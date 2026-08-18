@@ -1,0 +1,221 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --accent: #0058BE;          /* secondary blue — CTAs, active links, focus rings */
+  --accent-soft: #D8E2FF;
+  --accent-ink: #004395;
+
+  --primary-container: #4D7C7C;   /* teal primary — sidebar active icon only */
+  --on-primary-container: #EFFFFE;
+
+  --ink-strong: #1A1A1A;      /* brand-black — solid buttons, sidebar */
+  --on-strong: #FFFFFF;
+
+  --canvas: #E8F0E8;          /* brand-sage wash — app background */
+  --surface: #FDFCF8;         /* brand-cream — card background */
+  --surface-2: #F3F0E8;       /* nested / hover surface, still warm against sage */
+  --sidebar-bg: #1A1A1A;
+
+  --border: rgba(28, 27, 27, 0.08);
+  --border-strong: rgba(28, 27, 27, 0.16);
+
+  --ink: #1C1B1B;
+  --muted: #404848;
+  --muted-2: #707978;
+
+  --shadow-card: 0px 10px 30px rgba(26, 26, 26, 0.05);
+}
+
+.dark {
+  --accent: #9FCFCF;
+  --accent-soft: #1C4E4E;
+  --accent-ink: #EFFFFE;
+
+  --primary-container: #9FCFCF;
+  --on-primary-container: #002020;
+
+  --ink-strong: #F3F0EF;
+  --on-strong: #1A1A1A;
+
+  --canvas: #14181A;
+  --surface: #1E2422;
+  --surface-2: #262E2B;
+  --sidebar-bg: #0F1211;
+
+  --border: #2A322F;
+  --border-strong: #384039;
+
+  --ink: #EDEBE7;
+  --muted: #A9B3AF;
+  --muted-2: #7C8783;
+
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background-color: var(--canvas);
+  color: var(--ink);
+  font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
+  font-weight: 400;
+  font-optical-sizing: auto;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  letter-spacing: -0.005em;
+}
+
+h1, h2, h3, h4 {
+  font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: -0.02em;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+@layer components {
+  /* Card primitive — "Level 1" surface per the design system: cream on sage. */
+  .card {
+    background-color: var(--surface);
+    border-radius: 24px;
+    box-shadow: var(--shadow-card);
+  }
+  .card-tight { border-radius: 20px; }
+  .card-flat {
+    background-color: var(--surface);
+    border-radius: 20px;
+    border: 1px solid var(--border);
+  }
+
+  /* Pills / buttons */
+  .pill-primary {
+    background-color: var(--ink-strong);
+    color: var(--on-strong);
+    border-radius: 999px;
+    font-weight: 600;
+    transition: transform 0.12s ease, opacity 0.15s ease;
+  }
+  .pill-primary:hover { opacity: 0.9; }
+  .pill-primary:active { transform: translateY(1px); }
+
+  .pill-secondary {
+    background-color: var(--surface);
+    border: 1px solid var(--border-strong);
+    color: var(--ink);
+    border-radius: 999px;
+    font-weight: 600;
+    transition: border-color 0.15s ease, background-color 0.15s ease;
+  }
+  .pill-secondary:hover { background-color: var(--surface-2); }
+
+  .pill-accent {
+    background-color: var(--accent);
+    color: #ffffff;
+    border-radius: 999px;
+    font-weight: 600;
+    transition: opacity 0.15s ease;
+  }
+  .pill-accent:hover { opacity: 0.92; }
+
+  .field {
+    width: 100%;
+    background-color: var(--surface-2);
+    border: 1px solid transparent;
+    border-radius: 12px;
+    padding: 0.65rem 0.9rem;
+    font-size: 0.875rem;
+    color: var(--ink);
+    transition: border-color 0.15s ease, background-color 0.15s ease;
+  }
+  .field::placeholder { color: var(--muted-2); }
+  .field:hover { border-color: var(--border-strong); }
+  .field:focus {
+    outline: none;
+    border-color: var(--accent);
+    background-color: var(--surface);
+  }
+
+  /* Section titles — "label-caps" typography from the design system */
+  .section-title {
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--ink);
+    letter-spacing: -0.015em;
+  }
+
+  .label-caps {
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  /* Faint decorative curve for stat cards (SVG-like via gradient) */
+  .stat-curve {
+    position: absolute;
+    inset: auto 0 0 0;
+    height: 60%;
+    pointer-events: none;
+    opacity: 0.35;
+  }
+
+  .tab-pill {
+    border-radius: 12px;
+    padding: 0.55rem 1.1rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--ink);
+    background-color: var(--surface);
+    border: 1px solid var(--border-strong);
+    transition: color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
+    white-space: nowrap;
+  }
+  .tab-pill:hover { background-color: var(--surface-2); }
+  .tab-pill.active {
+    background-color: var(--surface);
+    color: var(--ink);
+    box-shadow: var(--shadow-card);
+  }
+
+  .folder-tab-active {
+    padding: 0.55rem 1.1rem;
+    border-radius: 12px;
+    background-color: var(--accent-soft);
+    color: var(--accent-ink);
+    font-size: 0.875rem;
+    font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    white-space: nowrap;
+    box-shadow: inset 0px 3px 6px rgba(0, 0, 0, 0.08);
+    position: relative;
+    z-index: 1;
+  }
+
+  /* Utility: soft divider */
+  .divider { border-top: 1px solid var(--border); }
+}
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background-color: var(--border-strong);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover { background-color: var(--muted-2); }
+* { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }

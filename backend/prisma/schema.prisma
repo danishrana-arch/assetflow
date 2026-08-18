@@ -1,0 +1,454 @@
+// AssetFlow — Prisma schema
+// Run `npx prisma migrate dev --name init` after setting DATABASE_URL in .env
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum PlanTier {
+  FREE
+  PRO
+  BUSINESS
+  ENTERPRISE
+}
+
+enum UserRole {
+  ADMIN      // Owner — full authority incl. removing employees & org settings
+  CEO
+  SALES_HEAD
+  HR
+  MANAGER
+  EMPLOYEE
+}
+
+enum LeaveStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+// SICK and CASUAL are paid, drawn from the employee's yearly allowance
+// (8 sick + 6 casual = 14 total, see leave.controller.js). UNPAID has no
+// balance cap but still goes through the same approval flow.
+enum LeaveType {
+  SICK
+  CASUAL
+  UNPAID
+}
+
+enum EmployeeStatus {
+  ACTIVE
+  ON_LEAVE
+  LEFT_COMPANY
+}
+
+enum AssetStatus {
+  ASSIGNED
+  AVAILABLE
+  REPAIR
+  LOST
+  DISPOSED
+}
+
+enum TicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum LifecycleEventType {
+  PURCHASED
+  ASSIGNED
+  UNASSIGNED
+  REPAIR_STARTED
+  REPAIR_COMPLETED
+  UPGRADED
+  WARRANTY_EXPIRED
+  RETURNED
+  DISPOSED
+  NOTE
+}
+
+enum SeniorityLevel {
+  INTERN
+  JUNIOR
+  SENIOR
+  LEAD
+}
+
+enum AttendanceStatus {
+  PRESENT
+  LATE
+  ABSENT
+  LEAVE
+}
+
+enum PayrollStatus {
+  DRAFT             // generated, still editable by an admin
+  PENDING_APPROVAL  // submitted by an admin, awaiting a CEO's decision
+  PAID              // approved by a CEO and delivered
+}
+
+model Organization {
+  id            String   @id @default(cuid())
+  name          String
+  slug          String   @unique
+  logoUrl       String?
+  primaryColor  String   @default("#3E63DD")
+  accentColor   String   @default("#16A34A")
+  theme         String   @default("light") // light | dark
+  planTier      PlanTier @default(FREE)
+  // Configurable yearly paid-leave policy (was hardcoded 8 sick + 6 casual).
+  sickLeaveAllowance   Int @default(8)
+  casualLeaveAllowance Int @default(6)
+
+  // Payroll: the account salaries are disbursed FROM (encrypted, same
+  // approach as CNIC/employee bank details — see utils/crypto.js), plus
+  // the flat PKR deduction applied per late-attendance day. Owner-only,
+  // never returned on the general GET /organization payload every user
+  // hits — see organization.controller.js.
+  payrollBankName       String?
+  payrollAccountNumber  String?
+  lateDeductionAmount   Decimal @default(500) @db.Decimal(10, 2)
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  users         User[]
+  departments   Department[]
+  assets        Asset[]
+  tickets       Ticket[]
+  holidays      Holiday[]
+  auditLogs     AuditLog[]
+}
+
+// Org-wide public holidays. Used to keep leave-day counting fair (a
+// holiday inside a leave range isn't charged against the employee's
+// balance) and to show on the leave calendar.
+model Holiday {
+  id             String       @id @default(cuid())
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  organizationId String
+  date           DateTime     @db.Date
+  name           String
+  createdAt      DateTime     @default(now())
+
+  @@unique([organizationId, date])
+  @@index([organizationId])
+}
+
+// Lightweight audit trail for sensitive actions (role changes, employee
+// removal, org rename, unassigning an asset, leave decisions). Not a full
+// event-sourcing system — just enough to answer "who did that, and when".
+model AuditLog {
+  id             String       @id @default(cuid())
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  organizationId String
+  actor          User?        @relation(fields: [actorId], references: [id])
+  actorId        String?
+  action         String // e.g. "employee.role_changed", "asset.unassigned"
+  targetType     String? // e.g. "User", "Asset", "Organization"
+  targetId       String?
+  note           String?
+  createdAt      DateTime     @default(now())
+
+  @@index([organizationId, createdAt])
+}
+
+model User {
+  id             String         @id @default(cuid())
+  organization   Organization   @relation(fields: [organizationId], references: [id])
+  organizationId String
+  name           String
+  email          String         @unique
+  password       String
+  phone          String?
+  photoUrl       String?
+  role           UserRole       @default(EMPLOYEE)
+  status         EmployeeStatus @default(ACTIVE)
+  department     Department?    @relation(fields: [departmentId], references: [id])
+  departmentId   String?
+  manager        User?          @relation("ManagerReports", fields: [managerId], references: [id])
+  managerId      String?
+  reports        User[]         @relation("ManagerReports")
+
+  // Personal information card
+  cnic           String?         // national ID number
+  dob            DateTime?
+  address        String?         // residence
+
+  // Skills / work card
+  skill          String?         // e.g. "Frontend Development"
+  seniorityLevel SeniorityLevel? // Intern / Junior / Senior / Lead
+
+  // Restricts attendance management to a small set of trusted admins
+  canManageAttendance Boolean @default(false)
+
+  // Monthly base salary used to generate payroll records. Nullable so
+  // adding payroll doesn't require backfilling every existing employee.
+  // Org policy: 25,000 PKR minimum (see employee.controller.js).
+  baseSalary     Decimal?       @db.Decimal(12, 2)
+  // Bank details for salary disbursement — encrypted at rest, same
+  // approach as CNIC (see utils/crypto.js). Only ever decrypted for the
+  // employee themselves or a management viewer.
+  bankName          String?
+  bankAccountNumber String?
+
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  assignedAssets    Asset[]          @relation("AssignedAssets")
+  lifecycleEvents   LifecycleEvent[] @relation("EventActor")
+  tickets           Ticket[]         @relation("TicketRaisedBy")
+  attendanceRecords AttendanceRecord[] @relation("AttendanceOf")
+  attendanceMarkedBy AttendanceRecord[] @relation("AttendanceMarkedBy")
+  payrollRecords     PayrollRecord[] @relation("PayrollOf")
+  payrollGeneratedBy PayrollRecord[] @relation("PayrollGeneratedBy")
+  payrollApprovedBy  PayrollRecord[] @relation("PayrollApprovedBy")
+
+  leaveApplications   LeaveApplication[] @relation("LeaveApplicant")
+  leaveApplicationsReviewed LeaveApplication[] @relation("LeaveReviewer")
+
+  assetRequests         AssetRequest[] @relation("AssetRequestedBy")
+  assetRequestsReviewed AssetRequest[] @relation("AssetRequestReviewer")
+
+  auditLogs AuditLog[]
+}
+
+// Employee-submitted leave requests. Employees create these; a management
+// user (ADMIN/CEO/SALES_HEAD/HR) reviews and approves or rejects them.
+// Approval writes LEAVE attendance records for every day in the range.
+model LeaveApplication {
+  id             String      @id @default(cuid())
+  organizationId String
+
+  employee       User        @relation("LeaveApplicant", fields: [employeeId], references: [id], onDelete: Cascade)
+  employeeId     String
+
+  startDate      DateTime    @db.Date
+  endDate        DateTime    @db.Date
+  reason         String
+  type           LeaveType   @default(CASUAL)
+  isHalfDay      Boolean     @default(false) // only meaningful when startDate == endDate
+
+  status         LeaveStatus @default(PENDING)
+
+  reviewedBy     User?       @relation("LeaveReviewer", fields: [reviewedById], references: [id])
+  reviewedById   String?
+  reviewedAt     DateTime?
+  reviewNote     String?
+
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  @@index([organizationId, status])
+  @@index([employeeId])
+}
+
+enum AssetRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  FULFILLED
+}
+
+// Employee-initiated "I need a monitor" requests — the counterpart to
+// management proactively assigning assets. Approving doesn't hand over an
+// asset by itself; management fulfills it separately by assigning a real
+// asset, which flips this to FULFILLED (see asset-request.controller.js).
+model AssetRequest {
+  id             String             @id @default(cuid())
+  organizationId String
+
+  employee       User               @relation("AssetRequestedBy", fields: [employeeId], references: [id], onDelete: Cascade)
+  employeeId     String
+
+  category       String
+  reason         String
+
+  status         AssetRequestStatus @default(PENDING)
+
+  reviewedBy     User?              @relation("AssetRequestReviewer", fields: [reviewedById], references: [id])
+  reviewedById   String?
+  reviewedAt     DateTime?
+  reviewNote     String?
+
+  fulfilledAsset   Asset?           @relation(fields: [fulfilledAssetId], references: [id])
+  fulfilledAssetId String?
+
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  @@index([organizationId, status])
+  @@index([employeeId])
+}
+
+model Department {
+  id             String       @id @default(cuid())
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  organizationId String
+  name           String
+  createdAt      DateTime     @default(now())
+
+  employees User[]
+  assets    Asset[]
+
+  @@unique([organizationId, name])
+}
+
+model Asset {
+  id             String       @id @default(cuid())
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  organizationId String
+
+  name           String        // e.g. "Dell Latitude 7440"
+  category       String?       // Laptop, Monitor, Phone, etc.
+  serialNumber   String        @unique
+  cpu            String?
+  ram            String?
+  storage        String?
+  purchaseDate   DateTime?
+  warrantyEnd    DateTime?
+  status         AssetStatus   @default(AVAILABLE)
+
+  department     Department?   @relation(fields: [departmentId], references: [id])
+  departmentId   String?
+
+  assignedTo     User?         @relation("AssignedAssets", fields: [assignedToId], references: [id])
+  assignedToId   String?
+
+  photos         String[]      @default([])
+  documents      String[]      @default([])
+
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  lifecycleEvents LifecycleEvent[]
+  tickets         Ticket[]
+  fulfilledRequests AssetRequest[]
+}
+
+// The signature feature: full lifecycle timeline per asset,
+// not just "who currently holds it".
+model LifecycleEvent {
+  id         String             @id @default(cuid())
+  asset      Asset              @relation(fields: [assetId], references: [id])
+  assetId    String
+  type       LifecycleEventType
+  note       String?
+  // Only meaningful for REPAIR_STARTED / REPAIR_COMPLETED — lets Reports
+  // total up repair spend per asset/category.
+  cost       Decimal?           @db.Decimal(10, 2)
+  actor      User?              @relation("EventActor", fields: [actorId], references: [id])
+  actorId    String?
+  occurredAt DateTime           @default(now())
+}
+
+model Ticket {
+  id             String         @id @default(cuid())
+  organization   Organization   @relation(fields: [organizationId], references: [id])
+  organizationId String
+
+  subject        String
+  description    String
+  priority       TicketPriority @default(MEDIUM)
+  status         TicketStatus   @default(OPEN)
+  category       String? // Hardware / Software / Access / Other — free text, filterable
+  imageUrl       String?
+
+  raisedBy       User?          @relation("TicketRaisedBy", fields: [raisedById], references: [id])
+  raisedById     String?
+
+  asset          Asset?         @relation(fields: [assetId], references: [id])
+  assetId        String?
+
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+}
+
+// One row per employee per day. Only users with canManageAttendance = true
+// (the 3 designated attendance admins) can create/edit these.
+model AttendanceRecord {
+  id             String           @id @default(cuid())
+  organizationId String
+
+  employee       User             @relation("AttendanceOf", fields: [employeeId], references: [id], onDelete: Cascade)
+  employeeId     String
+
+  date           DateTime         @db.Date
+  status         AttendanceStatus @default(PRESENT)
+
+  markedBy       User?            @relation("AttendanceMarkedBy", fields: [markedById], references: [id])
+  markedById     String?
+
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  @@unique([employeeId, date])
+}
+
+// One row per employee per calendar month. Generated in bulk from
+// User.baseSalary, then editable (bonus/deduction/note) before being
+// marked PAID. Attendance for the same month is read at generation time
+// to pre-fill unpaidLeaveDays, but isn't otherwise linked live — a
+// payslip should stay stable once generated, even if attendance is
+// corrected later.
+model PayrollRecord {
+  id             String        @id @default(cuid())
+  organizationId String
+
+  employee       User          @relation("PayrollOf", fields: [employeeId], references: [id], onDelete: Cascade)
+  employeeId     String
+
+  month          Int           // 1-12
+  year           Int
+
+  baseSalary     Decimal       @db.Decimal(12, 2)
+  bonus          Decimal       @default(0) @db.Decimal(12, 2)
+  deductions     Decimal       @default(0) @db.Decimal(12, 2)
+  unpaidLeaveDays Int          @default(0) // full unpaid-leave days this month (1000 PKR/day)
+  halfDayLeaveDays Int         @default(0) // half-day unpaid-leave days this month (500 PKR/day)
+  lateDays        Int          @default(0) // days marked LATE this month
+  netPay         Decimal       @db.Decimal(12, 2)
+
+  // Bank details snapshot — taken at generation time so a payslip stays
+  // accurate even if the employee's bank details change later. Encrypted
+  // the same way as the live fields on User.
+  bankName          String?
+  bankAccountNumber String?
+
+  status         PayrollStatus @default(DRAFT)
+  note           String?
+
+  generatedBy    User?         @relation("PayrollGeneratedBy", fields: [generatedById], references: [id])
+  generatedById  String?
+
+  // A CEO's decision on a submitted batch — see payroll.controller.js.
+  // Only ever set once status leaves PENDING_APPROVAL.
+  approvedBy     User?         @relation("PayrollApprovedBy", fields: [approvedById], references: [id])
+  approvedById   String?
+  approvedAt     DateTime?
+
+  paidAt         DateTime?
+
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@unique([employeeId, month, year])
+  @@index([organizationId, year, month])
+}
