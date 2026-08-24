@@ -9,7 +9,7 @@ import { SelectField } from "../components/ui/Field"
 import EmptyState from "../components/ui/EmptyState"
 
 const LEAVE_TONE = { PENDING: "yellow", APPROVED: "green", REJECTED: "pink", CANCELLED: "slate" }
-const LEAVE_TYPE_LABELS = { SICK: "Sick", CASUAL: "Casual / Annual", UNPAID: "Unpaid" }
+const LEAVE_TYPE_LABELS = { SICK: "Sick", CASUAL: "Annual", UNPAID: "Unpaid" }
 
 function fmt(dateStr) {
   if (!dateStr) return "—"

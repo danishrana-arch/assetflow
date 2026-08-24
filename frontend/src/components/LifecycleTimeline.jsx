@@ -53,7 +53,7 @@ export default function LifecycleTimeline({ events = [] }) {
               </div>
               {event.note && <p className="mt-0.5 text-xs text-muted">{event.note}</p>}
               {event.cost != null && (
-                <p className="mt-0.5 text-xs font-semibold text-warning">Cost: ${Number(event.cost).toFixed(2)}</p>
+                <p className="mt-0.5 text-xs font-semibold text-warning">Cost: PKR {Number(event.cost).toFixed(2)}</p>
               )}
               {event.actor?.name && (
                 <p className="mt-0.5 text-[11px] text-muted-2">by {event.actor.name}</p>

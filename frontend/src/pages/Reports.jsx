@@ -104,7 +104,7 @@ export default function Reports() {
           <SectionHeader title="Repair Spend by Asset" showMenu />
           {repairSpend?.byAsset?.length > 0 ? (
             <>
-              <p className="mb-3 text-2xl font-bold text-ink">${repairSpend.total.toFixed(2)}<span className="ml-1.5 text-xs font-normal text-muted">total logged</span></p>
+              <p className="mb-3 text-2xl font-bold text-ink">PKR {repairSpend.total.toFixed(2)}<span className="ml-1.5 text-xs font-normal text-muted">total logged</span></p>
               <ul className="space-y-2">
                 {repairSpend.byAsset.map((a) => (
                   <li key={a.assetId} className="flex items-center gap-3">
@@ -113,7 +113,7 @@ export default function Reports() {
                       <p className="truncate text-sm font-medium text-ink">{a.name}</p>
                       <p className="truncate font-mono text-[11px] text-muted-2">{a.serialNumber}</p>
                     </div>
-                    <span className="shrink-0 text-sm font-semibold text-warning">${a.total.toFixed(2)}</span>
+                    <span className="shrink-0 text-sm font-semibold text-warning">PKR {a.total.toFixed(2)}</span>
                   </li>
                 ))}
               </ul>
@@ -131,7 +131,7 @@ export default function Reports() {
                 <li key={c.category} className="flex items-center justify-between gap-3">
                   <span className="text-sm text-ink">{c.category}</span>
                   <span className="text-xs text-muted">{c.count} repair{c.count === 1 ? "" : "s"}</span>
-                  <span className="w-20 text-right text-sm font-semibold text-warning">${c.total.toFixed(2)}</span>
+                  <span className="w-20 text-right text-sm font-semibold text-warning">PKR {c.total.toFixed(2)}</span>
                 </li>
               ))}
             </ul>

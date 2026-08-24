@@ -24,11 +24,13 @@ const Tickets = lazy(() => import("./pages/Tickets"))
 const Reports = lazy(() => import("./pages/Reports"))
 const Export = lazy(() => import("./pages/Export"))
 const Settings = lazy(() => import("./pages/Settings"))
+const AttendanceDevices = lazy(() => import("./pages/AttendanceDevices"))
 const Billing = lazy(() => import("./pages/Billing"))
 const Payroll = lazy(() => import("./pages/Payroll"))
 const MyPayroll = lazy(() => import("./pages/MyPayroll"))
 const Profile = lazy(() => import("./pages/Profile"))
 const Notifications = lazy(() => import("./pages/Notifications"))
+const Projects = lazy(() => import("./pages/Projects"))
 
 function PageFallback() {
   return (
@@ -86,6 +88,7 @@ function ProtectedShell() {
           <Route path="/inventory" element={<RequireManagement><Inventory /></RequireManagement>} />
           <Route path="/inventory/:id" element={<AssetProfile />} />
           <Route path="/assignments" element={<RequireManagement><Assignments /></RequireManagement>} />
+          <Route path="/projects" element={<RequireManagement><Projects /></RequireManagement>} />
           <Route path="/asset-requests" element={<RequireManagement><AssetRequests /></RequireManagement>} />
           <Route path="/departments" element={<RequireManagement><Departments /></RequireManagement>} />
           <Route path="/attendance" element={<RequireManagement><Attendance /></RequireManagement>} />
@@ -101,6 +104,7 @@ function ProtectedShell() {
           <Route path="/export" element={<RequireManagement><Export /></RequireManagement>} />
           <Route path="/notifications" element={<RequireManagement><Notifications /></RequireManagement>} />
           <Route path="/settings" element={<RequireOwner><Settings /></RequireOwner>} />
+          <Route path="/settings/attendance-devices" element={<RequireOwner><AttendanceDevices /></RequireOwner>} />
           <Route path="/billing" element={<RequireManagement><Billing /></RequireManagement>} />
           <Route path="/profile" element={<Profile />} />
           <Route path="*" element={<Navigate to="/" replace />} />

@@ -30,6 +30,8 @@ export default function Settings() {
   const [payrollBankName, setPayrollBankName] = useState("")
   const [payrollAccountNumber, setPayrollAccountNumber] = useState("")
   const [lateDeductionAmount, setLateDeductionAmount] = useState(500)
+  const [workingHoursPerDay, setWorkingHoursPerDay] = useState(8)
+  const [workingDaysPerWeek, setWorkingDaysPerWeek] = useState(5)
 
   const { data: organization } = useQuery({
     queryKey: ["organization"],
@@ -45,6 +47,8 @@ export default function Settings() {
       setPayrollBankName(organization.payrollBankName || "")
       setPayrollAccountNumber(organization.payrollAccountNumber || "")
       setLateDeductionAmount(organization.lateDeductionAmount ?? 500)
+      setWorkingHoursPerDay(organization.workingHoursPerDay ?? 8)
+      setWorkingDaysPerWeek(organization.workingDaysPerWeek ?? 5)
     }
   }, [organization])
 
@@ -58,6 +62,11 @@ export default function Settings() {
 
   const savePolicy = useMutation({
     mutationFn: () => api.patch("/organization", { sickLeaveAllowance, casualLeaveAllowance }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["organization"] }),
+  })
+
+  const saveWorkSchedule = useMutation({
+    mutationFn: () => api.patch("/organization", { workingHoursPerDay, workingDaysPerWeek }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["organization"] }),
   })
 
@@ -167,11 +176,53 @@ export default function Settings() {
 
           <div className="mt-5 flex flex-wrap gap-2 border-t border-border pt-4">
             <Link to="/holidays" className="pill-secondary px-4 py-2 text-xs">Manage Holidays</Link>
+            <Link to="/settings/attendance-devices" className="pill-secondary px-4 py-2 text-xs">Attendance Devices</Link>
             <Link to="/audit-log" className="pill-secondary px-4 py-2 text-xs">View Audit Log</Link>
           </div>
         </div>
 
         {isCeo && (
+          <div className="card p-6">
+            <SectionHeader title="Work Schedule" />
+            <p className="mb-4 text-xs text-muted">
+              These values drive automatic attendance calculations. The standard 5-day week is Monday through Friday.
+            </p>
+            <div className="grid grid-cols-2 gap-4">
+              <TextField
+                label="Working hours / day"
+                type="number"
+                min={1}
+                max={24}
+                step="0.5"
+                value={workingHoursPerDay}
+                onChange={(e) => setWorkingHoursPerDay(e.target.value)}
+              />
+              <TextField
+                label="Working days / week"
+                type="number"
+                min={1}
+                max={7}
+                step="1"
+                value={workingDaysPerWeek}
+                onChange={(e) => setWorkingDaysPerWeek(e.target.value)}
+              />
+            </div>
+            <p className="mt-2 text-xs text-muted-2">
+              Expected weekly time: {(Number(workingHoursPerDay || 0) * Number(workingDaysPerWeek || 0)).toFixed(1)} hours.
+            </p>
+            <button
+              onClick={() => saveWorkSchedule.mutate()}
+              disabled={saveWorkSchedule.isPending}
+              className="pill-accent mt-4 px-5 py-2.5 text-sm disabled:opacity-60"
+            >
+              {saveWorkSchedule.isPending ? "Saving…" : "Save work schedule"}
+            </button>
+            {saveWorkSchedule.isSuccess && !saveWorkSchedule.isPending && (
+              <p className="mt-2 text-xs text-chip-green-fg">Saved.</p>
+            )}
+          </div>
+        )}
+
           <div className="card p-6">
             <SectionHeader title="Payroll Account" />
             <p className="mb-4 text-xs text-muted">
@@ -210,7 +261,6 @@ export default function Settings() {
               <p className="mt-2 text-xs text-chip-green-fg">Saved.</p>
             )}
           </div>
-        )}
 
         <div className="card p-6">
           <SectionHeader title="Plan" />

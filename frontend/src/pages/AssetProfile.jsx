@@ -78,14 +78,14 @@ export default function AssetProfile() {
 
   function handleStatusChange(status) {
     if (status === "REPAIR") {
-      const cost = window.prompt("Repair cost (optional — leave blank to skip):")
-      if (cost === null) return // cancelled
+                const cost = window.prompt("Repair cost:")
+      if (cost === null) return // cancelled      
       changeStatus.mutate({ status, cost: cost.trim() || undefined })
     } else {
       changeStatus.mutate({ status })
     }
   }
-
+  
   if (isLoading) return <p className="text-sm text-muted">Loading...</p>
   if (!asset) return <p className="text-sm text-muted">Asset not found.</p>
 

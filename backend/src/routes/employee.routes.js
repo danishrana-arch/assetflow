@@ -18,8 +18,8 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
   fileFilter: (req, file, cb) => {
-    const ok = /spreadsheetml|excel/.test(file.mimetype) || /\.xlsx$/i.test(file.originalname)
-    cb(ok ? null : new Error("Only .xlsx files are supported"), ok)
+    const ok = /csv|comma-separated-values|text\/plain/i.test(file.mimetype) || /\.csv$/i.test(file.originalname)
+    cb(ok ? null : new Error("Only .csv files are supported"), ok)
   },
 })
 
@@ -36,6 +36,6 @@ router.patch("/:id", requireManagementOrSelf, updateEmployee)
 // Admin-assisted "forgot password" — management resets to a known temp
 // password since there's no email-reset flow.
 router.post("/:id/reset-password", requireManagement, resetPassword)
-router.delete("/:id", requireRole("ADMIN"), deleteEmployee)
+router.delete("/:id", requireRole("ADMIN", "CEO"), deleteEmployee)
 
 module.exports = router

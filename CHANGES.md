@@ -1,3 +1,60 @@
+# AssetFlow — New Changes
+
+Apply these files on top of the previous AssetFlow Projects updates.
+
+## 1. Automatic work-time calculation
+- Organization now stores working hours per day (default 8) and working days per week (default 5).
+- CEO can configure the work schedule in Organization Settings.
+- Biometric punches automatically determine the first check-in, last check-out, and actual working minutes for each employee/day.
+- Attendance now displays check-in, check-out, actual working time, and the configured schedule.
+- Attendance export includes calculated working and expected minutes.
+- The default 5-day schedule is Monday-Friday.
+
+## 2. CEO authority rules
+- ADMIN cannot delete a CEO.
+- CEO can delete another CEO.
+- CEO can delete other organization accounts, including the original ADMIN owner.
+- A user cannot delete their own account.
+- Maximum CEO count remains 2.
+- When the organization already has 2 CEOs, the Employee role selector no longer offers CEO as an option.
+- Backend still enforces the 2-CEO limit for safety.
+
+## 3. Employee import
+- Employee import is now CSV-only instead of Excel/XLSX.
+- CSV template download replaces the Excel template.
+- CSV import keeps the same employee columns and validation.
+- CEO/Admin can import management roles; CEO count is enforced during import.
+
+## 4. Prisma fix
+- Added the missing Organization <-> BiometricPunch relation that caused Prisma P1012 validation errors.
+- Added migration for the missing foreign key and work-schedule fields.
+
+## Verification
+- All modified backend JavaScript files pass `node --check`.
+- Prisma validation/build could not be completed in this Linux environment because the supplied node_modules contains Windows Prisma/Rollup binaries and the environment cannot download replacement binaries. Run the commands below on the Windows project.
+
+# AssetFlow Biometric + Access Control Patch
+
+This package contains only the files that must be added/replaced in the existing AssetFlow application. It does not contain the rest of the application.
+
+## Included
+- Multi-tenant biometric device records and connector tokens.
+- Admin/CEO device management UI.
+- Employee-to-device-user-ID mapping.
+- Cloud connector authentication and punch ingestion.
+- Biometric attendance check-in/check-out and working minutes.
+- Adapter-based connector architecture.
+- ZKTeco pull adapter when the `node-zklib` package is installed in the connector.
+- Generic HTTP adapter and local push receiver for vendor gateways.
+- Local door relay control: unlock, wait configured seconds, lock.
+- Deployment instructions.
+
+## Important vendor limitation
+No software can make unrelated biometric hardware universally compatible without a protocol/SDK adapter. This patch provides the common integration layer and adapters. Each vendor/model is selected per company; new vendor adapters can be added without changing the cloud attendance data model/API.
+
+## Existing app changes
+Replace the matching existing files with these versions. Add the new files at their paths. Then run the Prisma migration and deploy the connector at the customer site.
+
 # What changed — Round 2
 
 Continues on top of Round 1 (roles/leave/attendance/search-bar-fix). No
@@ -584,96 +641,3 @@ Payroll will keep failing with a database error until this runs.
 Re-verified your actual uploaded project — 49 frontend files + 41
 backend files — with esbuild's real parser (not just brace-counting).
 All pass.
-
----
-
-# What changed — CEO-authority payroll workflow, PKR, bank details
-
-Restructures payroll around a real approval chain instead of a single
-flat role: an admin/owner generates and reviews, but only a CEO can
-approve and actually pay — because salaries are disbursed from the
-CEO's own account. CEO is capped at 2 per organization.
-
-## 1. Role hierarchy: CEO is now the top authority
-- **CEO** — full org authority: rename/branding/leave policy (same as
-  before, now shared with ADMIN), assign roles, **and exclusively**
-  holds the payroll disbursement account and approves/pays salaries.
-  Capped at **2 per organization** — enforced when assigning the role
-  via Add Employee or an employee's role edit (`MAX_CEO_COUNT` in
-  `backend/src/utils/roles.js`).
-- **ADMIN (Owner)** — still full people/asset management, still can
-  rename the org and assign roles, but on the payroll side can only
-  **generate** and **submit for approval** — not pay.
-- Everything else about roles (HR/Sales Head/Employee) is unchanged.
-
-## 2. Payroll approval workflow
-New status: `DRAFT → PENDING_APPROVAL → PAID`.
-1. Admin **Generates** payroll for a month (as before — active
-   employees with a base salary set).
-2. Admin reviews/adjusts bonus & deductions, then **Submits for
-   Approval** — every DRAFT record for that month moves to
-   `PENDING_APPROVAL` in one action.
-3. CEO reviews and either:
-   - **Approve & Pay All** — every pending record for that month is
-     approved and marked paid **in one click**, "delivered to every
-     account" at once (not one payslip at a time).
-   - **Reject** — sends the whole batch back to DRAFT for the admin to
-     revise.
-   - **Delete All** — bulk-clears every non-paid record for the month
-     in one action. Paid records are permanent and can never be
-     deleted, single or bulk.
-
-## 3. Unpaid-leave deduction is now proportional, not flat
-Replaced the flat 1000 PKR (full day) / 500 PKR (half day) deduction
-with a **percentage of the employee's own base salary**, banded by
-salary so higher earners pay a fair proportional amount:
-
-| Base salary       | Deduction per unpaid day |
-|--------------------|--------------------------|
-| Below 70,000        | 2.7% |
-| 70,000 – 119,999     | 3.3% |
-| 120,000 – 179,999    | 3.8% |
-| 180,000 and above    | 4.5% |
-
-A half-day unpaid leave deducts half of that day's amount. Late-arrival
-deduction stays a flat, **owner-configurable** PKR amount per day
-(Settings, CEO-only — see below), defaulting to 500.
-
-## 4. Base salary floor: PKR 25,000
-An employee's base salary can no longer be set below **PKR 25,000/month**
-— enforced on save, both from an employee's profile and going forward
-from any future entry point.
-
-## 5. Bank account details
-- **Per employee**: Bank Name + Account Number, editable by management
-  from the employee's profile (encrypted at rest, same approach as
-  CNIC). Snapshotted onto each payslip at generation time, so it stays
-  accurate even if the employee's bank details change later.
-- **Org-level payroll account** (Settings, new "Payroll Account" card,
-  **CEO-only** — the section doesn't even render for anyone else): the
-  account salaries are actually paid from. Also encrypted at rest, and
-  the general `GET /organization` endpoint (hit by every user for
-  branding) never includes it for non-CEOs.
-- On the Payroll page, only a CEO sees full account numbers; other
-  management roles see them masked (`•••• 1234`) — they can review and
-  submit payroll without seeing exactly where the money's coming from
-  or going to.
-
-## 6. Currency: everything now shows PKR
-All amounts across Payroll, My Payslips, and the employee profile now
-display as `PKR 25,000.00` instead of `$25,000.00`.
-
-# Required setup steps
-This round changed `schema.prisma` again (new `PayrollStatus` value,
-`approvedBy`/`approvedAt` on `PayrollRecord`, `bankName`/
-`bankAccountNumber` on `User`, `payrollBankName`/`payrollAccountNumber`/
-`lateDeductionAmount` on `Organization`):
-```bash
-cd backend
-npx prisma migrate dev --name payroll_approval_and_bank_details
-```
-
-# Verification
-All 49 frontend + 41 backend files re-verified with esbuild's real
-parser (schema.prisma brace-balanced too). Nothing else in the app was
-touched this round beyond what's listed above.

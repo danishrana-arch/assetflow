@@ -14,6 +14,20 @@ const STATUS_CONFIG = {
   LEAVE: { label: "Leave", tone: "yellow", icon: Palmtree },
 }
 
+
+function formatMinutes(minutes) {
+  if (minutes === null || minutes === undefined) return "—"
+  const value = Math.max(0, Number(minutes) || 0)
+  const hours = Math.floor(value / 60)
+  const mins = value % 60
+  return `${hours}h ${mins.toString().padStart(2, "0")}m`
+}
+
+function formatPunchTime(value) {
+  if (!value) return "—"
+  return new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+}
+
 function statusPill(status) {
   const cfg = STATUS_CONFIG[status] || { label: status, tone: "slate" }
   return <StatusPill tone={cfg.tone}>{cfg.label}</StatusPill>
@@ -88,6 +102,7 @@ export default function Attendance() {
         subtitle={
           <span>
             {presentCount} of {rows.length} marked present
+            {data?.schedule && <span className="ml-2">· {data.schedule.workingHoursPerDay}h/day · {data.schedule.workingDaysPerWeek} days/week</span>}
             {dirty && <span className="ml-2 rounded-full bg-chip-yellow-bg px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-chip-yellow-fg">Unsaved</span>}
             {saved && !dirty && <span className="ml-2 rounded-full bg-chip-green-bg px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-chip-green-fg">Saved</span>}
           </span>
@@ -122,6 +137,9 @@ export default function Attendance() {
                 {row.time && (
                   <p className="mt-0.5 text-xs text-muted-2">{new Date(row.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
                 )}
+                <p className="mt-0.5 text-xs text-muted-2">
+                  {formatPunchTime(row.checkInAt)} → {formatPunchTime(row.checkOutAt)} · {formatMinutes(row.workingMinutes)}
+                </p>
                 {row.markedByName && (
                   <p className="mt-0.5 text-xs text-muted-2">Marked by {row.markedByName}</p>
                 )}
@@ -156,7 +174,8 @@ export default function Attendance() {
             <tr className="border-b border-border">
               <th className="px-5 py-3.5">Employee</th>
               <th className="px-5 py-3.5">Department</th>
-              <th className="px-5 py-3.5">Time</th>
+              <th className="px-5 py-3.5">Check in / out</th>
+              <th className="px-5 py-3.5">Working time</th>
               <th className="px-5 py-3.5">Status</th>
               <th className="px-5 py-3.5">Mark</th>
             </tr>
@@ -171,8 +190,8 @@ export default function Attendance() {
                   </div>
                 </td>
                 <td className="px-5 py-3.5 text-muted">{row.department || "—"}</td>
-                <td className="px-5 py-3.5 text-muted">{row.time ? new Date(row.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "—"}</td>
-                <td className="px-5 py-3.5 text-muted">{row.markedByName || "—"}</td>
+                <td className="px-5 py-3.5 text-muted">{formatPunchTime(row.checkInAt)} → {formatPunchTime(row.checkOutAt)}</td>
+                <td className="px-5 py-3.5 font-medium text-ink">{formatMinutes(row.workingMinutes)}</td>
                 <td className="px-5 py-3.5">{statusPill(row.status)}</td>
                 <td className="px-5 py-3.5">
                   <div className="flex gap-1.5">

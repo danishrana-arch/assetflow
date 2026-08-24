@@ -1,6 +1,7 @@
 const prisma = require("../lib/prisma")
 const ExcelJS = require("exceljs")
 const { toDateOnly } = require("../utils/date")
+const { workingMinutesPerDay, expectedWeeklyMinutes, isScheduledWorkday } = require("../utils/work-schedule")
 
 function startOfDay(dateStr) {
   return toDateOnly(dateStr || new Date())
@@ -11,7 +12,8 @@ async function getDailyAttendance(req, res, next) {
     const { organizationId } = req.user
     const date = startOfDay(req.query.date)
 
-    const [employees, records] = await Promise.all([
+    const [organization, employees, records] = await Promise.all([
+      prisma.organization.findUnique({ where: { id: organizationId }, select: { workingHoursPerDay: true, workingDaysPerWeek: true } }),
       prisma.user.findMany({
         where: { organizationId, status: "ACTIVE" },
         include: { department: true },
@@ -34,11 +36,27 @@ async function getDailyAttendance(req, res, next) {
         status: record?.status || "ABSENT",
         recordId: record?.id || null,
         time: record?.updatedAt?.toISOString() || null,
+        checkInAt: record?.checkInAt?.toISOString() || null,
+        checkOutAt: record?.checkOutAt?.toISOString() || null,
+        workingMinutes: record?.workingMinutes ?? null,
+        expectedWorkingMinutes: workingMinutesPerDay(organization),
+        expectedWeeklyMinutes: expectedWeeklyMinutes(organization),
+        isScheduledWorkday: isScheduledWorkday(date, organization),
+        source: record?.source || "MANUAL",
         markedByName: record?.markedBy?.name || null,
       }
     })
 
-    res.json({ date: date.toISOString().slice(0, 10), rows })
+    res.json({
+      date: date.toISOString().slice(0, 10),
+      schedule: {
+        workingHoursPerDay: Number(organization?.workingHoursPerDay ?? 8),
+        workingDaysPerWeek: Number(organization?.workingDaysPerWeek ?? 5),
+        expectedWeeklyMinutes: expectedWeeklyMinutes(organization),
+        isScheduledWorkday: isScheduledWorkday(date, organization),
+      },
+      rows,
+    })
   } catch (err) {
     next(err)
   }
@@ -109,7 +127,8 @@ async function exportAttendanceSheet(req, res, next) {
     const { organizationId } = req.user
     const date = startOfDay(req.query.date)
 
-    const [employees, records] = await Promise.all([
+    const [organization, employees, records] = await Promise.all([
+      prisma.organization.findUnique({ where: { id: organizationId }, select: { workingHoursPerDay: true, workingDaysPerWeek: true } }),
       prisma.user.findMany({
         where: { organizationId, status: "ACTIVE" },
         include: { department: true },
@@ -127,6 +146,10 @@ async function exportAttendanceSheet(req, res, next) {
       { header: "Employee", key: "name", width: 26 },
       { header: "Department", key: "department", width: 20 },
       { header: "Status", key: "status", width: 14 },
+      { header: "Check In", key: "checkInAt", width: 22 },
+      { header: "Check Out", key: "checkOutAt", width: 22 },
+      { header: "Working Minutes", key: "workingMinutes", width: 18 },
+      { header: "Expected Minutes", key: "expectedMinutes", width: 18 },
     ]
     sheet.getRow(1).font = { bold: true }
 
@@ -136,6 +159,10 @@ async function exportAttendanceSheet(req, res, next) {
         name: emp.name,
         department: emp.department?.name || "",
         status: record?.status || "ABSENT",
+        checkInAt: record?.checkInAt ? record.checkInAt.toISOString() : "",
+        checkOutAt: record?.checkOutAt ? record.checkOutAt.toISOString() : "",
+        workingMinutes: record?.workingMinutes ?? "",
+        expectedMinutes: workingMinutesPerDay(organization),
       })
     })
 

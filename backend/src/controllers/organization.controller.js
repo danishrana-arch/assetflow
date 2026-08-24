@@ -46,6 +46,7 @@ async function updateOrganization(req, res, next) {
       name, logoUrl, primaryColor, accentColor, theme,
       sickLeaveAllowance, casualLeaveAllowance,
       payrollBankName, payrollAccountNumber, lateDeductionAmount,
+      workingHoursPerDay, workingDaysPerWeek,
     } = req.body
 
     const settingPayrollAccount = payrollBankName !== undefined || payrollAccountNumber !== undefined || lateDeductionAmount !== undefined
@@ -77,6 +78,24 @@ async function updateOrganization(req, res, next) {
       return res.status(400).json({ error: "casualLeaveAllowance must be between 0 and 365" })
     }
     let lateDeductionUpdate
+    let workingHoursUpdate
+    let workingDaysUpdate
+
+    if (workingHoursPerDay !== undefined) {
+      const n = Number(workingHoursPerDay)
+      if (!Number.isFinite(n) || n < 1 || n > 24) {
+        return res.status(400).json({ error: "workingHoursPerDay must be between 1 and 24 hours" })
+      }
+      workingHoursUpdate = n
+    }
+
+    if (workingDaysPerWeek !== undefined) {
+      const n = Number(workingDaysPerWeek)
+      if (!Number.isInteger(n) || n < 1 || n > 7) {
+        return res.status(400).json({ error: "workingDaysPerWeek must be an integer between 1 and 7" })
+      }
+      workingDaysUpdate = n
+    }
     if (lateDeductionAmount !== undefined) {
       const n = Number(lateDeductionAmount)
       if (Number.isNaN(n) || n < 0) {
@@ -101,6 +120,8 @@ async function updateOrganization(req, res, next) {
         ...(payrollBankName !== undefined ? { payrollBankName } : {}),
         ...(payrollAccountNumber !== undefined ? { payrollAccountNumber: encryptField(payrollAccountNumber) } : {}),
         ...(lateDeductionUpdate !== undefined ? { lateDeductionAmount: lateDeductionUpdate } : {}),
+        ...(workingHoursUpdate !== undefined ? { workingHoursPerDay: workingHoursUpdate } : {}),
+        ...(workingDaysUpdate !== undefined ? { workingDaysPerWeek: workingDaysUpdate } : {}),
       },
     })
 
@@ -109,7 +130,10 @@ async function updateOrganization(req, res, next) {
     }
 
     const { payrollAccountNumber: _omit, ...safeUpdated } = updated
-    res.json({ ...safeUpdated, payrollAccountNumber: decryptField(updated.payrollAccountNumber) })
+    if (role === "CEO") {
+      return res.json({ ...safeUpdated, payrollAccountNumber: decryptField(updated.payrollAccountNumber) })
+    }
+    res.json(safeUpdated)
   } catch (err) {
     next(err)
   }

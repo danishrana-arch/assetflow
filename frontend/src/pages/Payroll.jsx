@@ -119,69 +119,69 @@ export default function Payroll() {
           { label: "Paid", value: totals.paid },
         ]}
         actions={
-          <>
-            <div className="flex items-center gap-1 rounded-full border border-border-strong bg-surface px-1.5 py-1">
-              <button onClick={() => shiftMonth(-1)} className="flex h-7 w-7 items-center justify-center rounded-full text-muted hover:bg-surface-2" aria-label="Previous month">
-                <ChevronLeft size={15} />
-              </button>
-              <span className="min-w-[130px] text-center text-sm font-semibold text-ink">
-                {MONTHS[month - 1]} {year}
-              </span>
-              <button onClick={() => shiftMonth(1)} className="flex h-7 w-7 items-center justify-center rounded-full text-muted hover:bg-surface-2" aria-label="Next month">
-                <ChevronRight size={15} />
-              </button>
-            </div>
+      <>
+        <div className="flex items-center gap-1 rounded-full border border-border-strong bg-surface px-1.5 py-1">
+          <button onClick={() => shiftMonth(-1)} className="flex h-7 w-7 items-center justify-center rounded-full text-muted hover:bg-surface-2" aria-label="Previous month">
+            <ChevronLeft size={15} />
+          </button>
+          <span className="min-w-[130px] text-center text-sm font-semibold text-ink">
+            {MONTHS[month - 1]} {year}
+          </span>
+          <button onClick={() => shiftMonth(1)} className="flex h-7 w-7 items-center justify-center rounded-full text-muted hover:bg-surface-2" aria-label="Next month">
+            <ChevronRight size={15} />
+          </button>
+        </div>
 
-            {isAdmin && (
-              <>
-                <button
-                  onClick={() => generate.mutate()}
-                  disabled={generate.isPending}
-                  className="flex items-center gap-1.5 rounded-full bg-accent px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-60"
-                >
-                  <Play size={14} />
-                  {generate.isPending ? "Generating…" : "Generate"}
-                </button>
-                <button
-                  onClick={() => submit.mutate()}
-                  disabled={submit.isPending || totals.draft === 0}
-                  title={totals.draft === 0 ? "No draft payslips to submit" : "Send to the CEO for approval"}
-                  className="flex items-center gap-1.5 rounded-full border border-border-strong bg-surface px-4 py-2 text-sm font-semibold text-ink hover:bg-surface-2 disabled:opacity-40"
-                >
-                  <Send size={14} />
-                  {submit.isPending ? "Submitting…" : "Submit for Approval"}
-                </button>
-              </>
-            )}
+      {isAdmin && (
+        <>
+          <button
+            onClick={() => generate.mutate()}
+            disabled={generate.isPending}
+            className="flex items-center gap-1.5 rounded-full bg-accent px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-60"
+          >
+            <Play size={14} />
+            {generate.isPending ? "Generating…" : "Generate"}
+          </button>
+          <button
+            onClick={() => submit.mutate()}
+            disabled={submit.isPending || totals.draft === 0}
+            title={totals.draft === 0 ? "No draft payslips to submit" : "Send to the CEO for approval"}
+            className="flex items-center gap-1.5 rounded-full border border-border-strong bg-surface px-4 py-2 text-sm font-semibold text-ink hover:bg-surface-2 disabled:opacity-40"
+          >
+            <Send size={14} />
+            {submit.isPending ? "Submitting…" : "Submit for Approval"}
+          </button>
+        </>
+      )}
 
-            {isCeo && (
-              <>
-                <button
-                  onClick={() => approveAll.mutate()}
-                  disabled={approveAll.isPending || totals.pending === 0}
-                  title={totals.pending === 0 ? "Nothing pending approval" : "Approve and pay everyone at once, from your account"}
-                  className="flex items-center gap-1.5 rounded-full bg-accent px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-40"
-                >
-                  <CheckCircle2 size={14} />
-                  {approveAll.isPending ? "Paying…" : "Approve & Pay All"}
-                </button>
-                <button
-                  onClick={() => rejectAll.mutate()}
-                  disabled={rejectAll.isPending || totals.pending === 0}
-                  className="flex items-center gap-1.5 rounded-full border border-border-strong bg-surface px-3.5 py-2 text-sm font-semibold text-ink hover:bg-surface-2 disabled:opacity-40"
-                >
-                  <XCircle size={14} /> Reject
-                </button>
-                <button
-                  onClick={handleDeleteAll}
-                  disabled={deleteAll.isPending || (totals.draft === 0 && totals.pending === 0)}
-                  title="Delete every non-paid payslip for this month, in one go"
-                  className="flex items-center gap-1.5 rounded-full border border-border-strong bg-surface px-3.5 py-2 text-sm font-semibold text-danger hover:bg-chip-pink-bg disabled:opacity-40"
-                >
-                  <Trash2 size={14} /> Delete All
-                </button>
-              </>
-            )}
+    {isCeo && (
+      <>
+        <button
+          onClick={() => approveAll.mutate()}
+          disabled={approveAll.isPending || totals.pending === 0}
+          title={totals.pending === 0 ? "Nothing pending approval" : "Approve and pay everyone at once, from your account"}
+          className="flex items-center gap-1.5 rounded-full bg-accent px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-40"
+        >
+          <CheckCircle2 size={14} />
+          {approveAll.isPending ? "Paying…" : "Approve & Pay All"}
+        </button>
+        <button
+          onClick={() => rejectAll.mutate()}
+          disabled={rejectAll.isPending || totals.pending === 0}
+          className="flex items-center gap-1.5 rounded-full border border-border-strong bg-surface px-3.5 py-2 text-sm font-semibold text-ink hover:bg-surface-2 disabled:opacity-40"
+        >
+          <XCircle size={14} /> Reject
+        </button>
+        <button
+          onClick={handleDeleteAll}
+          disabled={deleteAll.isPending || (totals.draft === 0 && totals.pending === 0)}
+          title="Delete every non-paid payslip for this month, in one go"
+          className="flex items-center gap-1.5 rounded-full border border-border-strong bg-surface px-3.5 py-2 text-sm font-semibold text-danger hover:bg-chip-pink-bg disabled:opacity-40"
+        >
+          <Trash2 size={14} /> Delete All
+        </button>
+      </>
+    )}
           </>
         }
       />
@@ -223,106 +223,108 @@ export default function Payroll() {
                 <th className="px-5 py-3 font-semibold text-right">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-border">
-              {(records || []).map((r) => {
-                const isEditing = editing?.id === r.id
-                const isDraft = r.status === "DRAFT"
-                const isPaid = r.status === "PAID"
-                return (
-                  <tr key={r.id} className="align-middle">
-                    <td className="px-5 py-3">
-                      <div className="flex items-center gap-2.5">
-                        <Avatar name={r.employee?.name} size="sm" />
-                        <div>
-                          <div className="font-medium text-ink">{r.employee?.name}</div>
-                          <div className="text-xs text-muted">{r.employee?.department?.name || "—"}</div>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-5 py-3">
-                      <div className="text-xs text-ink">{r.bankName || "—"}</div>
-                      <div className="font-mono text-[11px] text-muted">{r.bankAccountNumber || "No account on file"}</div>
-                    </td>
-                    <td className="px-5 py-3 font-mono text-xs text-ink">{money(r.baseSalary)}</td>
-                    <td className="px-5 py-3">
-                      {isEditing ? (
-                        <input
-                          type="number"
-                          min="0"
-                          value={editing.bonus}
-                          onChange={(e) => setEditing((s) => ({ ...s, bonus: e.target.value }))}
-                          className="w-24 rounded-lg border border-border-strong bg-canvas px-2 py-1 font-mono text-xs"
-                        />
-                      ) : (
-                        <span className="font-mono text-xs text-chip-green-fg">+{money(r.bonus)}</span>
-                      )}
-                    </td>
-                    <td className="px-5 py-3">
-                      {isEditing ? (
-                        <input
-                          type="number"
-                          min="0"
-                          value={editing.deductions}
-                          onChange={(e) => setEditing((s) => ({ ...s, deductions: e.target.value }))}
-                          className="w-24 rounded-lg border border-border-strong bg-canvas px-2 py-1 font-mono text-xs"
-                        />
-                      ) : (
-                        <span className="font-mono text-xs text-chip-pink-fg">-{money(r.deductions)}</span>
-                      )}
-                    </td>
-                    <td className="px-5 py-3 text-xs text-muted">
-                      {r.unpaidLeaveDays > 0 && <div>{r.unpaidLeaveDays} unpaid day{r.unpaidLeaveDays === 1 ? "" : "s"}</div>}
-                      {r.halfDayLeaveDays > 0 && <div>{r.halfDayLeaveDays} half-day{r.halfDayLeaveDays === 1 ? "" : "s"}</div>}
-                      {r.lateDays > 0 && <div>{r.lateDays} late</div>}
-                      {!r.unpaidLeaveDays && !r.halfDayLeaveDays && !r.lateDays && "—"}
-                    </td>
-                    <td className="px-5 py-3 font-mono text-sm font-semibold text-ink">{money(r.netPay)}</td>
-                    <td className="px-5 py-3">
-                      <StatusPill tone={STATUS_TONE[r.status]}>{r.status.replace("_", " ")}</StatusPill>
-                    </td>
-                    <td className="px-5 py-3">
-                      <div className="flex items-center justify-end gap-2">
-                        {isDraft && isAdmin && isEditing && (
-                          <button
-                            onClick={() => save.mutate({ id: r.id, bonus: editing.bonus, deductions: editing.deductions })}
-                            disabled={save.isPending}
-                            className="rounded-full bg-accent px-3 py-1.5 text-xs font-semibold text-white"
-                          >
-                            Save
-                          </button>
-                        )}
-                        {isDraft && isAdmin && !isEditing && (
-                          <button
-                            onClick={() => setEditing({ id: r.id, bonus: r.bonus, deductions: r.deductions })}
-                            className="rounded-full border border-border-strong px-3 py-1.5 text-xs font-semibold text-ink hover:bg-surface-2"
-                          >
-                            Edit
-                          </button>
-                        )}
-                        {!isPaid && isCeo && (
-                          <button
-                            onClick={() => markPaid.mutate(r.id)}
-                            disabled={markPaid.isPending}
-                            title="Mark this one paid"
-                            className="flex h-8 w-8 items-center justify-center rounded-full text-chip-green-fg hover:bg-chip-green-bg"
-                          >
-                            <CheckCircle2 size={16} />
-                          </button>
-                        )}
-                        {!isPaid && (isAdmin || isCeo) && (
-                          <button
-                            onClick={() => remove.mutate(r.id)}
-                            disabled={remove.isPending}
-                            title="Delete record"
-                            className="flex h-8 w-8 items-center justify-center rounded-full text-chip-pink-fg hover:bg-chip-pink-bg"
-                          >
-                            <Trash2 size={15} />
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                )
+    <tbody className="divide-y divide-border">
+      {(records || []).map((r) => {
+        const isEditing = editing?.id === r.id
+        const isDraft = r.status === "DRAFT"
+        const isPaid = r.status === "PAID"
+        return (
+          <tr key={r.id} className="align-middle">
+            <td className="px-5 py-3">
+              <div className="flex items-center gap-2.5">
+                <Avatar name={r.employee?.name} size="sm" />
+                <div>
+                  <div className="font-medium text-ink">{r.employee?.name}</div>
+                  <div className="text-xs text-muted">{r.employee?.department?.name || "—"}</div>
+                </div>
+              </div>
+            </td>
+            <td className="px-5 py-3">
+              <div className="text-xs text-ink">{r.bankName || "—"}</div>
+              <div className="font-mono text-[11px] text-muted">{r.bankAccountNumber || "No account on file"}</div>
+            </td>
+            <td className="px-5 py-3 font-mono text-xs text-ink">{money(r.baseSalary)}</td>
+            <td className="px-5 py-3">
+              {isEditing ? (
+                <input
+                  type="number"
+                  min="1000"
+                  step="1000"
+                  value={editing.bonus}
+                  onChange={(e) => setEditing((s) => ({ ...s, bonus: e.target.value }))}
+                  className="w-24 rounded-lg border border-border-strong bg-canvas px-2 py-1 font-mono text-xs"
+                />
+              ) : (
+                <span className="font-mono text-xs text-chip-green-fg">+{money(r.bonus)}</span>
+              )}
+            </td>
+            <td className="px-5 py-3">
+              {isEditing ? (
+                <input
+                  type="number"
+                  min="1000"
+                  step="1000"
+                  value={editing.deductions}
+                  onChange={(e) => setEditing((s) => ({ ...s, deductions: e.target.value }))}
+                  className="w-24 rounded-lg border border-border-strong bg-canvas px-2 py-1 font-mono text-xs"
+                />
+              ) : (
+                <span className="font-mono text-xs text-chip-pink-fg">-{money(r.deductions)}</span>
+              )}
+            </td>
+            <td className="px-5 py-3 text-xs text-muted">
+              {r.unpaidLeaveDays > 0 && <div>{r.unpaidLeaveDays} unpaid day{r.unpaidLeaveDays === 1 ? "" : "s"}</div>}
+              {r.halfDayLeaveDays > 0 && <div>{r.halfDayLeaveDays} half-day{r.halfDayLeaveDays === 1 ? "" : "s"}</div>}
+              {r.lateDays > 0 && <div>{r.lateDays} late</div>}
+              {!r.unpaidLeaveDays && !r.halfDayLeaveDays && !r.lateDays && "—"}
+            </td>
+            <td className="px-5 py-3 font-mono text-sm font-semibold text-ink">{money(r.netPay)}</td>
+            <td className="px-5 py-3">
+              <StatusPill tone={STATUS_TONE[r.status]}>{r.status.replace("_", " ")}</StatusPill>
+            </td>
+            <td className="px-5 py-3">
+              <div className="flex items-center justify-end gap-2">
+                {isDraft && isAdmin && isEditing && (
+                  <button
+                    onClick={() => save.mutate({ id: r.id, bonus: editing.bonus, deductions: editing.deductions })}
+                    disabled={save.isPending}
+                    className="rounded-full bg-accent px-3 py-1.5 text-xs font-semibold text-white"
+                  >
+                    Save
+                  </button>
+                )}
+                {isDraft && isAdmin && !isEditing && (
+                  <button
+                    onClick={() => setEditing({ id: r.id, bonus: r.bonus, deductions: r.deductions })}
+                    className="rounded-full border border-border-strong px-3 py-1.5 text-xs font-semibold text-ink hover:bg-surface-2"
+                  >
+                    Edit
+                  </button>
+                )}
+                {!isPaid && isCeo && (
+                  <button
+                    onClick={() => markPaid.mutate(r.id)}
+                    disabled={markPaid.isPending}
+                    title="Mark this one paid"
+                    className="flex h-8 w-8 items-center justify-center rounded-full text-chip-green-fg hover:bg-chip-green-bg"
+                  >
+                    <CheckCircle2 size={16} />
+                  </button>
+                )}
+                {!isPaid && (isAdmin || isCeo) && (
+                  <button
+                    onClick={() => remove.mutate(r.id)}
+                    disabled={remove.isPending}
+                    title="Delete record"
+                    className="flex h-8 w-8 items-center justify-center rounded-full text-chip-pink-fg hover:bg-chip-pink-bg"
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                )}
+              </div>
+            </td>
+          </tr>
+        )
               })}
             </tbody>
           </table>
@@ -332,7 +334,7 @@ export default function Payroll() {
           <EmptyState
             icon={Wallet}
             title="No payroll for this month yet"
-            description="Generate it from active employees with a base salary set (PKR 25,000 minimum). Employees without a base salary are skipped — add one from their profile."
+            description="Generate it from active employees with a base salary set. Employees without a base salary are skipped add one from their profile."
             className="my-4"
           />
         )}

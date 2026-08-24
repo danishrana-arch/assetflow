@@ -50,6 +50,8 @@ function useDebouncedValue(value, delay = 350) {
 export default function Employees() {
   const { user } = useAuth()
   const isOwner = user?.role === "ADMIN"
+  const canManageEmployees = user?.role === "ADMIN" || user?.role === "CEO"
+  const canDeleteEmployee = (emp) => canManageEmployees && emp.id !== user?.id && (user?.role === "CEO" || emp.role !== "CEO")
   const [search, setSearch] = useState("")
   const debouncedSearch = useDebouncedValue(search)
   const [page, setPage] = useState(1)
@@ -99,7 +101,7 @@ export default function Employees() {
       api.post("/auth/invite", {
         ...form,
         password: form.password || undefined,
-        role: isOwner ? form.role : undefined,
+        role: canManageEmployees ? form.role : undefined,
         departmentId: form.departmentId || undefined,
         seniorityLevel: form.seniorityLevel || undefined,
       }),
@@ -154,7 +156,7 @@ export default function Employees() {
     const url = URL.createObjectURL(res.data)
     const a = document.createElement("a")
     a.href = url
-    a.download = "employee-import-template.xlsx"
+    a.download = "employee-import-template.csv"
     a.click()
     URL.revokeObjectURL(url)
   }
@@ -176,7 +178,7 @@ export default function Employees() {
                 className="field pl-9 !rounded-full"
               />
             </div>
-            {isOwner && (
+            {canManageEmployees && (
               <>
                 <button
                   onClick={handleDownloadTemplate}
@@ -190,12 +192,12 @@ export default function Employees() {
                   disabled={importFile.isPending}
                   className="pill-secondary flex items-center gap-1.5 px-3.5 py-2.5 text-sm disabled:opacity-60"
                 >
-                  <Upload size={14} /> {importFile.isPending ? "Importing…" : "Import Excel"}
+                  <Upload size={14} /> {importFile.isPending ? "Importing…" : "Import CSV"}
                 </button>
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept=".xlsx"
+                  accept=".csv,text/csv"
                   onChange={handleFileChosen}
                   className="hidden"
                 />
@@ -283,14 +285,16 @@ export default function Employees() {
               onChange={(e) => updateField("password", e.target.value)}
               hint="Optional: leave blank to auto-generate a temp password"
             />
-            {isOwner ? (
+            {canManageEmployees ? (
               <SelectField label="Role" value={form.role} onChange={(e) => updateField("role", e.target.value)}>
-                {Object.entries(ROLE_LABELS).map(([value, label]) => (
-                  <option key={value} value={value}>{label}</option>
-                ))}
+                {Object.entries(ROLE_LABELS)
+                  .filter(([value]) => value !== "CEO" || (data?.ceoCount || 0) < 2)
+                  .map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
               </SelectField>
             ) : (
-              <TextField label="Role" value="Employee" disabled hint="Only the owner can create management accounts" />
+              <TextField label="Role" value="Employee" disabled hint="Only an ADMIN or CEO can create management accounts" />
             )}
             <SelectField label="Department" value={form.departmentId} onChange={(e) => updateField("departmentId", e.target.value)}>
               <option value="">None</option>
@@ -332,7 +336,7 @@ export default function Employees() {
             </Link>
             <div className="flex flex-col items-end gap-2">
               <StatusBadge type="employee" status={emp.status} />
-              {isOwner && emp.role !== "ADMIN" && (
+              {canDeleteEmployee(emp) && (
                 <button onClick={() => handleRemove(emp)} className="text-muted hover:text-danger" aria-label={`Remove ${emp.name}`}>
                   <Trash2 size={15} />
                 </button>
@@ -375,7 +379,7 @@ export default function Employees() {
                   <td className="px-5 py-3.5"><StatusBadge type="employee" status={emp.status} /></td>
                   <td className="px-5 py-3.5 text-muted">{emp.assignedAssets?.length || 0}</td>
                   <td className="px-5 py-3.5 text-right">
-                    {isOwner && emp.role !== "ADMIN" && (
+                    {canDeleteEmployee(emp) && (
                       <button onClick={() => handleRemove(emp)} className="text-xs font-semibold text-danger hover:underline">
                         Remove
                       </button>

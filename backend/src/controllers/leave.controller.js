@@ -86,7 +86,7 @@ async function createLeave(req, res, next) {
     const conflict = await findTeamLeaveConflict({ organizationId, employeeId: userId, start, end })
     if (conflict) {
       return res.status(409).json({
-        error: `${conflict.employee.name} from your team is already on approved leave during this period — only one teammate can be off at a time.`,
+        error: `${conflict.employee.name} from your team is already on approved leave during this period only one teammate can be off at a time.`,
       })
     }
 
@@ -211,7 +211,7 @@ async function getLeaveCalendar(req, res, next) {
   try {
     const { organizationId } = req.user
     const year = parseInt(req.query.year, 10) || new Date().getFullYear()
-    const month = parseInt(req.query.month, 10) || new Date().getMonth() + 1 // 1-12
+    const month = parseInt(req.query.month, 10) || new Date().getMonth() + 1
 
     const monthStart = new Date(Date.UTC(year, month - 1, 1))
     const monthEnd = new Date(Date.UTC(year, month, 0, 23, 59, 59))

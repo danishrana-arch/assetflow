@@ -4,6 +4,7 @@ import {
   Users,
   Boxes,
   ClipboardCheck,
+  FolderKanban,
   PackageSearch,
   Building2,
   Ticket,
@@ -38,8 +39,8 @@ function RailItem({ to, label, icon: Icon, end, isDark }) {
           isActive
             ? "text-[var(--on-primary-container)]"
             : isDark
-              ? "text-black/55 hover:bg-black/10 hover:text-black"
-              : "text-white/60 hover:bg-white/10 hover:text-white"
+          ? "text-black/55 hover:bg-black/10 hover:text-black"
+          : "text-white/60 hover:bg-white/10 hover:text-white"
         }`
       }
       style={({ isActive }) =>
@@ -183,6 +184,13 @@ export default function Sidebar() {
               to="/assignments"
               label="Assignments"
               icon={ClipboardCheck}
+              isDark={isDark}
+            />
+
+            <RailItem
+              to="/projects"
+              label="Projects"
+              icon={FolderKanban}
               isDark={isDark}
             />
 
