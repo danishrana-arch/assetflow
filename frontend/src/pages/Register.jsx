@@ -3,11 +3,6 @@ import { Link, useNavigate } from "react-router-dom"
 import { useAuth } from "../context/AuthContext"
 import api from "../api/client"
 
-// Signs up a brand-new organization + its owner (ADMIN) account in one
-// step — this is how a company gets onto AssetFlow for the first time.
-// Individual employees are never self-registered after that; the owner
-// (or any management role) adds them from the Employees page instead,
-// which issues a temp password rather than a public signup form.
 export default function Register() {
   const navigate = useNavigate()
   const { login } = useAuth()
@@ -41,13 +36,12 @@ export default function Register() {
       // auth.controller.js and adjust if it expects different keys.
       const res = await api.post("/auth/register", { organizationName, name, email, password })
 
-      // If the backend returns a token directly, log the person straight
-      // in. If your endpoint instead just creates the account without a
-      // token, remove this block and navigate("/login") instead.
+      // The API returns a token for the new owner, so establish the session
+      // immediately and send the user into the application.
       if (res.data?.token) {
         localStorage.setItem("assetflow_token", res.data.token)
         await login(email, password)
-        navigate("/")
+        navigate("/dashboard")
       } else {
         navigate("/login")
       }
@@ -78,7 +72,7 @@ export default function Register() {
               Set up your organization
             </h2>
             <p className="max-w-sm text-sm text-muted">
-              Track inventory, manage your team, run attendance and payroll — all in one place.
+              Track inventory, manage your team, run attendance and payroll all in one place.
               This creates your organization and your owner account together.
             </p>
           </div>
@@ -97,6 +91,9 @@ export default function Register() {
               Log in instead
             </Link>
           </p>
+          <Link to="/" className="mt-2 inline-block text-xs font-medium text-muted hover:text-accent">
+            ← Back to welcome
+          </Link>
 
           <form onSubmit={handleSubmit} className="mt-8 space-y-4">
             <div>

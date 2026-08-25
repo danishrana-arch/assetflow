@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { useNavigate } from "react-router-dom"
+import { Link, useNavigate } from "react-router-dom"
 import { Boxes, ShieldCheck, Sparkles } from "lucide-react"
 import { useAuth } from "../context/AuthContext"
 import { useTheme } from "../context/ThemeContext"
@@ -357,19 +357,26 @@ export default function Login() {
             </button>
           </form>
 
-          {/* Help */}
-          <p
-            className={`
-              mt-6 text-center text-xs
-              ${
-                isDark
-                  ? "text-white/45"
-                  : "text-[#687272]"
-              }
-            `}
-          >
-            Trouble signing in? Contact your workspace admin.
-          </p>
+          <div className="mt-6 space-y-3 text-center">
+            <p
+              className={`
+                text-xs
+                ${
+                  isDark
+                    ? "text-white/45"
+                    : "text-[#687272]"
+                }
+              `}
+            >
+              Trouble signing in? Contact your workspace admin.
+            </p>
+            <p className={`text-sm ${isDark ? "text-white/60" : "text-[#687272]"}`}>
+              Don't have an account?{" "}
+              <Link to="/register" className="font-semibold text-accent hover:underline">
+                Sign up
+              </Link>
+            </p>
+          </div>
         </div>
       </div>
     </div>

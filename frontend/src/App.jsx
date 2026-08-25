@@ -5,6 +5,8 @@ import { ThemeProvider, useTheme } from "./context/ThemeContext"
 import { isManagement } from "./utils/roles"
 import DashboardLayout from "./layouts/DashboardLayout"
 import Login from "./pages/Login"
+import Register from "./pages/Register"
+import Welcome from "./pages/Welcome"
 
 const Dashboard = lazy(() => import("./pages/Dashboard"))
 const Employees = lazy(() => import("./pages/Employees"))
@@ -83,6 +85,7 @@ function ProtectedShell() {
       <Routes>
         <Route element={<DashboardLayout />}>
           <Route index element={isManager ? <Dashboard /> : <Navigate to={`/employees/${user.id}`} replace />} />
+          <Route path="/dashboard" element={isManager ? <Dashboard /> : <Navigate to={`/employees/${user.id}`} replace />} />
           <Route path="/employees" element={<RequireManagement><Employees /></RequireManagement>} />
           <Route path="/employees/:id" element={<EmployeeProfile />} />
           <Route path="/inventory" element={<RequireManagement><Inventory /></RequireManagement>} />
@@ -119,7 +122,9 @@ export default function App() {
     <ThemeProvider>
       <BrowserRouter>
         <Routes>
+          <Route path="/" element={<Welcome />} />
           <Route path="/login" element={<Login />} />
+          <Route path="/register" element={<Register />} />
           <Route path="/*" element={<ProtectedShell />} />
         </Routes>
       </BrowserRouter>
