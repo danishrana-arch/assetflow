@@ -4,7 +4,6 @@ import { useAuth } from "../context/AuthContext"
 import api from "../api/client"
 import logoFull from "../assets/logo1.png"
 
-
 export default function Register() {
   const navigate = useNavigate()
   const { login } = useAuth()
@@ -32,18 +31,12 @@ export default function Register() {
 
     setLoading(true)
     try {
-      // NOTE: field names here (organizationName/name/email/password) match
-      // the common shape for this kind of endpoint — double check these
-      // against your actual `registerOrganization` controller in
-      // auth.controller.js and adjust if it expects different keys.
       const res = await api.post("/auth/register", { organizationName, name, email, password })
 
-      // The API returns a token for the new owner, so establish the session
-      // immediately and send the user into the application.
       if (res.data?.token) {
         localStorage.setItem("assetflow_token", res.data.token)
         await login(email, password)
-        navigate("/dashboard")
+        navigate("/")
       } else {
         navigate("/login")
       }
@@ -57,15 +50,15 @@ export default function Register() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-canvas p-4">
       <div className="grid w-full max-w-4xl overflow-hidden rounded-[28px] bg-surface shadow-card-lg lg:grid-cols-2">
-        {/* Left visual — mirrors Login.jsx */}
         <div className="relative hidden flex-col justify-between bg-gradient-to-br from-chip-blue-bg via-chip-purple-bg to-chip-cyan-bg p-10 lg:flex">
           <div className="flex items-center gap-2.5">
-            <div
-              className="flex h-10 w-10 items-center justify-center rounded-full text-lg font-bold text-white"
-              style={{ backgroundColor: "var(--accent)" }}
-            >
-              A
-            </div>
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/80 p-1.5">
+  <img
+    src={logoFull}
+    alt="AssetFlow"
+    className="h-full w-full object-contain"
+  />
+</div>
             <span className="text-lg font-semibold text-ink">AssetFlow</span>
           </div>
 
@@ -93,9 +86,6 @@ export default function Register() {
               Log in instead
             </Link>
           </p>
-          <Link to="/" className="mt-2 inline-block text-xs font-medium text-muted hover:text-accent">
-            ← Back to welcome
-          </Link>
 
           <form onSubmit={handleSubmit} className="mt-8 space-y-4">
             <div>
