@@ -92,33 +92,33 @@ export default function Settings() {
               </p>
             )}
 
-            <div>
-              <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-muted">
-                Brand color
-              </label>
-              <div className="flex flex-wrap items-center gap-2">
-                {PRESETS.map((preset) => {
-                  const active = primaryColor.toLowerCase() === preset.value.toLowerCase()
-                  return (
-                    <button
-                      key={preset.value}
-                      type="button"
-                      onClick={() => setPrimaryColor(preset.value)}
-                      className={`h-9 w-9 rounded-full transition-transform ${active ? "scale-110 ring-2 ring-offset-2 ring-offset-surface" : ""}`}
-                      style={{ backgroundColor: preset.value, boxShadow: active ? `0 0 0 2px ${preset.value}` : "none" }}
-                      title={preset.label}
-                      aria-label={preset.label}
-                    />
-                  )
-                })}
-                <input
-                  type="color"
-                  value={primaryColor}
-                  onChange={(e) => setPrimaryColor(e.target.value)}
-                  className="h-9 w-9 cursor-pointer rounded-full border-2 border-border bg-transparent"
-                  aria-label="Custom color"
-                />
-              </div>
+          <div>
+        <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-muted">
+          Brand color
+        </label>
+        <div className="flex flex-wrap items-center gap-2">
+          {PRESETS.map((preset) => {
+            const active = primaryColor.toLowerCase() === preset.value.toLowerCase()
+            return (
+              <button
+                key={preset.value}
+                type="button"
+                onClick={() => setPrimaryColor(preset.value)}
+                className={`h-9 w-9 rounded-full transition-transform ${active ? "scale-110 ring-2 ring-offset-2 ring-offset-surface" : ""}`}
+                style={{ backgroundColor: preset.value, boxShadow: active ? `0 0 0 2px ${preset.value}` : "none" }}
+                title={preset.label}
+                aria-label={preset.label}
+              />
+            )
+          })}
+          <input
+            type="color"
+            value={primaryColor}
+            onChange={(e) => setPrimaryColor(e.target.value)}
+            className="h-9 w-9 cursor-pointer rounded-full border-2 border-border bg-transparent"
+            aria-label="Custom color"
+          />
+        </div>
               <p className="mt-2 text-xs text-muted">
                 Applied across buttons, charts, and highlights the moment you save.
               </p>
@@ -135,7 +135,7 @@ export default function Settings() {
               <p className="text-xs text-chip-green-fg">Saved.</p>
             )}
           </div>
-        </div>
+      </div>
 
         <div className="card p-6">
           <SectionHeader title="Leave Policy" />
@@ -244,7 +244,8 @@ export default function Settings() {
               <TextField
                 label="Late-arrival deduction (PKR / day)"
                 type="number"
-                min={0}
+                min={500}
+                step={100}
                 value={lateDeductionAmount}
                 onChange={(e) => setLateDeductionAmount(e.target.value)}
                 hint="Deducted for every day an employee is marked Late"
