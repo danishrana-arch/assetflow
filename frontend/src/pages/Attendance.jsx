@@ -86,7 +86,7 @@ function LocationFlag({ row }) {
 
 export default function Attendance() {
   const { user } = useAuth()
-  const hasAccess = user?.role === "ADMIN" || !!user?.canManageAttendance
+  const hasAccess = ["ADMIN", "CEO"].includes(user?.role) || !!user?.canManageAttendance
   const queryClient = useQueryClient()
   const [date] = useState(() => new Date().toISOString().slice(0, 10))
   const [rows, setRows] = useState([])

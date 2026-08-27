@@ -12,6 +12,7 @@ import {
   Download,
   CalendarCheck,
   CalendarDays,
+  UserCheck,
   Bell,
   Settings,
   Wallet,
@@ -72,9 +73,10 @@ export default function MobileNav({ open, onClose }) {
               <Row to="/asset-requests" icon={PackageSearch} label="Asset Requests" onClick={onClose} />
               <Row to="/departments" icon={Building2} label="Departments" onClick={onClose} />
               <Row to="/tickets" icon={Ticket} label="Requests / Tickets" onClick={onClose} />
-              {(user?.role === "ADMIN" || user?.canManageAttendance) && (
+              {(["ADMIN", "CEO"].includes(user?.role) || user?.canManageAttendance) && (
                 <Row to="/attendance" icon={CalendarCheck} label="Attendance" onClick={onClose} />
               )}
+              <Row to="/attendance/me" icon={UserCheck} label="My Attendance" onClick={onClose} />
               <Row to="/leave-requests" icon={ClipboardList} label="Leave Requests" onClick={onClose} />
               <Row to="/leave-calendar" icon={CalendarDays} label="Leave Calendar" onClick={onClose} />
               <Row to="/reports" icon={BarChart3} label="Reports" onClick={onClose} />
