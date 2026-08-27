@@ -68,14 +68,21 @@ export function AuthProvider({ children }) {
 
     // Cached auth data makes reloads feel immediate. /auth/me still runs in
     // the background so role, organization and permission changes are fresh.
+    // Only clear the session when the server actually rejects the token
+    // (401). A cold-start timeout, dropped connection, or brief 5xx from the
+    // backend spinning back up must NOT wipe a still-valid login.
     refreshUser()
-      .catch(() => {
-        localStorage.removeItem(TOKEN_KEY)
-        localStorage.removeItem(USER_CACHE_KEY)
-        localStorage.removeItem(ORG_KEY)
-        setUser(null)
-        setOrganization(null)
-        setOrganizations([])
+      .catch((err) => {
+        if (err?.response?.status === 401) {
+          localStorage.removeItem(TOKEN_KEY)
+          localStorage.removeItem(USER_CACHE_KEY)
+          localStorage.removeItem(ORG_KEY)
+          setUser(null)
+          setOrganization(null)
+          setOrganizations([])
+        }
+        // Any other error (timeout, network, 5xx): keep the cached user/token
+        // as-is so the person stays logged in and can keep using cached data.
       })
       .finally(() => setLoading(false))
   }, [refreshUser])

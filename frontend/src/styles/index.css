@@ -240,8 +240,10 @@ img, svg { max-width: 100%; }
   /* Dialogs/modals authored with fixed desktop widths stay inside the viewport. */
   [role="dialog"], .modal, .dialog { max-width: calc(100vw - 1.5rem) !important; }
 
-  /* Long text, URLs and IDs should never create a horizontal page overflow. */
-  p, h1, h2, h3, h4, span, a { overflow-wrap: anywhere; }
+  /* Long text, URLs and IDs should never create a horizontal page overflow.
+     Headings are excluded — they're short, controlled titles, and breaking
+     them mid-word (e.g. "Inventory Activity") looks broken rather than safe. */
+  p, span, a { overflow-wrap: anywhere; }
 }
 
 @media (prefers-reduced-motion: reduce) {

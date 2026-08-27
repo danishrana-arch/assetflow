@@ -2,9 +2,9 @@ import { MoreHorizontal } from "lucide-react"
 
 export default function SectionHeader({ title, action, showMenu = false, className = "" }) {
   return (
-    <div className={`mb-4 flex items-center justify-between gap-3 ${className}`}>
-      <h3 className="section-title">{title}</h3>
-      <div className="flex items-center gap-2">
+    <div className={`mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between ${className}`}>
+      <h3 className="section-title shrink-0">{title}</h3>
+      <div className="flex flex-wrap items-center gap-2">
         {action}
         {showMenu && (
           <button
