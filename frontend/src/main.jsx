@@ -6,7 +6,15 @@ import { AuthProvider } from "./context/AuthContext"
 import "./styles/index.css"
 
 const queryClient = new QueryClient({
-  defaultOptions: { queries: { refetchOnWindowFocus: false, retry: 1 } },
+  defaultOptions: {
+    queries: {
+      staleTime: 30 * 1000,
+      gcTime: 10 * 60 * 1000,
+      refetchOnWindowFocus: false,
+      refetchOnReconnect: true,
+      retry: 1,
+    },
+  },
 })
 
 ReactDOM.createRoot(document.getElementById("root")).render(

@@ -134,6 +134,26 @@ function Lamp({ isOn, onToggle }) {
       />
 
 
+      {/* Soft ceiling spill makes the lamp feel grounded in a real room. */}
+      <motion.div
+        className="pointer-events-none absolute left-1/2 top-[72px] h-[90px] w-[260px] -translate-x-1/2 rounded-full blur-3xl"
+        animate={{ opacity: isOn ? 0.34 : 0 }}
+        transition={{ duration: 0.6 }}
+        style={{ background: "radial-gradient(ellipse, rgba(255,214,120,.45), transparent 70%)" }}
+      />
+
+      {/* Directional cone of light under the shade. */}
+      <motion.div
+        className="pointer-events-none absolute left-1/2 top-[225px] z-10 h-[210px] w-[330px] -translate-x-1/2"
+        animate={{ opacity: isOn ? 0.28 : 0, scaleY: isOn ? 1 : 0.65 }}
+        transition={{ duration: 0.55 }}
+        style={{
+          clipPath: "polygon(42% 0%, 58% 0%, 100% 100%, 0% 100%)",
+          background: "linear-gradient(180deg, rgba(255,220,140,.28), rgba(245,158,11,0))",
+          filter: "blur(6px)",
+        }}
+      />
+
       {/* ======================================================
           CEILING
           ====================================================== */}
@@ -193,6 +213,13 @@ function Lamp({ isOn, onToggle }) {
 
           </div>
 
+
+          <motion.div
+            className="pointer-events-none absolute bottom-1 left-1/2 h-[92px] w-[76%] -translate-x-1/2 rounded-[50%] blur-2xl"
+            animate={{ opacity: isOn ? 0.32 : 0 }}
+            transition={{ duration: 0.45 }}
+            style={{ background: "radial-gradient(ellipse, rgba(255,218,130,.65), transparent 72%)" }}
+          />
 
           {/* Top rim */}
 
@@ -659,7 +686,7 @@ export default function Welcome() {
                 />
 
                 <span>
-                  Drag the string down or click it
+                  Pull the chain or tap it
                 </span>
 
               </div>

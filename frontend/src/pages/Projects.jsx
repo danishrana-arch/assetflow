@@ -144,7 +144,7 @@ function ProjectCard({ project, onOpen }) {
   )
 }
 
-function ProjectDetails({ project, onClose, onRefresh }) {
+function ProjectDetails({ project, onClose, onRefresh, canEdit = true }) {
   const [hours, setHours] = useState({})
   const [newDeadline, setNewDeadline] = useState(project.deadline ? project.deadline.slice(0, 10) : "")
   const [status, setStatus] = useState(project.status)
@@ -188,8 +188,8 @@ function ProjectDetails({ project, onClose, onRefresh }) {
         <div className="px-6 pb-6">
           <div className="card p-5">
             <div className="grid gap-4 md:grid-cols-2">
-              <label><span className="text-xs font-medium text-muted">Project status</span><select value={status} onChange={e => setStatus(e.target.value)} className="field mt-1 w-full text-xs">{Object.entries(STATUS).map(([value, meta]) => <option key={value} value={value}>{meta.label}</option>)}</select></label>
-              <label><span className="text-xs font-medium text-muted">Deadline</span><input type="date" value={newDeadline} onChange={e => setNewDeadline(e.target.value)} className="field mt-1 w-full text-xs" /></label>
+              <label><span className="text-xs font-medium text-muted">Project status</span><select disabled={!canEdit} value={status} onChange={e => setStatus(e.target.value)} className="field mt-1 w-full text-xs">{Object.entries(STATUS).map(([value, meta]) => <option key={value} value={value}>{meta.label}</option>)}</select></label>
+              <label><span className="text-xs font-medium text-muted">Deadline</span><input disabled={!canEdit} type="date" value={newDeadline} onChange={e => setNewDeadline(e.target.value)} className="field mt-1 w-full text-xs" /></label>
               <label className="md:col-span-2"><span className="text-xs font-medium text-muted">Project link {status === "COMPLETED" ? "(required)" : "(optional)"}</span><input value={projectUrl} onChange={e => setProjectUrl(e.target.value)} className="field mt-1 w-full text-xs" placeholder="https://..." /></label>
             </div>
 
@@ -204,7 +204,7 @@ function ProjectDetails({ project, onClose, onRefresh }) {
             </div>
 
             {completedNeedsLink && <p className="mt-3 text-xs font-medium text-red-600">A project link is required before this project can be marked completed.</p>}
-            <button onClick={saveProject} disabled={update.isPending || completedNeedsLink} className="pill-accent mt-5 px-4 py-2.5 text-xs disabled:opacity-50">{update.isPending ? "Saving…" : "Save project changes"}</button>
+            <button onClick={saveProject} disabled={!canEdit || update.isPending || completedNeedsLink} className="pill-accent mt-5 px-4 py-2.5 text-xs disabled:opacity-50">{update.isPending ? "Saving…" : "Save project changes"}</button>
           </div>
         </div>
 
@@ -216,7 +216,7 @@ function ProjectDetails({ project, onClose, onRefresh }) {
                 <div key={member.id} className="flex items-center gap-3 p-4">
                   <Avatar name={member.employee.name} src={member.employee.photoUrl} size="sm" />
                   <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-ink">{member.employee.name}</p><p className="truncate text-[11px] text-muted">{member.employee.skill || member.employee.department?.name || member.employee.role}{member.employee.email ? ` · ${member.employee.email}` : ""}</p></div>
-                  <div className="flex items-center gap-2"><input type="number" min="0" step="0.5" value={hours[member.id] ?? 0} onChange={e => setHours(prev => ({ ...prev, [member.id]: e.target.value }))} className="field w-24 text-xs" /><span className="text-xs text-muted">hrs</span><button onClick={() => saveHours(member.id)} className="rounded-xl bg-surface-2 px-3 py-2 text-xs font-semibold text-ink hover:bg-surface-3">Save</button></div>
+                  <div className="flex items-center gap-2"><input disabled={!canEdit} type="number" min="0" step="0.5" value={hours[member.id] ?? 0} onChange={e => setHours(prev => ({ ...prev, [member.id]: e.target.value }))} className="field w-24 text-xs" /><span className="text-xs text-muted">hrs</span><button disabled={!canEdit} onClick={() => saveHours(member.id)} className="rounded-xl bg-surface-2 px-3 py-2 text-xs font-semibold text-ink hover:bg-surface-3">Save</button></div>
                 </div>
               ))}
               {project.members?.length === 0 && <div className="p-6 text-sm text-muted">No employees assigned yet.</div>}
@@ -332,6 +332,7 @@ export default function Projects() {
   const [selected, setSelected] = useState(null)
   const [expired, setExpired] = useState(null)
   const [createOpen, setCreateOpen] = useState(false)
+  const isManagement = ["ADMIN", "CEO", "SALES_HEAD", "HR", "MANAGEMENT", "Dept-Head"].includes(user?.role)
 
   const { data: projects = [], isLoading } = useQuery({
     queryKey: ["projects", activeStatus, search],
@@ -340,6 +341,7 @@ export default function Projects() {
 
   const countsQuery = useQuery({
     queryKey: ["projects-counts"],
+    enabled: isManagement,
     queryFn: async () => {
       const [a, b, c] = await Promise.all(["NOT_STARTED", "IN_PROGRESS", "COMPLETED"].map(status => api.get("/projects", { params: { status } }).then(r => r.data.length)))
       return { NOT_STARTED: a, IN_PROGRESS: b, COMPLETED: c }
@@ -347,7 +349,7 @@ export default function Projects() {
   })
 
   useEffect(() => {
-    const firstExpired = projects.find(isExpired)
+    const firstExpired = isManagement ? projects.find(isExpired) : null
     if (firstExpired && !sessionStorage.getItem(`project-deadline-${firstExpired.id}-${firstExpired.deadline}`)) {
       sessionStorage.setItem(`project-deadline-${firstExpired.id}-${firstExpired.deadline}`, "1")
       setExpired(firstExpired)
@@ -373,21 +375,18 @@ export default function Projects() {
     if (id) setSelected(await api.get(`/projects/${id}`).then(r => r.data))
   }
 
-  const isManagement = ["ADMIN", "CEO", "SALES_HEAD", "HR", "MANAGER"].includes(user?.role)
-  if (!isManagement) return null
-
   return (
     <div>
-      <PageHeader title="Projects" subtitle="Track company projects, deadlines, teams, technology, and time spent." backTo="/" actions={<button onClick={() => setCreateOpen(true)} className="pill-accent inline-flex items-center gap-2 px-4 py-2.5 text-xs"><Plus size={15} /> New Project</button>} />
+      <PageHeader title="Projects" subtitle="Track company projects, deadlines, teams, technology, and time spent." backTo="/" actions={isManagement ? <button onClick={() => setCreateOpen(true)} className="pill-accent inline-flex items-center gap-2 px-4 py-2.5 text-xs"><Plus size={15} /> New Project</button> : null} />
 
-      <div className="grid gap-4 md:grid-cols-3">{["NOT_STARTED", "IN_PROGRESS", "COMPLETED"].map(status => <StatusCard key={status} status={status} count={countsQuery.data?.[status] ?? 0} active={activeStatus === status} onClick={() => setActiveStatus(activeStatus === status ? null : status)} />)}</div>
+      {isManagement && <div className="grid gap-4 md:grid-cols-3">{["NOT_STARTED", "IN_PROGRESS", "COMPLETED"].map(status => <StatusCard key={status} status={status} count={countsQuery.data?.[status] ?? 0} active={activeStatus === status} onClick={() => setActiveStatus(activeStatus === status ? null : status)} />)}</div>}
 
       <div className="mt-5 card p-4"><div className="flex flex-col gap-3 lg:flex-row lg:items-center"><div className="relative flex-1"><Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" /><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search projects or clients…" className="field w-full pl-9" /></div><select value={deadlineFilter} onChange={e => setDeadlineFilter(e.target.value)} className="field lg:w-48"><option value="ALL">All deadlines</option><option value="UPCOMING">Due in 7 days</option><option value="OVERDUE">Overdue</option></select>{activeStatus && <button onClick={() => setActiveStatus(null)} className="rounded-xl bg-surface-2 px-4 py-2.5 text-xs font-semibold text-muted hover:text-ink">Clear status</button>}</div></div>
 
       <div className="mt-5"><div className="mb-3 flex items-center justify-between"><p className="text-sm font-semibold text-ink">{activeStatus ? STATUS[activeStatus].label : "All Projects"}</p><p className="text-xs text-muted">{visibleProjects.length} project{visibleProjects.length === 1 ? "" : "s"}</p></div>{isLoading ? <div className="card p-10 text-center text-sm text-muted">Loading projects…</div> : visibleProjects.length ? <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{visibleProjects.map(project => <ProjectCard key={project.id} project={project} onOpen={setSelected} />)}</div> : <div className="card p-12 text-center"><Users size={24} className="mx-auto text-muted" /><p className="mt-3 text-sm font-semibold text-ink">No projects found</p><p className="mt-1 text-xs text-muted">Try changing the status, deadline, or search filters.</p></div>}</div>
 
-      {createOpen && <CreateProjectModal onClose={() => setCreateOpen(false)} onCreated={async project => { setCreateOpen(false); await refresh(); setSelected(project) }} />}
-      {selected && <ProjectDetails project={selected} onClose={() => setSelected(null)} onRefresh={() => refresh(selected.id)} />}
+      {createOpen && isManagement && <CreateProjectModal onClose={() => setCreateOpen(false)} onCreated={async project => { setCreateOpen(false); await refresh(); setSelected(project) }} />}
+      {selected && <ProjectDetails project={selected} onClose={() => setSelected(null)} onRefresh={() => refresh(selected.id)} canEdit={isManagement} />}
       {expired && <DeadlineModal project={expired} onClose={() => setExpired(null)} onCompleted={() => { setExpired(null); refresh() }} onExtended={() => { setExpired(null); refresh() }} />}
     </div>
   )

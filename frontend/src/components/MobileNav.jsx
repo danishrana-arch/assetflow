@@ -1,6 +1,7 @@
 import { NavLink } from "react-router-dom"
 import {
   LayoutDashboard,
+  FolderKanban,
   Users,
   Boxes,
   ClipboardCheck,
@@ -13,7 +14,6 @@ import {
   CalendarDays,
   Bell,
   Settings,
-  CreditCard,
   Wallet,
   ClipboardList,
   ShieldCheck,
@@ -23,6 +23,7 @@ import {
 } from "lucide-react"
 import { useAuth } from "../context/AuthContext"
 import { isManagement } from "../utils/roles"
+import OrganizationSwitcher from "./OrganizationSwitcher"
 
 function Row({ to, icon: Icon, label, end, onClick }) {
   return (
@@ -57,13 +58,17 @@ export default function MobileNav({ open, onClose }) {
             <X size={18} />
           </button>
         </div>
-        <nav className="flex-1 space-y-1">
+        <div className="mb-3 rounded-2xl border border-border bg-surface-2 p-3">
+          <OrganizationSwitcher />
+        </div>
+        <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto pr-1">
           {isAdmin ? (
             <>
               <Row to="/" icon={LayoutDashboard} label="Dashboard" end onClick={onClose} />
               <Row to="/inventory" icon={Boxes} label="Inventory" onClick={onClose} />
               <Row to="/employees" icon={Users} label="Employees" onClick={onClose} />
               <Row to="/assignments" icon={ClipboardCheck} label="Asset Assignment" onClick={onClose} />
+              <Row to="/projects" icon={FolderKanban} label="Projects" onClick={onClose} />
               <Row to="/asset-requests" icon={PackageSearch} label="Asset Requests" onClick={onClose} />
               <Row to="/departments" icon={Building2} label="Departments" onClick={onClose} />
               <Row to="/tickets" icon={Ticket} label="Requests / Tickets" onClick={onClose} />
@@ -80,12 +85,12 @@ export default function MobileNav({ open, onClose }) {
               <Row to="/notifications" icon={Bell} label="Notifications" onClick={onClose} />
               <Row to="/settings" icon={Settings} label="Settings" onClick={onClose} />
               <Row to="/holidays" icon={CalendarDays} label="Holidays" onClick={onClose} />
-              <Row to="/billing" icon={CreditCard} label="Billing" onClick={onClose} />
               <Row to="/profile" icon={UserCircle} label="Profile" onClick={onClose} />
             </>
           ) : (
             <>
               <Row to={`/employees/${user?.id}`} icon={UserCircle} label="My Profile" onClick={onClose} />
+              <Row to="/projects" icon={FolderKanban} label="My Projects" onClick={onClose} />
               <Row to="/attendance/me" icon={CalendarCheck} label="My Attendance" onClick={onClose} />
               <Row to="/payroll/me" icon={Wallet} label="My Payslips" onClick={onClose} />
               <Row to="/tickets" icon={Ticket} label="Tickets" onClick={onClose} />

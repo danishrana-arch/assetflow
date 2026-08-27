@@ -16,7 +16,6 @@ import {
   ShieldCheck,
   Bell,
   Settings as SettingsIcon,
-  CreditCard,
   Wallet,
   Sun,
   Moon,
@@ -282,12 +281,6 @@ export default function Sidebar() {
               isDark={isDark}
             />
 
-            <RailItem
-              to="/billing"
-              label="Billing"
-              icon={CreditCard}
-              isDark={isDark}
-            />
           </>
         ) : (
           <>
@@ -295,6 +288,13 @@ export default function Sidebar() {
               to={`/employees/${user?.id}`}
               label="My Profile"
               icon={Users}
+              isDark={isDark}
+            />
+
+            <RailItem
+              to="/projects"
+              label="My Projects"
+              icon={FolderKanban}
               isDark={isDark}
             />
 

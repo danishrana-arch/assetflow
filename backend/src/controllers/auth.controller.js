@@ -1,9 +1,45 @@
 const bcrypt = require("bcrypt")
+const crypto = require("crypto")
 const prisma = require("../lib/prisma")
 const { signToken } = require("../utils/jwt")
 const { ASSIGNABLE_ROLES, MAX_CEO_COUNT } = require("../utils/roles")
 const { encryptField } = require("../utils/crypto")
 const { logAudit } = require("../utils/audit")
+
+
+function organizationSummary(organization) {
+  return {
+    id: organization.id,
+    name: organization.name,
+    slug: organization.slug,
+    companyId: organization.companyId,
+    parentOrganizationId: organization.parentOrganizationId,
+    isMain: organization.id === organization.companyId,
+    primaryColor: organization.primaryColor,
+    accentColor: organization.accentColor,
+    theme: organization.theme,
+    planTier: organization.planTier,
+  }
+}
+
+async function getCompanyOrganizations(companyId) {
+  const organizations = await prisma.organization.findMany({
+    where: { companyId, archivedAt: null },
+    select: {
+      id: true,
+      name: true,
+      slug: true,
+      companyId: true,
+      parentOrganizationId: true,
+      primaryColor: true,
+      accentColor: true,
+      theme: true,
+      planTier: true,
+    },
+    orderBy: [{ parentOrganizationId: "asc" }, { name: "asc" }],
+  })
+  return organizations.map(organizationSummary)
+}
 
 // Creates a brand-new organization plus its first admin user.
 async function registerOrganization(req, res, next) {
@@ -21,10 +57,13 @@ async function registerOrganization(req, res, next) {
 
     const hashed = await bcrypt.hash(password, 10)
 
+    const rootId = crypto.randomUUID()
     const organization = await prisma.organization.create({
       data: {
+        id: rootId,
         name: organizationName,
         slug: `${slug}-${Math.random().toString(36).slice(2, 6)}`,
+        companyId: rootId,
         users: {
           create: {
             name,
@@ -38,12 +77,13 @@ async function registerOrganization(req, res, next) {
     })
 
     const admin = organization.users[0]
-    const token = signToken({ userId: admin.id, organizationId: organization.id, role: admin.role })
+    const token = signToken({ userId: admin.id, organizationId: organization.id, companyId: organization.companyId, role: admin.role })
 
     res.status(201).json({
       token,
       user: { id: admin.id, name: admin.name, email: admin.email, role: admin.role },
-      organization: { id: organization.id, name: organization.name, slug: organization.slug },
+      organization: organizationSummary(organization),
+      organizations: [organizationSummary(organization)],
     })
   } catch (err) {
     next(err)
@@ -62,7 +102,7 @@ async function login(req, res, next) {
       include: { organization: true },
     })
 
-    if (!user) {
+    if (!user || user.organization.archivedAt) {
       return res.status(401).json({ error: "Invalid email or password" })
     }
 
@@ -71,7 +111,10 @@ async function login(req, res, next) {
       return res.status(401).json({ error: "Invalid email or password" })
     }
 
-    const token = signToken({ userId: user.id, organizationId: user.organizationId, role: user.role })
+    const token = signToken({ userId: user.id, organizationId: user.organizationId, companyId: user.organization.companyId, role: user.role })
+    const organizations = ["ADMIN", "CEO"].includes(user.role)
+      ? await getCompanyOrganizations(user.organization.companyId)
+      : [organizationSummary(user.organization)]
 
     res.json({
       token,
@@ -83,14 +126,8 @@ async function login(req, res, next) {
         status: user.status,
         canManageAttendance: user.canManageAttendance,
       },
-      organization: {
-        id: user.organization.id,
-        name: user.organization.name,
-        primaryColor: user.organization.primaryColor,
-        accentColor: user.organization.accentColor,
-        theme: user.organization.theme,
-        planTier: user.organization.planTier,
-      },
+      organization: organizationSummary(user.organization),
+      organizations,
     })
   } catch (err) {
     next(err)
@@ -115,7 +152,7 @@ async function inviteEmployee(req, res, next) {
       seniorityLevel,
       role,
     } = req.body
-    const { organizationId, role: requesterRole } = req.user
+    const { organizationId, companyId, role: requesterRole } = req.user
 
     if (!name || !email) {
       return res.status(400).json({ error: "name and email are required" })
@@ -130,7 +167,7 @@ async function inviteEmployee(req, res, next) {
         return res.status(400).json({ error: `role must be one of: ${ASSIGNABLE_ROLES.join(", ")}` })
       }
       if (role === "CEO") {
-        const ceoCount = await prisma.user.count({ where: { organizationId, role: "CEO" } })
+        const ceoCount = await prisma.user.count({ where: { organization: { companyId }, role: "CEO" } })
         if (ceoCount >= MAX_CEO_COUNT) {
           return res.status(400).json({ error: `An organization can have at most ${MAX_CEO_COUNT} CEOs` })
         }
@@ -177,8 +214,17 @@ async function me(req, res, next) {
     })
     if (!user) return res.status(404).json({ error: "User not found" })
 
-    const { password, ...safeUser } = user
-    res.json(safeUser)
+    const organizations = ["ADMIN", "CEO"].includes(user.role)
+      ? await getCompanyOrganizations(user.organization.companyId)
+      : [organizationSummary(user.organization)]
+
+    const activeOrganization = organizations.find((org) => org.id === req.user.organizationId) || organizationSummary(user.organization)
+    const { password, organization, ...safeUser } = user
+    res.json({
+      ...safeUser,
+      organization: activeOrganization,
+      organizations,
+    })
   } catch (err) {
     next(err)
   }

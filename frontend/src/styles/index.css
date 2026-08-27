@@ -219,3 +219,36 @@ h1, h2, h3, h4 {
 }
 ::-webkit-scrollbar-thumb:hover { background-color: var(--muted-2); }
 * { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+
+/* Responsive guardrails shared by every AssetFlow page. */
+html { overflow-x: hidden; }
+body { min-width: 320px; overflow-x: hidden; }
+button, input, select, textarea { max-width: 100%; }
+img, svg { max-width: 100%; }
+
+@media (max-width: 1023px) {
+  .card { border-radius: 20px; }
+}
+
+@media (max-width: 639px) {
+  .card { border-radius: 18px; }
+
+  /* Keep dense desktop tables usable on phones without forcing the page
+     itself to scroll horizontally. Existing table wrappers remain scrollable. */
+  table { width: max-content; min-width: 100%; }
+
+  /* Dialogs/modals authored with fixed desktop widths stay inside the viewport. */
+  [role="dialog"], .modal, .dialog { max-width: calc(100vw - 1.5rem) !important; }
+
+  /* Long text, URLs and IDs should never create a horizontal page overflow. */
+  p, h1, h2, h3, h4, span, a { overflow-wrap: anywhere; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

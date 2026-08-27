@@ -44,9 +44,12 @@ function validateCompletedLink(status, projectUrl) {
 
 async function listProjects(req, res, next) {
   try {
-    const { organizationId } = req.user
+    const { organizationId, userId, role } = req.user
     const { status, search } = req.query
-    const where = { organizationId }
+    const management = ["ADMIN", "CEO", "SALES_HEAD", "HR", "MANAGEMENT", "Dept-Head"].includes(role)
+    const where = management
+      ? { organizationId }
+      : { organizationId, members: { some: { employeeId: userId } } }
     if (status && Object.values(ProjectStatus).includes(status)) where.status = status
     if (search) {
       where.OR = [
@@ -66,8 +69,13 @@ async function listProjects(req, res, next) {
 
 async function getProject(req, res, next) {
   try {
+    const management = ["ADMIN", "CEO", "SALES_HEAD", "HR", "MANAGEMENT", "Dept-Head"].includes(req.user.role)
     const project = await prisma.project.findFirst({
-      where: { id: req.params.id, organizationId: req.user.organizationId },
+      where: {
+        id: req.params.id,
+        organizationId: req.user.organizationId,
+        ...(management ? {} : { members: { some: { employeeId: req.user.userId } } }),
+      },
       include: projectInclude,
     })
     if (!project) return res.status(404).json({ error: "Project not found" })

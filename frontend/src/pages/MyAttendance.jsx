@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { CheckCircle2, XCircle, Palmtree, Send, Ban } from "lucide-react"
+import { CheckCircle2, XCircle, Palmtree, Send, Ban, MapPin, AlertTriangle } from "lucide-react"
 import api from "../api/client"
 import PageHeader from "../components/ui/PageHeader"
 import SectionHeader from "../components/ui/SectionHeader"
@@ -26,6 +26,9 @@ export default function MyAttendance() {
   const queryClient = useQueryClient()
   const [leaveForm, setLeaveForm] = useState({ startDate: "", endDate: "", reason: "", type: "CASUAL" })
   const [leaveError, setLeaveError] = useState("")
+  const [locating, setLocating] = useState(false)
+  const [flagNotice, setFlagNotice] = useState(null)
+  const [locationError, setLocationError] = useState("")
 
   const { data: attendance, isLoading: loadingAttendance } = useQuery({
     queryKey: ["attendance-self"],
@@ -43,9 +46,57 @@ export default function MyAttendance() {
   })
 
   const markToday = useMutation({
-    mutationFn: (status) => api.post("/attendance/self/mark", { status }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["attendance-self"] }),
+    mutationFn: ({ status, latitude, longitude }) => api.post("/attendance/self/mark", { status, latitude, longitude }),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ["attendance-self"] })
+      if (res.data?.autoFlagged) {
+        setFlagNotice(
+          "You were marked Absent because your location is outside the office premises. If you're working remotely or in the field today, ask your admin to review it or mark your account as a field employee."
+        )
+      } else {
+        setFlagNotice(null)
+      }
+    },
   })
+
+  function handleMark(status) {
+    setFlagNotice(null)
+    setLocationError("")
+
+    if (status === "ABSENT") {
+      markToday.mutate({ status })
+      return
+    }
+
+    // Attendance on phones/tablets should always request location. This
+    // provides a clear permission prompt and records the check-in location.
+    const isMobile = /Android|iPhone|iPad|iPod|Windows Phone|Mobile/i.test(navigator.userAgent)
+    if (!navigator.geolocation) {
+      if (isMobile) {
+        setLocationError("Location services are required to mark attendance from a mobile or tablet. Please enable location and try again.")
+        return
+      }
+      markToday.mutate({ status })
+      return
+    }
+
+    setLocating(true)
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setLocating(false)
+        markToday.mutate({ status, latitude: pos.coords.latitude, longitude: pos.coords.longitude })
+      },
+      (error) => {
+        setLocating(false)
+        setLocationError(
+          error.code === 1
+            ? "Location permission was denied. Please allow location access in your browser settings and try again."
+            : "We couldn't get your location. Please turn on location services and try again."
+        )
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    )
+  }
 
   const submitLeave = useMutation({
     mutationFn: () => api.post("/leaves", leaveForm),
@@ -81,26 +132,31 @@ export default function MyAttendance() {
       <PageHeader title="My Attendance" subtitle="Mark today's attendance and request time off." backTo="/" />
 
       {balance && (
-        <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <div className="card p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted">Sick Leave</p>
-            <p className="mt-1 text-xl font-semibold text-ink">
-              {balance.sick.remaining}<span className="text-sm font-normal text-muted-2"> / {balance.sick.total} left</span>
-            </p>
+        <details className="group mb-5 overflow-hidden rounded-3xl border border-border bg-surface shadow-card">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-5 py-4 [&::-webkit-details-marker]:hidden">
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted">Leave balance</p>
+              <p className="mt-1 text-sm font-semibold text-ink">
+                {balance.sick.remaining + balance.casual.remaining} paid days remaining
+              </p>
+            </div>
+            <span className="rounded-xl bg-surface-2 px-3 py-2 text-xs font-semibold text-muted transition-transform group-open:rotate-180">⌄</span>
+          </summary>
+          <div className="grid gap-3 border-t border-border p-4 sm:grid-cols-3">
+            <div className="rounded-2xl bg-surface-2 p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted">Sick Leave</p>
+              <p className="mt-1 text-xl font-semibold text-ink">{balance.sick.remaining}<span className="text-sm font-normal text-muted-2"> / {balance.sick.total} left</span></p>
+            </div>
+            <div className="rounded-2xl bg-surface-2 p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted">Casual Leave</p>
+              <p className="mt-1 text-xl font-semibold text-ink">{balance.casual.remaining}<span className="text-sm font-normal text-muted-2"> / {balance.casual.total} left</span></p>
+            </div>
+            <div className="rounded-2xl bg-surface-2 p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted">Unpaid Taken</p>
+              <p className="mt-1 text-xl font-semibold text-ink">{balance.unpaid.used}<span className="text-sm font-normal text-muted-2"> days this year</span></p>
+            </div>
           </div>
-          <div className="card p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted">Casual Leave</p>
-            <p className="mt-1 text-xl font-semibold text-ink">
-              {balance.casual.remaining}<span className="text-sm font-normal text-muted-2"> / {balance.casual.total} left</span>
-            </p>
-          </div>
-          <div className="card p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted">Unpaid Taken</p>
-            <p className="mt-1 text-xl font-semibold text-ink">
-              {balance.unpaid.used}<span className="text-sm font-normal text-muted-2"> days this year</span>
-            </p>
-          </div>
-        </div>
+        </details>
       )}
 
       <div className="grid gap-5 lg:grid-cols-2">
@@ -127,22 +183,43 @@ export default function MyAttendance() {
               {attendance?.today?.updatedAt && (
                 <p className="mb-3 text-sm text-muted-2">Marked at {fmtTime(attendance.today.updatedAt)}</p>
               )}
+              {attendance?.today?.autoFlagged && (
+                <div className="mb-3 flex items-start gap-2 rounded-2xl bg-chip-pink-bg px-3.5 py-2.5 text-xs text-chip-pink-fg">
+                  <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+                  <span>Auto-marked Absent — your last check-in location was outside the office. Your admin can review and override this.</span>
+                </div>
+              )}
               <div className="flex gap-2">
                 <button
-                  onClick={() => markToday.mutate("PRESENT")}
-                  disabled={markToday.isPending}
+                  onClick={() => handleMark("PRESENT")}
+                  disabled={markToday.isPending || locating}
                   className="pill-accent flex flex-1 items-center justify-center gap-1.5 px-4 py-2.5 text-sm disabled:opacity-60"
                 >
-                  <CheckCircle2 size={15} /> Mark Present
+                  {locating ? <MapPin size={15} className="animate-pulse" /> : <CheckCircle2 size={15} />}
+                  {locating ? "Locating…" : "Mark Present"}
                 </button>
                 <button
-                  onClick={() => markToday.mutate("ABSENT")}
-                  disabled={markToday.isPending}
+                  onClick={() => handleMark("ABSENT")}
+                  disabled={markToday.isPending || locating}
                   className="pill-secondary flex flex-1 items-center justify-center gap-1.5 px-4 py-2.5 text-sm disabled:opacity-60"
                 >
                   <XCircle size={15} /> Mark Absent
                 </button>
               </div>
+              <p className="mt-2 flex items-center gap-1 text-[11px] text-muted-2">
+                <MapPin size={11} /> Your location is checked against the office when you mark yourself Present.
+              </p>
+              {locationError && (
+                <div className="mt-3 rounded-2xl bg-chip-pink-bg px-3.5 py-2.5 text-xs font-medium text-chip-pink-fg">
+                  {locationError}
+                </div>
+              )}
+              {flagNotice && (
+                <div className="mt-3 flex items-start gap-2 rounded-2xl bg-chip-yellow-bg px-3.5 py-2.5 text-xs text-chip-yellow-fg">
+                  <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+                  <span>{flagNotice}</span>
+                </div>
+              )}
             </>
           )}
 

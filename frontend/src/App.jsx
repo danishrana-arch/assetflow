@@ -4,9 +4,9 @@ import { useAuth } from "./context/AuthContext"
 import { ThemeProvider, useTheme } from "./context/ThemeContext"
 import { isManagement } from "./utils/roles"
 import DashboardLayout from "./layouts/DashboardLayout"
-import Login from "./pages/Login"
-import Register from "./pages/Register"
-import Welcome from "./pages/Welcome"
+const Login = lazy(() => import("./pages/Login"))
+const Register = lazy(() => import("./pages/Register"))
+const Welcome = lazy(() => import("./pages/Welcome"))
 
 const Dashboard = lazy(() => import("./pages/Dashboard"))
 const Employees = lazy(() => import("./pages/Employees"))
@@ -91,7 +91,7 @@ function ProtectedShell() {
           <Route path="/inventory" element={<RequireManagement><Inventory /></RequireManagement>} />
           <Route path="/inventory/:id" element={<AssetProfile />} />
           <Route path="/assignments" element={<RequireManagement><Assignments /></RequireManagement>} />
-          <Route path="/projects" element={<RequireManagement><Projects /></RequireManagement>} />
+          <Route path="/projects" element={<Projects />} />
           <Route path="/asset-requests" element={<RequireManagement><AssetRequests /></RequireManagement>} />
           <Route path="/departments" element={<RequireManagement><Departments /></RequireManagement>} />
           <Route path="/attendance" element={<RequireManagement><Attendance /></RequireManagement>} />
@@ -108,7 +108,7 @@ function ProtectedShell() {
           <Route path="/notifications" element={<RequireManagement><Notifications /></RequireManagement>} />
           <Route path="/settings" element={<RequireOwner><Settings /></RequireOwner>} />
           <Route path="/settings/attendance-devices" element={<RequireOwner><AttendanceDevices /></RequireOwner>} />
-          <Route path="/billing" element={<RequireManagement><Billing /></RequireManagement>} />
+          <Route path="/billing" element={<Navigate to="/" replace />} />
           <Route path="/profile" element={<Profile />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
@@ -121,12 +121,14 @@ export default function App() {
   return (
     <ThemeProvider>
       <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<Welcome />} />
-          <Route path="/login" element={<Login />} />
-          <Route path="/register" element={<Register />} />
-          <Route path="/*" element={<ProtectedShell />} />
-        </Routes>
+        <Suspense fallback={<PageFallback />}>
+          <Routes>
+            <Route path="/" element={<Welcome />} />
+            <Route path="/login" element={<Login />} />
+            <Route path="/register" element={<Register />} />
+            <Route path="/*" element={<ProtectedShell />} />
+          </Routes>
+        </Suspense>
       </BrowserRouter>
     </ThemeProvider>
   )

@@ -31,7 +31,7 @@ export default function PageHeader({ title, subtitle, backTo, stats, actions, cl
             {subtitle && <p className="mt-1.5 text-sm text-muted">{subtitle}</p>}
           </div>
         </div>
-        {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
+        {actions && <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">{actions}</div>}
       </div>
 
       {stats && stats.length > 0 && (

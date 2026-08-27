@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Save, Download, CheckCircle2, XCircle, Palmtree } from "lucide-react"
+import { Save, Download, CheckCircle2, XCircle, Palmtree, MapPin, AlertTriangle } from "lucide-react"
 import api from "../api/client"
 import { useAuth } from "../context/AuthContext"
 import PageHeader from "../components/ui/PageHeader"
@@ -33,6 +33,57 @@ function statusPill(status) {
   return <StatusPill tone={cfg.tone}>{cfg.label}</StatusPill>
 }
 
+function mapsLink(lat, lng) {
+  return `https://www.google.com/maps?q=${lat},${lng}`
+}
+
+// Shown next to a row when the employee's "Present" attempt landed
+// outside the office geofence and was auto-flipped to Absent by the
+// system. Admin can click through to see exactly where they were, then
+// use the status buttons to override the call either way.
+function LocationFlag({ row }) {
+  const hasLocation = row.latitude != null && row.longitude != null
+
+  if (!hasLocation) {
+    if (row.workLocationType === "FIELD") {
+      return (
+        <span className="mt-1 inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-2">
+          <MapPin size={10} /> Field employee · No location
+        </span>
+      )
+    }
+    return (
+      <span className="mt-1 inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-2">
+        <MapPin size={10} /> No location recorded
+      </span>
+    )
+  }
+
+  return (
+    <div className="mt-1 space-y-0.5">
+      <a
+        href={mapsLink(row.latitude, row.longitude)}
+        target="_blank"
+        rel="noreferrer"
+        className={`inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide hover:underline ${
+          row.autoFlagged ? "text-chip-pink-fg" : "text-muted"
+        }`}
+        title="Open the exact recorded attendance location in Google Maps"
+      >
+        {row.autoFlagged ? <AlertTriangle size={10} /> : <MapPin size={10} />}
+        {row.autoFlagged
+          ? row.distanceMeters != null
+            ? `${row.distanceMeters}m away · View exact location`
+            : "Outside office · View exact location"
+          : "View exact location"}
+      </a>
+      <p className="text-[10px] text-muted-2">
+        {Number(row.latitude).toFixed(6)}, {Number(row.longitude).toFixed(6)}
+      </p>
+    </div>
+  )
+}
+
 export default function Attendance() {
   const { user } = useAuth()
   const hasAccess = user?.role === "ADMIN" || !!user?.canManageAttendance
@@ -57,7 +108,7 @@ export default function Attendance() {
     setRows((prev) =>
       prev.map((r) =>
         r.employeeId === employeeId
-          ? { ...r, status, time: nowIso, markedByName: user?.name || r.markedByName }
+          ? { ...r, status, time: nowIso, markedByName: user?.name || r.markedByName, autoFlagged: false }
           : r
       )
     )
@@ -143,6 +194,7 @@ export default function Attendance() {
                 {row.markedByName && (
                   <p className="mt-0.5 text-xs text-muted-2">Marked by {row.markedByName}</p>
                 )}
+                <LocationFlag row={row} />
               </div>
               {statusPill(row.status)}
             </div>
@@ -176,6 +228,7 @@ export default function Attendance() {
               <th className="px-5 py-3.5">Department</th>
               <th className="px-5 py-3.5">Check in / out</th>
               <th className="px-5 py-3.5">Working time</th>
+              <th className="px-5 py-3.5">Location</th>
               <th className="px-5 py-3.5">Status</th>
               <th className="px-5 py-3.5">Mark</th>
             </tr>
@@ -192,7 +245,12 @@ export default function Attendance() {
                 <td className="px-5 py-3.5 text-muted">{row.department || "—"}</td>
                 <td className="px-5 py-3.5 text-muted">{formatPunchTime(row.checkInAt)} → {formatPunchTime(row.checkOutAt)}</td>
                 <td className="px-5 py-3.5 font-medium text-ink">{formatMinutes(row.workingMinutes)}</td>
-                <td className="px-5 py-3.5">{statusPill(row.status)}</td>
+                <td className="px-5 py-3.5">
+                  <LocationFlag row={row} />
+                </td>
+                <td className="px-5 py-3.5">
+                  {statusPill(row.status)}
+                </td>
                 <td className="px-5 py-3.5">
                   <div className="flex gap-1.5">
                     {Object.entries(STATUS_CONFIG).map(([key, cfg]) => (

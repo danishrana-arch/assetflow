@@ -1,6 +1,7 @@
 require("dotenv").config()
 const { PrismaClient } = require("@prisma/client")
 const bcrypt = require("bcrypt")
+const crypto = require("crypto")
 const { encryptField } = require("../src/utils/crypto")
 
 const prisma = new PrismaClient()
@@ -14,10 +15,13 @@ function today() {
 async function main() {
   const hashed = await bcrypt.hash("password123", 10)
 
+  const rootId = crypto.randomUUID()
   const org = await prisma.organization.create({
     data: {
+      id: rootId,
       name: "Acme Corp",
       slug: "acme-corp",
+      companyId: rootId,
       primaryColor: "#3E63DD",
       accentColor: "#16A34A",
       theme: "light",

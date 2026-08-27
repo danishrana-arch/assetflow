@@ -6,9 +6,10 @@ import PageHeader from "../components/ui/PageHeader"
 import SectionHeader from "../components/ui/SectionHeader"
 import Avatar from "../components/ui/Avatar"
 import { TextField } from "../components/ui/Field"
+import { LogOut } from "lucide-react"
 
 export default function Profile() {
-  const { user, refreshUser } = useAuth()
+  const { user, refreshUser, logout } = useAuth()
   const [currentPassword, setCurrentPassword] = useState("")
   const [newPassword, setNewPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
@@ -79,6 +80,14 @@ export default function Profile() {
             <Detail label="Department" value={user?.department?.name} />
             <Detail label="Phone" value={user?.phone} />
           </div>
+          <button
+            type="button"
+            onClick={logout}
+            className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl border border-border px-4 py-2.5 text-sm font-semibold text-muted transition hover:bg-chip-pink-bg hover:text-chip-pink-fg lg:hidden"
+          >
+            <LogOut size={16} />
+            Logout
+          </button>
         </div>
 
         <div className="card p-6 lg:col-span-2">

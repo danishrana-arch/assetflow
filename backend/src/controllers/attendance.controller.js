@@ -2,6 +2,7 @@ const prisma = require("../lib/prisma")
 const ExcelJS = require("exceljs")
 const { toDateOnly } = require("../utils/date")
 const { workingMinutesPerDay, expectedWeeklyMinutes, isScheduledWorkday } = require("../utils/work-schedule")
+const { distanceMeters } = require("../utils/geo")
 
 function startOfDay(dateStr) {
   return toDateOnly(dateStr || new Date())
@@ -13,7 +14,17 @@ async function getDailyAttendance(req, res, next) {
     const date = startOfDay(req.query.date)
 
     const [organization, employees, records] = await Promise.all([
-      prisma.organization.findUnique({ where: { id: organizationId }, select: { workingHoursPerDay: true, workingDaysPerWeek: true } }),
+      prisma.organization.findUnique({
+        where: { id: organizationId },
+        select: {
+          workingHoursPerDay: true,
+          workingDaysPerWeek: true,
+          geofenceEnabled: true,
+          officeLatitude: true,
+          officeLongitude: true,
+          geofenceRadiusMeters: true,
+        },
+      }),
       prisma.user.findMany({
         where: { organizationId, status: "ACTIVE" },
         include: { department: true },
@@ -44,6 +55,16 @@ async function getDailyAttendance(req, res, next) {
         isScheduledWorkday: isScheduledWorkday(date, organization),
         source: record?.source || "MANUAL",
         markedByName: record?.markedBy?.name || null,
+        workLocationType: emp.workLocationType || "OFFICE",
+        // Geofence info: only meaningful when the record was self-marked
+        // with a location and the employee is OFFICE-type. autoFlagged
+        // means the system overrode a "Present" attempt to "Absent"
+        // because the punch came from outside the office radius — an
+        // admin can review the coordinates below and override the status.
+        autoFlagged: record?.autoFlagged || false,
+        distanceMeters: record?.distanceMeters ?? null,
+        latitude: record?.latitude != null ? Number(record.latitude) : null,
+        longitude: record?.longitude != null ? Number(record.longitude) : null,
       }
     })
 
@@ -77,9 +98,12 @@ async function markAttendance(req, res, next) {
 
     const day = startOfDay(date)
 
+    // An admin setting the status directly is an explicit override — any
+    // prior "auto-flagged as absent due to location" marker no longer
+    // applies, since a human has now made the call.
     const record = await prisma.attendanceRecord.upsert({
       where: { employeeId_date: { employeeId, date: day } },
-      update: { status, markedById: userId },
+      update: { status, markedById: userId, autoFlagged: false },
       create: { organizationId, employeeId, date: day, status, markedById: userId },
     })
 
@@ -110,7 +134,7 @@ async function saveDayAttendance(req, res, next) {
       records.map((r) =>
         prisma.attendanceRecord.upsert({
           where: { employeeId_date: { employeeId: r.employeeId, date: day } },
-          update: { status: r.status, markedById: userId },
+          update: { status: r.status, markedById: userId, autoFlagged: false },
           create: { organizationId, employeeId: r.employeeId, date: day, status: r.status, markedById: userId },
         })
       )
@@ -178,7 +202,7 @@ async function exportAttendanceSheet(req, res, next) {
 async function markSelfAttendance(req, res, next) {
   try {
     const { organizationId, userId } = req.user
-    const { status } = req.body
+    const { status, latitude, longitude } = req.body
 
     const validStatuses = ["PRESENT", "ABSENT"]
     if (!validStatuses.includes(status)) {
@@ -194,13 +218,57 @@ async function markSelfAttendance(req, res, next) {
       return res.status(400).json({ error: "Today is already recorded as leave" })
     }
 
+    const [organization, employee] = await Promise.all([
+      prisma.organization.findUnique({
+        where: { id: organizationId },
+        select: { geofenceEnabled: true, officeLatitude: true, officeLongitude: true, geofenceRadiusMeters: true },
+      }),
+      prisma.user.findUnique({ where: { id: userId }, select: { workLocationType: true } }),
+    ])
+
+    const hasCoords = typeof latitude === "number" && typeof longitude === "number"
+    const isMobileDevice = /Android|iPhone|iPad|iPod|Windows Phone|Mobile/i.test(String(req.headers["user-agent"] || ""))
+    if (status === "PRESENT" && isMobileDevice && !hasCoords) {
+      return res.status(400).json({ error: "Location is required to mark attendance from a mobile or tablet" })
+    }
+    const geofenceActive =
+      organization?.geofenceEnabled &&
+      organization.officeLatitude != null &&
+      organization.officeLongitude != null &&
+      employee?.workLocationType !== "FIELD"
+
+    let finalStatus = status
+    let autoFlagged = false
+    let distance = null
+
+    // Only the "Mark Present" attempt is subject to the geofence — marking
+    // yourself Absent never needs a location check. FIELD-type employees
+    // (those who work outside the office) are exempt entirely, but their
+    // location is still recorded when available so admins have context.
+    if (status === "PRESENT" && geofenceActive && hasCoords) {
+      distance = distanceMeters(
+        latitude,
+        longitude,
+        Number(organization.officeLatitude),
+        Number(organization.officeLongitude)
+      )
+      if (distance > organization.geofenceRadiusMeters) {
+        finalStatus = "ABSENT"
+        autoFlagged = true
+      }
+    }
+
+    const locationData = hasCoords
+      ? { latitude, longitude, distanceMeters: distance }
+      : { latitude: null, longitude: null, distanceMeters: null }
+
     const record = await prisma.attendanceRecord.upsert({
       where: { employeeId_date: { employeeId: userId, date: today } },
-      update: { status, markedById: userId },
-      create: { organizationId, employeeId: userId, date: today, status, markedById: userId },
+      update: { status: finalStatus, markedById: userId, autoFlagged, ...locationData },
+      create: { organizationId, employeeId: userId, date: today, status: finalStatus, markedById: userId, autoFlagged, ...locationData },
     })
 
-    res.json(record)
+    res.json({ ...record, requestedStatus: status, autoFlagged })
   } catch (err) {
     next(err)
   }

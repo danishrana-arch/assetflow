@@ -10,6 +10,87 @@ function slugify(name) {
     .replace(/(^-|-$)/g, "")
 }
 
+function safeOrganization(organization) {
+  const { payrollAccountNumber: _payrollAccountNumber, ...safe } = organization
+  return {
+    ...safe,
+    isMain: organization.id === organization.companyId,
+  }
+}
+
+async function listCompanyOrganizations(req, res, next) {
+  try {
+    const { role, organizationId } = req.user
+    if (!["ADMIN", "CEO"].includes(role)) {
+      const organization = await prisma.organization.findUnique({ where: { id: organizationId } })
+      return res.json(organization ? [safeOrganization(organization)] : [])
+    }
+
+    const current = await prisma.organization.findUnique({
+      where: { id: organizationId },
+      select: { companyId: true },
+    })
+    if (!current) return res.status(404).json({ error: "Organization not found" })
+
+    const organizations = await prisma.organization.findMany({
+      where: { companyId: current.companyId, archivedAt: null },
+      orderBy: [{ parentOrganizationId: "asc" }, { name: "asc" }],
+    })
+
+    res.json(organizations.map(safeOrganization))
+  } catch (err) {
+    next(err)
+  }
+}
+
+async function createSubOrganization(req, res, next) {
+  try {
+    const { organizationId, role, userId } = req.user
+    if (!["ADMIN", "CEO"].includes(role)) {
+      return res.status(403).json({ error: "Only an ADMIN or CEO can create organizations" })
+    }
+
+    const name = String(req.body.name || "").trim()
+    if (!name) return res.status(400).json({ error: "Organization name is required" })
+
+    const current = await prisma.organization.findUnique({
+      where: { id: organizationId },
+      select: { id: true, companyId: true },
+    })
+    if (!current) return res.status(404).json({ error: "Organization not found" })
+
+    const base = slugify(name) || "organization"
+    let slug = base
+    let attempt = 0
+    while (await prisma.organization.findUnique({ where: { slug } })) {
+      attempt += 1
+      slug = `${base}-${attempt}`
+    }
+
+    const organization = await prisma.organization.create({
+      data: {
+        name,
+        slug,
+        companyId: current.companyId,
+        parentOrganizationId: current.companyId,
+      },
+    })
+
+    logAudit({
+      organizationId: current.companyId,
+      actorId: userId,
+      action: "organization.created",
+      targetType: "Organization",
+      targetId: organization.id,
+      note: `${name} created under company ${current.companyId}`,
+    })
+
+    res.status(201).json(safeOrganization(organization))
+  } catch (err) {
+    next(err)
+  }
+}
+
 // The org's payroll disbursement account is sensitive, and per org policy
 // only the CEO holds/sees it — salaries are paid out of the CEO's own
 // account, not a shared admin one. This endpoint is hit by every logged-in
@@ -19,12 +100,12 @@ function slugify(name) {
 async function getOrganization(req, res, next) {
   try {
     const { organizationId, role } = req.user
-    const organization = await prisma.organization.findUnique({ where: { id: organizationId } })
+    const organization = await prisma.organization.findFirst({ where: { id: organizationId, archivedAt: null } })
     if (!organization) return res.status(404).json({ error: "Organization not found" })
 
     const { payrollAccountNumber, ...rest } = organization
-    if (role !== "CEO") return res.json(rest)
-    res.json({ ...rest, payrollAccountNumber: decryptField(payrollAccountNumber) })
+    if (role !== "CEO") return res.json({ ...rest, isMain: organization.id === organization.companyId })
+    res.json({ ...rest, isMain: organization.id === organization.companyId, payrollAccountNumber: decryptField(payrollAccountNumber) })
   } catch (err) {
     next(err)
   }
@@ -47,6 +128,7 @@ async function updateOrganization(req, res, next) {
       sickLeaveAllowance, casualLeaveAllowance,
       payrollBankName, payrollAccountNumber, lateDeductionAmount,
       workingHoursPerDay, workingDaysPerWeek,
+      geofenceEnabled, officeLatitude, officeLongitude, geofenceRadiusMeters,
     } = req.body
 
     const settingPayrollAccount = payrollBankName !== undefined || payrollAccountNumber !== undefined || lateDeductionAmount !== undefined
@@ -104,6 +186,29 @@ async function updateOrganization(req, res, next) {
       lateDeductionUpdate = n
     }
 
+    let officeLatUpdate
+    let officeLngUpdate
+    if (officeLatitude !== undefined) {
+      officeLatUpdate = officeLatitude === null || officeLatitude === "" ? null : Number(officeLatitude)
+      if (officeLatUpdate !== null && (Number.isNaN(officeLatUpdate) || officeLatUpdate < -90 || officeLatUpdate > 90)) {
+        return res.status(400).json({ error: "officeLatitude must be between -90 and 90" })
+      }
+    }
+    if (officeLongitude !== undefined) {
+      officeLngUpdate = officeLongitude === null || officeLongitude === "" ? null : Number(officeLongitude)
+      if (officeLngUpdate !== null && (Number.isNaN(officeLngUpdate) || officeLngUpdate < -180 || officeLngUpdate > 180)) {
+        return res.status(400).json({ error: "officeLongitude must be between -180 and 180" })
+      }
+    }
+    let geofenceRadiusUpdate
+    if (geofenceRadiusMeters !== undefined) {
+      const n = parseInt(geofenceRadiusMeters, 10)
+      if (!Number.isFinite(n) || n < 20 || n > 20000) {
+        return res.status(400).json({ error: "geofenceRadiusMeters must be between 20 and 20000" })
+      }
+      geofenceRadiusUpdate = n
+    }
+
     const before = await prisma.organization.findUnique({ where: { id: organizationId } })
 
     const updated = await prisma.organization.update({
@@ -122,6 +227,10 @@ async function updateOrganization(req, res, next) {
         ...(lateDeductionUpdate !== undefined ? { lateDeductionAmount: lateDeductionUpdate } : {}),
         ...(workingHoursUpdate !== undefined ? { workingHoursPerDay: workingHoursUpdate } : {}),
         ...(workingDaysUpdate !== undefined ? { workingDaysPerWeek: workingDaysUpdate } : {}),
+        ...(geofenceEnabled !== undefined ? { geofenceEnabled: !!geofenceEnabled } : {}),
+        ...(officeLatUpdate !== undefined ? { officeLatitude: officeLatUpdate } : {}),
+        ...(officeLngUpdate !== undefined ? { officeLongitude: officeLngUpdate } : {}),
+        ...(geofenceRadiusUpdate !== undefined ? { geofenceRadiusMeters: geofenceRadiusUpdate } : {}),
       },
     })
 
@@ -139,4 +248,52 @@ async function updateOrganization(req, res, next) {
   }
 }
 
-module.exports = { getOrganization, updateOrganization }
+
+async function archiveSubOrganization(req, res, next) {
+  try {
+    const { organizationId, role, userId } = req.user
+    if (!["ADMIN", "CEO"].includes(role)) {
+      return res.status(403).json({ error: "Only an ADMIN or CEO can remove organizations" })
+    }
+
+    const targetId = req.params.id
+    const current = await prisma.organization.findFirst({
+      where: { id: organizationId, archivedAt: null },
+      select: { companyId: true },
+    })
+    if (!current) return res.status(404).json({ error: "Current organization not found" })
+
+    const target = await prisma.organization.findFirst({
+      where: { id: targetId, companyId: current.companyId, archivedAt: null },
+      select: { id: true, name: true, companyId: true },
+    })
+    if (!target) return res.status(404).json({ error: "Subcompany not found" })
+    if (target.id === target.companyId) {
+      return res.status(400).json({ error: "The main company cannot be deleted" })
+    }
+
+    // Keep historical payroll, attendance, projects and audit data intact.
+    // Archiving removes the organization from all active company selectors
+    // while preserving the records for audit/history.
+    const archivedAt = new Date()
+    await prisma.organization.update({
+      where: { id: target.id },
+      data: { archivedAt },
+    })
+
+    logAudit({
+      organizationId: current.companyId,
+      actorId: userId,
+      action: "organization.archived",
+      targetType: "Organization",
+      targetId: target.id,
+      note: `${target.name} removed from the company`,
+    })
+
+    res.json({ message: "Subcompany removed", organizationId: target.id, archivedAt })
+  } catch (err) {
+    next(err)
+  }
+}
+
+module.exports = { getOrganization, updateOrganization, listCompanyOrganizations, createSubOrganization, archiveSubOrganization }

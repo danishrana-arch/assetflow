@@ -1,7 +1,11 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useParams, Link, useNavigate } from "react-router-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { BadgeCheck, Plus, X, Boxes, Ticket as TicketIcon, Activity, UserX, Pencil, Check, Mail, Phone, KeyRound } from "lucide-react"
+import {
+  BadgeCheck, Plus, X, Boxes, Ticket as TicketIcon, Activity, UserX, Pencil, Check,
+  Mail, Phone, KeyRound, ChevronDown, ChevronUp, Laptop, PackageSearch, MapPin,
+  Calendar, Users as ManagerIcon, Briefcase, Send, AlertTriangle,
+} from "lucide-react"
 import api from "../api/client"
 import { useAuth } from "../context/AuthContext"
 import { isManagement } from "../utils/roles"
@@ -17,6 +21,36 @@ import EmptyState from "../components/ui/EmptyState"
 const LEVEL_LABEL = { INTERN: "Intern", JUNIOR: "Junior", SENIOR: "Senior", LEAD: "Lead" }
 const REQUEST_TONE = { PENDING: "yellow", APPROVED: "blue", REJECTED: "pink", FULFILLED: "green" }
 const LEVEL_TONE = { INTERN: "slate", JUNIOR: "blue", SENIOR: "green", LEAD: "yellow" }
+const WORK_LOCATION_LABEL = { OFFICE: "Office", FIELD: "Field / Remote" }
+
+function fmtDate(value) {
+  if (!value) return undefined
+  return new Date(value).toLocaleDateString(undefined, { timeZone: "UTC", month: "short", day: "numeric", year: "numeric" })
+}
+
+// Categorizes an assigned asset into a tab. Anything whose category name
+// contains "laptop" (case-insensitive) goes in the Laptops tab; everything
+// else — monitors, phones, accessories, etc. — goes in Accessories.
+function assetTabOf(asset) {
+  return (asset.category || "").toLowerCase().includes("laptop") ? "LAPTOP" : "ACCESSORY"
+}
+
+// What a viewer who isn't the employee themself (and isn't a full-access
+// role like ADMIN/CEO) gets to see is scoped to their own department, so
+// an IT manager reviewing someone's profile sees their equipment, HR sees
+// personal/employment details, Finance sees pay details, and a direct
+// manager sees the operational picture — not every field on the record.
+function useProfileLens({ user, employee, isSelf }) {
+  return useMemo(() => {
+    if (isSelf || user?.role === "ADMIN" || user?.role === "CEO") return "full"
+    const dept = (user?.department?.name || "").toLowerCase()
+    if (dept.includes("it") || dept.includes("tech")) return "it"
+    if (dept.includes("financ") || dept.includes("account")) return "finance"
+    if (dept.includes("hr") || dept.includes("people") || user?.role === "HR") return "hr"
+    if (employee?.manager?.id === user?.id) return "manager"
+    return "full"
+  }, [user, employee, isSelf])
+}
 
 export default function EmployeeProfile() {
   const { id } = useParams()
@@ -42,11 +76,20 @@ export default function EmployeeProfile() {
   const [showRequestForm, setShowRequestForm] = useState(false)
   const [requestCategory, setRequestCategory] = useState("")
   const [requestReason, setRequestReason] = useState("")
+  const [detailsOpen, setDetailsOpen] = useState(false)
+  const [assetTab, setAssetTab] = useState("ALL")
+  const [usageDrafts, setUsageDrafts] = useState({}) // { [assetId]: { notUsing: bool, actual: string } }
+  const [usageSubmitted, setUsageSubmitted] = useState({}) // { [assetId]: true }
 
   const { data: employee, isLoading } = useQuery({
     queryKey: ["employee", id],
     queryFn: () => api.get(`/employees/${id}`).then((r) => r.data),
   })
+
+  const lens = useProfileLens({ user, employee, isSelf })
+  const showAssets = lens === "full" || lens === "it" || lens === "manager"
+  const showFinancial = lens === "full" || lens === "finance"
+  const showPersonalDetails = lens === "full" || lens === "hr"
 
   const { data: departments } = useQuery({
     queryKey: ["departments"],
@@ -111,6 +154,24 @@ export default function EmployeeProfile() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["asset-requests", "mine", id] }),
   })
 
+  // Self-service "am I actually using this?" check. Unticking reveals a
+  // free-text field for what the employee is really using, and submitting
+  // raises a ticket (category "Asset Discrepancy") so IT/management can
+  // follow up — reuses the existing ticket queue instead of a new inbox.
+  const reportUsage = useMutation({
+    mutationFn: ({ asset, actual }) =>
+      api.post("/tickets", {
+        subject: `Not using assigned asset: ${asset.name}`,
+        description: `${employee?.name || "Employee"} reported they are not currently using their assigned ${asset.name} (${asset.serialNumber}). They say they're actually using: ${actual}`,
+        category: "Asset Discrepancy",
+        priority: "MEDIUM",
+        assetId: asset.id,
+      }),
+    onSuccess: (_res, variables) => {
+      setUsageSubmitted((prev) => ({ ...prev, [variables.asset.id]: true }))
+    },
+  })
+
   function handleResetPassword() {
     if (!employee) return
     if (window.confirm(`Reset ${employee.name}'s password to the temporary password? They'll need to change it after logging in.`)) {
@@ -150,6 +211,9 @@ export default function EmployeeProfile() {
       baseSalary: employee.baseSalary ?? "",
       bankName: employee.bankName || "",
       bankAccountNumber: employee.bankAccountNumber || "",
+      designation: employee.designation || "",
+      joiningDate: employee.joiningDate ? employee.joiningDate.slice(0, 10) : "",
+      workLocationType: employee.workLocationType || "OFFICE",
     })
     setEditError("")
     setEditing(true)
@@ -170,6 +234,15 @@ export default function EmployeeProfile() {
   const level = employee.seniorityLevel
   const levelTone = LEVEL_TONE[level] || "slate"
   const canEdit = canEditFully || canEditContactOnly
+
+  const assignedAssets = employee.assignedAssets || []
+  const laptopCount = assignedAssets.filter((a) => assetTabOf(a) === "LAPTOP").length
+  const accessoryCount = assignedAssets.length - laptopCount
+  const visibleAssets = assignedAssets.filter((a) => assetTab === "ALL" || assetTabOf(a) === assetTab)
+
+  function setUsageDraft(assetId, patch) {
+    setUsageDrafts((prev) => ({ ...prev, [assetId]: { notUsing: false, actual: "", ...prev[assetId], ...patch } }))
+  }
 
   return (
     <div>
@@ -209,75 +282,196 @@ export default function EmployeeProfile() {
         </div>
       )}
 
+      {/* Top identity bar — name / designation / reporting manager / company
+          email on the left, company name tag in the org's brand color on
+          the right. */}
+      <div className="card mb-5 flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-4">
+          <Avatar name={employee.name} size="lg" />
+          <div className="min-w-0">
+            <h2 className="truncate text-lg font-bold text-ink" style={{ letterSpacing: "-0.02em" }}>
+              {employee.name}
+            </h2>
+            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
+              {(employee.designation || employee.skill) && (
+                <span className="flex items-center gap-1">
+                  <Briefcase size={12} /> {employee.designation || employee.skill}
+                </span>
+              )}
+              {employee.manager?.name && (
+                <span className="flex items-center gap-1">
+                  <ManagerIcon size={12} /> Reports to {employee.manager.name}
+                </span>
+              )}
+              {employee.email && (
+                <span className="flex items-center gap-1">
+                  <Mail size={12} /> {employee.email}
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+        {organization?.name && (
+          <span
+            className="inline-flex shrink-0 items-center rounded-full px-3.5 py-1.5 text-xs font-semibold text-white"
+            style={{ backgroundColor: organization.primaryColor || "#3B82F6" }}
+          >
+            {organization.name}
+          </span>
+        )}
+      </div>
+
       {/* Contact panel + content, matching the AssetFlow contact-detail layout */}
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
         {/* LEFT — wider column: assets, tickets, activity */}
         <div className="space-y-5 lg:order-1 lg:col-span-2">
           {/* Assigned Assets */}
-          <div className="card p-5">
-            <SectionHeader
-              title="Assigned Assets"
-              action={
-                canManageInventory && (
-                  <button
-                    onClick={() => setShowAssignForm((v) => !v)}
-                    className="pill-secondary flex items-center gap-1.5 px-3 py-1.5 text-xs"
-                  >
-                    {showAssignForm ? <X size={12} /> : <Plus size={12} />}
-                    {showAssignForm ? "Cancel" : "Assign"}
-                  </button>
-                )
-              }
-            />
-
-            {showAssignForm && (
-              <form
-                onSubmit={(e) => { e.preventDefault(); if (selectedAssetId) assignAsset.mutate() }}
-                className="mb-4 flex gap-2"
-              >
-                <select
-                  value={selectedAssetId}
-                  onChange={(e) => setSelectedAssetId(e.target.value)}
-                  required
-                  className="field flex-1"
-                >
-                  <option value="">Select an available asset…</option>
-                  {(availableAssets || []).map((a) => (
-                    <option key={a.id} value={a.id}>{a.name} — {a.serialNumber}</option>
-                  ))}
-                </select>
-                <button type="submit" disabled={assignAsset.isPending} className="pill-accent px-4 text-xs">
-                  Assign
-                </button>
-              </form>
-            )}
-
-            <ul className="max-h-80 space-y-2 overflow-y-auto">
-              {(employee.assignedAssets || []).map((asset) => (
-                <li key={asset.id} className="flex items-center gap-3 rounded-2xl px-2 py-2 hover:bg-surface-2">
-                  <IconChip icon={Boxes} tone="blue" size="sm" />
-                  <div className="min-w-0 flex-1">
-                    <Link to={`/inventory/${asset.id}`} className="block truncate text-sm font-semibold text-ink hover:text-accent">
-                      {asset.name}
-                    </Link>
-                    <p className="truncate font-mono text-[11px] text-muted">{asset.serialNumber}</p>
-                  </div>
-                  {canManageInventory && (
+          {showAssets ? (
+            <div className="card p-5">
+              <SectionHeader
+                title="Assigned Assets"
+                action={
+                  canManageInventory && (
                     <button
-                      onClick={() => removeAsset.mutate(asset.id)}
-                      disabled={removeAsset.isPending}
-                      className="shrink-0 text-xs font-semibold text-danger hover:underline"
+                      onClick={() => setShowAssignForm((v) => !v)}
+                      className="pill-secondary flex items-center gap-1.5 px-3 py-1.5 text-xs"
                     >
-                      Remove
+                      {showAssignForm ? <X size={12} /> : <Plus size={12} />}
+                      {showAssignForm ? "Cancel" : "Assign"}
                     </button>
-                  )}
-                </li>
-              ))}
-              {employee.assignedAssets?.length === 0 && (
-                <EmptyState icon={Boxes} title="No assets assigned" description="Assign an available asset to this employee." />
+                  )
+                }
+              />
+
+              {showAssignForm && (
+                <form
+                  onSubmit={(e) => { e.preventDefault(); if (selectedAssetId) assignAsset.mutate() }}
+                  className="mb-4 flex gap-2"
+                >
+                  <select
+                    value={selectedAssetId}
+                    onChange={(e) => setSelectedAssetId(e.target.value)}
+                    required
+                    className="field flex-1"
+                  >
+                    <option value="">Select an available asset…</option>
+                    {(availableAssets || []).map((a) => (
+                      <option key={a.id} value={a.id}>{a.name} — {a.serialNumber}</option>
+                    ))}
+                  </select>
+                  <button type="submit" disabled={assignAsset.isPending} className="pill-accent px-4 text-xs">
+                    Assign
+                  </button>
+                </form>
               )}
-            </ul>
-          </div>
+
+              {/* Laptop / Accessories tabs */}
+              <div className="mb-3 flex gap-1.5">
+                {[
+                  { key: "ALL", label: "All", count: assignedAssets.length },
+                  { key: "LAPTOP", label: "Laptops", count: laptopCount },
+                  { key: "ACCESSORY", label: "Accessories", count: accessoryCount },
+                ].map((tab) => (
+                  <button
+                    key={tab.key}
+                    onClick={() => setAssetTab(tab.key)}
+                    className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-semibold transition-colors ${
+                      assetTab === tab.key ? "pill-accent px-3 py-1.5" : "bg-surface-2 text-muted hover:text-ink"
+                    }`}
+                  >
+                    {tab.key === "LAPTOP" && <Laptop size={11} />}
+                    {tab.key === "ACCESSORY" && <PackageSearch size={11} />}
+                    {tab.label} ({tab.count})
+                  </button>
+                ))}
+              </div>
+
+              <ul className="max-h-96 space-y-2 overflow-y-auto">
+                {visibleAssets.map((asset) => {
+                  const draft = usageDrafts[asset.id] || { notUsing: false, actual: "" }
+                  const submitted = usageSubmitted[asset.id]
+                  return (
+                    <li key={asset.id} className="rounded-2xl px-2 py-2 hover:bg-surface-2">
+                      <div className="flex items-center gap-3">
+                        <IconChip icon={assetTabOf(asset) === "LAPTOP" ? Laptop : Boxes} tone="blue" size="sm" />
+                        <div className="min-w-0 flex-1">
+                          <Link to={`/inventory/${asset.id}`} className="block truncate text-sm font-semibold text-ink hover:text-accent">
+                            {asset.name}
+                          </Link>
+                          <p className="truncate font-mono text-[11px] text-muted">{asset.serialNumber}</p>
+                        </div>
+                        {canManageInventory && (
+                          <button
+                            onClick={() => removeAsset.mutate(asset.id)}
+                            disabled={removeAsset.isPending}
+                            className="shrink-0 text-xs font-semibold text-danger hover:underline"
+                          >
+                            Remove
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Self-service usage confirmation — routes a
+                          discrepancy to IT/management as a ticket. */}
+                      {isSelf && (
+                        <div className="ml-11 mt-1.5">
+                          {submitted ? (
+                            <p className="flex items-center gap-1 text-[11px] font-medium text-chip-green-fg">
+                              <Check size={11} /> Reported to IT — they'll follow up.
+                            </p>
+                          ) : (
+                            <>
+                              <label className="flex items-center gap-1.5 text-[11px] text-muted">
+                                <input
+                                  type="checkbox"
+                                  checked={!draft.notUsing}
+                                  onChange={(e) => setUsageDraft(asset.id, { notUsing: !e.target.checked })}
+                                  className="h-3.5 w-3.5 rounded border-border-strong"
+                                />
+                                I'm currently using this
+                              </label>
+                              {draft.notUsing && (
+                                <form
+                                  onSubmit={(e) => {
+                                    e.preventDefault()
+                                    if (draft.actual.trim()) reportUsage.mutate({ asset, actual: draft.actual.trim() })
+                                  }}
+                                  className="mt-1.5 flex gap-1.5"
+                                >
+                                  <input
+                                    value={draft.actual}
+                                    onChange={(e) => setUsageDraft(asset.id, { actual: e.target.value })}
+                                    placeholder="What are you actually using?"
+                                    className="field flex-1 py-1.5 text-xs"
+                                    required
+                                  />
+                                  <button
+                                    type="submit"
+                                    disabled={reportUsage.isPending}
+                                    className="pill-accent flex items-center gap-1 px-3 py-1.5 text-[11px] disabled:opacity-60"
+                                  >
+                                    <Send size={10} /> Submit
+                                  </button>
+                                </form>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </li>
+                  )
+                })}
+                {visibleAssets.length === 0 && (
+                  <EmptyState icon={Boxes} title="No assets here" description="Nothing assigned in this category yet." />
+                )}
+              </ul>
+            </div>
+          ) : (
+            <div className="card p-5">
+              <SectionHeader title="Assigned Assets" />
+              <p className="text-sm text-muted">Asset details aren't part of your department's view of this profile.</p>
+            </div>
+          )}
 
           {isSelf && (
             <div className="card p-5">
@@ -402,6 +596,10 @@ export default function EmployeeProfile() {
                   {LEVEL_LABEL[level]}
                 </span>
               )}
+              <span className="inline-flex items-center gap-1 rounded-full bg-surface-2 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted">
+                <MapPin size={11} strokeWidth={2.5} />
+                {WORK_LOCATION_LABEL[employee.workLocationType] || "Office"}
+              </span>
             </div>
 
             <div className="mt-4 flex items-center gap-2">
@@ -482,6 +680,7 @@ export default function EmployeeProfile() {
               <TextField label="Phone" value={editForm.phone} onChange={(e) => setEditForm((f) => ({ ...f, phone: e.target.value }))} />
               {canEditFully && (
                 <>
+                  <TextField label="Designation / Title" value={editForm.designation} onChange={(e) => setEditForm((f) => ({ ...f, designation: e.target.value }))} placeholder="e.g. Senior Backend Engineer" />
                   <SelectField label="Department" value={editForm.departmentId} onChange={(e) => setEditForm((f) => ({ ...f, departmentId: e.target.value }))}>
                     <option value="">None</option>
                     {(departments || []).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
@@ -491,9 +690,18 @@ export default function EmployeeProfile() {
                     <option value="ON_LEAVE">On Leave</option>
                     <option value="LEFT_COMPANY">Left Company</option>
                   </SelectField>
+                  <SelectField
+                    label="Employee type"
+                    value={editForm.workLocationType}
+                    onChange={(e) => setEditForm((f) => ({ ...f, workLocationType: e.target.value }))}
+                  >
+                    <option value="OFFICE">Office (attendance geofence applies)</option>
+                    <option value="FIELD">Field / Remote (exempt from geofence)</option>
+                  </SelectField>
                   <TextField label="CNIC" value={editForm.cnic} onChange={(e) => setEditForm((f) => ({ ...f, cnic: e.target.value }))} placeholder="XXXXX-XXXXXXX-X" hint="Stored encrypted" />
                   <TextField label="Date of birth" type="date" value={editForm.dob} onChange={(e) => setEditForm((f) => ({ ...f, dob: e.target.value }))} />
-                  <TextField label="Residence" value={editForm.address} onChange={(e) => setEditForm((f) => ({ ...f, address: e.target.value }))} />
+                  <TextField label="Joining date" type="date" value={editForm.joiningDate} onChange={(e) => setEditForm((f) => ({ ...f, joiningDate: e.target.value }))} />
+                  <TextField label="Location / Residence" value={editForm.address} onChange={(e) => setEditForm((f) => ({ ...f, address: e.target.value }))} />
                   <TextField label="Skill" value={editForm.skill} onChange={(e) => setEditForm((f) => ({ ...f, skill: e.target.value }))} />
                   <SelectField label="Level" value={editForm.seniorityLevel} onChange={(e) => setEditForm((f) => ({ ...f, seniorityLevel: e.target.value }))}>
                     <option value="">None</option>
@@ -532,18 +740,52 @@ export default function EmployeeProfile() {
             </form>
           ) : (
             <div className="space-y-3.5">
-              <FieldValue label="First Name" value={employee.name?.split(" ")[0]} />
-              <FieldValue label="Last Name" value={employee.name?.split(" ").slice(1).join(" ")} />
               <FieldValue label="Email" value={employee.email} />
               <FieldValue label="Phone" value={employee.phone} />
+              <FieldValue label="Designation" value={employee.designation || employee.skill} />
               <FieldValue label="Department" value={employee.department?.name} />
-              <FieldValue label="Manager" value={employee.manager?.name} />
-              <FieldValue label="CNIC" value={employee.cnic} />
-              <FieldValue label="Date of Birth" value={employee.dob && new Date(employee.dob).toLocaleDateString(undefined, { timeZone: "UTC" })} />
-              <FieldValue label="Residence" value={employee.address} />
-              <FieldValue label="Base Salary" value={employee.baseSalary != null ? `PKR ${Number(employee.baseSalary).toLocaleString(undefined, { minimumFractionDigits: 2 })} / month` : undefined} />
-              <FieldValue label="Bank" value={employee.bankName} />
-              <FieldValue label="Account Number" value={employee.bankAccountNumber} />
+              <FieldValue label="Reporting Manager" value={employee.manager?.name} />
+
+              {/* Collapsible "more details" card — DOB, joining date,
+                  location and other less-frequently-needed fields. */}
+              <div className="!mt-4 overflow-hidden rounded-2xl border border-border">
+                <button
+                  type="button"
+                  onClick={() => setDetailsOpen((v) => !v)}
+                  className="flex w-full items-center justify-between px-3.5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted hover:text-ink"
+                >
+                  More details
+                  {detailsOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                </button>
+                {detailsOpen && (
+                  <div className="space-y-3.5 border-t border-border bg-surface-2 px-3.5 py-4">
+                    {showPersonalDetails ? (
+                      <>
+                        <FieldValue label="Date of Birth" value={fmtDate(employee.dob)} />
+                        <FieldValue
+                          label="Joining Date"
+                          value={fmtDate(employee.joiningDate) || fmtDate(employee.createdAt)}
+                        />
+                        <FieldValue label="Location" value={employee.address} />
+                        <FieldValue label="CNIC" value={employee.cnic} />
+                        <FieldValue label="Level" value={level && LEVEL_LABEL[level]} />
+                      </>
+                    ) : (
+                      <FieldValue
+                        label="Joining Date"
+                        value={fmtDate(employee.joiningDate) || fmtDate(employee.createdAt)}
+                      />
+                    )}
+                    {showFinancial && (
+                      <>
+                        <FieldValue label="Base Salary" value={employee.baseSalary != null ? `PKR ${Number(employee.baseSalary).toLocaleString(undefined, { minimumFractionDigits: 2 })} / month` : undefined} />
+                        <FieldValue label="Bank" value={employee.bankName} />
+                        <FieldValue label="Account Number" value={employee.bankAccountNumber} />
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>

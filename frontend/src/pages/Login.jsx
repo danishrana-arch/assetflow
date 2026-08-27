@@ -1,10 +1,11 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { Boxes, ShieldCheck, Sparkles } from "lucide-react"
 import { useAuth } from "../context/AuthContext"
 import { useTheme } from "../context/ThemeContext"
 import { TextField } from "../components/ui/Field"
 import logoFull from "../assets/logo1.png"
+import { getApiRoot } from "../api/client"
 
 export default function Login() {
   const { login } = useAuth()
@@ -17,6 +18,15 @@ export default function Login() {
   const [loading, setLoading] = useState(false)
 
   const isDark = mode === "dark"
+
+  useEffect(() => {
+    // Render/free-tier backends can sleep between requests. A tiny health
+    // request while the login form is open warms the API before credentials
+    // are submitted, reducing the apparent login delay.
+    const controller = new AbortController()
+    fetch(`${getApiRoot()}/health`, { signal: controller.signal, cache: "no-store" }).catch(() => {})
+    return () => controller.abort()
+  }, [])
 
   async function handleSubmit(e) {
     e.preventDefault()

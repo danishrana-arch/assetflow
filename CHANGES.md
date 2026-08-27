@@ -1,3 +1,133 @@
+# AssetFlow — Change Log (this round: attendance geofencing + profile redesign)
+
+Delivered as **changed files only** — copy these over the matching paths in your existing
+project. Do not re-copy a whole zip over your local edits. (Your repo already has a
+`CHANGES.md` with the full round-by-round history — this file is just this round's notes, kept
+separate so it doesn't overwrite that history.)
+
+Schema changed this round → after copying the files in, run:
+
+```
+cd backend
+npx prisma migrate dev
+```
+
+The migration file is already included at
+`backend/prisma/migrations/20260827090000_attendance_geofence_and_profile_fields/migration.sql`,
+so plain `migrate dev` will apply it and regenerate the Prisma client.
+
+---
+
+## 1. Attendance — location-based (geofenced) attendance
+
+**What it does:** when an employee marks themselves **Present**, their browser location is
+captured and checked against your configured office coordinates. If they're outside the
+allowed radius, the system automatically records them as **Absent** and flags the record so
+an admin can see exactly where they were and decide what to do. Employees who work outside
+the office (couriers, field sales, remote hires, etc.) can be marked as a **Field** employee
+on their profile — they're exempt from the geofence check entirely, but their location (if
+available) is still stored for reference.
+
+Marking yourself **Absent** never triggers a location check — only a "Present" attempt does.
+
+- **Settings → Attendance Geofence** (new card, ADMIN/CEO only): enable/disable geofencing,
+  set office latitude/longitude (there's a "Use my current location" button so you can stand
+  at the office and click it instead of typing coordinates), and set the allowed radius in
+  meters (default 200m).
+- **My Attendance page:** "Mark Present" now asks for location permission in the browser. If
+  the employee is outside the office and got auto-marked Absent, they see a clear banner
+  explaining why. If location permission is denied or unavailable, attendance is still marked
+  normally (no location check happens), so nobody gets stuck.
+- **Attendance page (admin grid):** any row that was auto-flagged shows a small "Xm away"
+  badge that links to a Google Maps pin of exactly where the employee was — click through to
+  review, then use the existing Present/Absent/Leave buttons to override the call either way
+  (overriding clears the flag, since a human has now made the decision). Field-type employees
+  show a "Field employee" tag instead.
+
+**New schema fields:**
+- `Organization`: `geofenceEnabled`, `officeLatitude`, `officeLongitude`, `geofenceRadiusMeters`
+- `AttendanceRecord`: `latitude`, `longitude`, `distanceMeters`, `autoFlagged`
+- `User`: `workLocationType` (`OFFICE` default / `FIELD`) — this is the "employee type" admins
+  can change per employee (edit it from that employee's profile page, in the Detailed
+  Information → edit form).
+
+## 2. Employee profile — redesigned layout
+
+- **Top identity bar** (new, full-width card above everything else): avatar, name,
+  designation, "Reports to <manager>", and company email on the left; the organization's name
+  as a pill on the right, colored with whatever brand color is set in Settings.
+- **"More details" is now collapsible** — Date of Birth, Joining Date, Location, CNIC, salary
+  and bank details are tucked into a closed-by-default dropdown under Detailed Information, so
+  the profile isn't a wall of fields by default. Click to expand.
+- **New fields:** Designation (separate from the existing "Skill" field), Joining Date (falls
+  back to account-creation date if not set), and the Office/Field employee type — all editable
+  by management from the same edit form as everything else.
+
+## 3. Assets tab split (Laptops / Accessories)
+
+The "Assigned Assets" card on a profile now has filter tabs — **All / Laptops / Accessories**
+— with a live count on each. An asset counts as a laptop if its category name contains
+"laptop" (case-insensitive); everything else (monitors, phones, peripherals, furniture, etc.)
+falls under Accessories. Clicking an asset still goes to its full asset page (purchase date,
+previous assignments, lifecycle timeline — that page already existed and needed no changes).
+
+## 4. "Am I using this?" self-check → routes to IT
+
+On their own profile, each assigned asset now has a small checkbox: **"I'm currently using
+this."** It's checked by default. If an employee unchecks it, a text field appears asking what
+they're actually using instead — submitting it raises a ticket (category "Asset Discrepancy")
+so IT/management sees it on the normal Tickets queue, tagged to that asset. No new inbox to
+check — it flows through the ticket system you already have.
+
+## 5. Profile view scoped by the viewer's department (lightweight)
+
+When someone other than the employee themself (and other than ADMIN/CEO, who always see
+everything) opens a profile, what's emphasized depends on the viewer's own department:
+
+- **IT** (or a department name containing "tech"): sees the Assets section in full; salary/
+  bank/personal fields are hidden from the "More details" dropdown.
+- **Finance** (or "account"): sees salary/bank details; the Assets section is hidden.
+- **HR** (or "people", or role HR): sees personal details (DOB, joining date, location, CNIC,
+  level) in "More details"; salary/bank stays hidden.
+- **A direct manager** viewing one of their reports: sees the operational picture (assets,
+  tickets, activity) without salary/bank.
+- Everyone else with management access (SALES_HEAD, other management roles) sees the full
+  profile, same as before — this doesn't take anything away that wasn't already visible to
+  management; it's a frontend display choice, not a new backend restriction, so it doesn't
+  change who's technically authorized on the API.
+
+## Files in this delivery
+
+```
+backend/prisma/schema.prisma
+backend/prisma/migrations/20260827090000_attendance_geofence_and_profile_fields/migration.sql
+backend/src/utils/geo.js                      (new)
+backend/src/controllers/attendance.controller.js
+backend/src/controllers/employee.controller.js
+backend/src/controllers/organization.controller.js
+frontend/src/pages/MyAttendance.jsx
+frontend/src/pages/Attendance.jsx
+frontend/src/pages/Settings.jsx
+frontend/src/pages/EmployeeProfile.jsx
+```
+
+All 51 frontend files and 41 backend files were re-verified end-to-end with esbuild's real
+parser after these changes (not just the ones touched) — everything compiles clean.
+
+## Notes / things to know
+
+- Geofencing is **off by default** (`geofenceEnabled = false`) — nothing changes for you until
+  you turn it on in Settings and set office coordinates.
+- The "employee type" (Office/Field) defaults to **Office** for everyone, including existing
+  employees — go set anyone who works outside the office to **Field** so they aren't affected
+  by the geofence.
+- The department-based profile scoping is intentionally simple (matched by department *name*
+  containing "IT"/"Finance"/"HR"/etc.) since there's no separate permissions table for this in
+  the schema. If your department names don't match those keywords, viewers from that
+  department just see the full profile (same as before) rather than being scoped — let me know
+  if you'd rather this be driven by an explicit department "type" field instead, that'd be a
+  clean follow-up.
+
 # AssetFlow — New Changes
 
 Apply these files on top of the previous AssetFlow Projects updates.

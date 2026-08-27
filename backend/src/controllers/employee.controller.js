@@ -127,6 +127,9 @@ const MANAGEMENT_EDITABLE_FIELDS = [
   "baseSalary",
   "bankName",
   "bankAccountNumber",
+  "designation",
+  "joiningDate",
+  "workLocationType",
 ]
 
 // Org policy: no salary below this. "further on" from here is just
@@ -161,6 +164,13 @@ async function updateEmployee(req, res, next) {
     for (const field of allowedFields) {
       if (req.body[field] === undefined) continue
       if (field === "dob") data.dob = req.body.dob ? new Date(req.body.dob) : null
+      else if (field === "joiningDate") data.joiningDate = req.body.joiningDate ? new Date(req.body.joiningDate) : null
+      else if (field === "workLocationType") {
+        if (!["OFFICE", "FIELD"].includes(req.body.workLocationType)) {
+          return res.status(400).json({ error: "workLocationType must be OFFICE or FIELD" })
+        }
+        data.workLocationType = req.body.workLocationType
+      }
       else if (field === "cnic") data.cnic = encryptField(req.body.cnic)
       else if (field === "bankAccountNumber") data.bankAccountNumber = encryptField(req.body.bankAccountNumber)
       // Enum/foreign-key fields don't accept "" as a value — an empty
@@ -197,7 +207,7 @@ async function updateEmployee(req, res, next) {
       // disbursement account) — capped at 2 so that authority stays
       // concentrated, per org policy.
       if (req.body.role === "CEO" && existing.role !== "CEO") {
-        const ceoCount = await prisma.user.count({ where: { organizationId, role: "CEO" } })
+        const ceoCount = await prisma.user.count({ where: { organization: { companyId }, role: "CEO" } })
         if (ceoCount >= MAX_CEO_COUNT) {
           return res.status(400).json({ error: `An organization can have at most ${MAX_CEO_COUNT} CEOs` })
         }
@@ -289,7 +299,7 @@ async function importEmployees(req, res, next) {
   try {
     if (!req.file) return res.status(400).json({ error: "Upload a .csv file under the 'file' field" })
 
-    const { organizationId, role: requesterRole } = req.user
+    const { organizationId, companyId, role: requesterRole } = req.user
     const text = req.file.buffer.toString("utf8").replace(/^\uFEFF/, "")
     const rows = parseCsv(text)
     if (!rows.length) return res.status(400).json({ error: "The uploaded CSV is empty" })
