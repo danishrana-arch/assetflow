@@ -18,16 +18,15 @@ export default function DashboardLayout() {
       <Topbar onMenuClick={() => setMobileOpen(true)} />
       <MobileNav open={mobileOpen} onClose={() => setMobileOpen(false)} />
 
-      {showCompanySwitcher && (
-        <div className="pointer-events-none fixed right-5 top-4 z-30 hidden lg:block">
-          <div className="pointer-events-auto rounded-2xl border border-border bg-surface/90 p-1.5 shadow-card backdrop-blur-xl">
-            <OrganizationSwitcher />
-          </div>
-        </div>
-      )}
-
       <main className="w-full px-3 py-4 sm:px-5 sm:py-6 md:px-6 lg:pl-[120px] lg:pr-8 lg:pt-7">
         <div className="mx-auto w-full max-w-[1600px] min-w-0">
+          {showCompanySwitcher && (
+            <div className="mb-5 hidden justify-end lg:flex">
+              <div className="rounded-2xl border border-border bg-surface/90 p-1.5 shadow-card backdrop-blur-xl">
+                <OrganizationSwitcher />
+              </div>
+            </div>
+          )}
           <Outlet />
         </div>
       </main>
