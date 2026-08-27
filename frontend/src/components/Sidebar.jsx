@@ -12,6 +12,7 @@ import {
   Download,
   CalendarCheck,
   CalendarDays,
+  UserCheck,
   ClipboardList,
   ShieldCheck,
   Bell,
@@ -82,11 +83,11 @@ export default function Sidebar() {
   const { mode, toggleMode } = useTheme()
 
   const isAdmin = isManagement(user?.role)
-  const isOwner = user?.role === "ADMIN"
+  const isOwner = ["ADMIN", "CEO"].includes(user?.role)
   const isDark = mode === "dark"
 
   const canManageAttendance =
-    user?.role === "ADMIN" || !!user?.canManageAttendance
+    ["ADMIN", "CEO"].includes(user?.role) || !!user?.canManageAttendance
 
   return (
     <aside
@@ -222,6 +223,13 @@ export default function Sidebar() {
                 isDark={isDark}
               />
             )}
+
+            <RailItem
+              to="/attendance/me"
+              label="My Attendance"
+              icon={UserCheck}
+              isDark={isDark}
+            />
 
             <RailItem
               to="/leave-requests"
