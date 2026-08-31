@@ -209,6 +209,13 @@ export default function Sidebar() {
             />
 
             <RailItem
+              to="/announcements"
+              label="Announcements"
+              icon={Bell}
+              isDark={isDark}
+            />
+
+            <RailItem
               to="/tickets"
               label="Tickets"
               icon={Ticket}
@@ -269,6 +276,13 @@ export default function Sidebar() {
             <RailItem
               to="/notifications"
               label="Activity"
+              icon={Bell}
+              isDark={isDark}
+            />
+
+            <RailItem
+              to="/announcements"
+              label="Announcements"
               icon={Bell}
               isDark={isDark}
             />

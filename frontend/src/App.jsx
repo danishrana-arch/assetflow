@@ -33,6 +33,7 @@ const MyPayroll = lazy(() => import("./pages/MyPayroll"))
 const Profile = lazy(() => import("./pages/Profile"))
 const Notifications = lazy(() => import("./pages/Notifications"))
 const Projects = lazy(() => import("./pages/Projects"))
+const Announcements = lazy(() => import("./pages/Announcements"))
 
 function PageFallback() {
   return (
@@ -106,6 +107,7 @@ function ProtectedShell() {
           <Route path="/reports" element={<RequireManagement><Reports /></RequireManagement>} />
           <Route path="/export" element={<RequireManagement><Export /></RequireManagement>} />
           <Route path="/notifications" element={<RequireManagement><Notifications /></RequireManagement>} />
+          <Route path="/announcements" element={<Announcements />} />
           <Route path="/settings" element={<RequireOwner><Settings /></RequireOwner>} />
           <Route path="/settings/attendance-devices" element={<RequireOwner><AttendanceDevices /></RequireOwner>} />
           <Route path="/billing" element={<Navigate to="/" replace />} />

@@ -228,7 +228,7 @@ export default function Login() {
               }
             `}
           >
-            © {new Date().getFullYear()} AssetFlow .MD
+            © {new Date().getFullYear()} AssetFlow
           </p>
         </div>
 

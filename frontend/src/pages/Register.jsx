@@ -72,7 +72,7 @@ export default function Register() {
             </p>
           </div>
 
-          <p className="text-xs text-muted-2">© {new Date().getFullYear()} AssetFlow</p>
+          <p className="text-xs text-muted-2">© {new Date().getFullYear()} AssetFlow .MD</p>
         </div>
 
         {/* Right — form */}
@@ -109,7 +109,7 @@ export default function Register() {
                 className="field"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="Jane Doe"
+                placeholder="Danish"
                 required
               />
             </div>

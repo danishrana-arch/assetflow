@@ -321,6 +321,32 @@ export default function EmployeeProfile() {
         )}
       </div>
 
+      {/* Employee 360 overview */}
+      <section className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {(() => {
+          const attendance = employee.attendanceRecords || []
+          const present = attendance.filter(a => ["PRESENT","LATE"].includes(a.status)).length
+          const attendancePct = attendance.length ? Math.round((present / attendance.length) * 100) : 0
+          const activeProjects = (employee.projectMemberships || []).filter(m => m.project?.status === "IN_PROGRESS").length
+          const completedProjects = (employee.projectMemberships || []).filter(m => m.project?.status === "COMPLETED").length
+          const year = new Date().getFullYear()
+          const leaveDays = (employee.leaveApplications || []).filter(l => new Date(l.startDate).getFullYear() === year).reduce((sum,l) => sum + Math.max(1, Math.round((new Date(l.endDate)-new Date(l.startDate))/86400000)+1),0)
+          const allowance = Number(employee.organization?.casualLeaveAllowance || 0) + Number(employee.organization?.sickLeaveAllowance || 0)
+          const remaining = Math.max(0, allowance - leaveDays)
+          return <>
+            <div className="card p-4"><p className="text-xs text-muted">Attendance</p><p className="mt-1 text-2xl font-semibold text-ink">{attendancePct}%</p><p className="text-[11px] text-muted">Last 90 records</p></div>
+            <div className="card p-4"><p className="text-xs text-muted">Leave remaining</p><p className="mt-1 text-2xl font-semibold text-ink">{remaining}</p><p className="text-[11px] text-muted">Approved days this year: {leaveDays}</p></div>
+            <div className="card p-4"><p className="text-xs text-muted">Projects</p><p className="mt-1 text-2xl font-semibold text-ink">{activeProjects}</p><p className="text-[11px] text-muted">{completedProjects} completed</p></div>
+            <div className="card p-4"><p className="text-xs text-muted">Assigned assets</p><p className="mt-1 text-2xl font-semibold text-ink">{assignedAssets.length}</p><p className="text-[11px] text-muted">Current assignments</p></div>
+          </>
+        })()}
+      </section>
+      <section className="mb-5 grid gap-4 lg:grid-cols-2">
+        <div className="card p-5"><SectionHeader title="Projects & time"/><div className="mt-3 space-y-2">{(employee.projectMemberships||[]).slice(0,6).map(m=><div key={m.id} className="flex items-center justify-between rounded-2xl bg-surface-2 p-3"><div className="min-w-0"><p className="truncate text-sm font-semibold text-ink">{m.project?.name}</p><p className="text-xs text-muted">{m.project?.status?.replaceAll("_"," ")} · {Number(m.hoursSpent||0).toFixed(1)}h</p></div>{m.project?.deadline&&<span className="text-[11px] text-muted">Due {new Date(m.project.deadline).toLocaleDateString()}</span>}</div>)}{!(employee.projectMemberships||[]).length&&<p className="text-sm text-muted">No project assignments.</p>}</div></div>
+        <div className="card p-5"><SectionHeader title="Recent payroll"/><div className="mt-3 space-y-2">{(employee.payrollRecords||[]).slice(0,5).map(p=><div key={p.id} className="flex items-center justify-between rounded-2xl bg-surface-2 p-3"><div><p className="text-sm font-semibold text-ink">{p.month}/{p.year}</p><p className="text-xs text-muted">{p.status}</p></div><span className="text-sm font-semibold text-ink">PKR {Number(p.netPay||0).toLocaleString()}</span></div>)}{!(employee.payrollRecords||[]).length&&<p className="text-sm text-muted">No payroll records.</p>}</div></div>
+      </section>
+
+      {/**/}
       {/* Contact panel + content, matching the AssetFlow contact-detail layout */}
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
         {/* LEFT — wider column: assets, tickets, activity */}

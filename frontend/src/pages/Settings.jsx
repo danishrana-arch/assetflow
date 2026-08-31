@@ -468,6 +468,12 @@ export default function Settings() {
             )}
           </div>
 
+        <div className="card p-6 lg:col-span-2">
+          <SectionHeader title="Role & permission matrix" />
+          <p className="mb-4 text-xs text-muted">Current built-in permissions for AssetFlow. Organization data remains scoped by the active organization for non-owner roles.</p>
+          <div className="overflow-x-auto rounded-2xl border border-border"><table className="w-full min-w-[760px] text-left text-xs"><thead className="bg-surface-2 text-muted"><tr><th className="px-3 py-3 font-semibold">Permission</th><th className="px-3 py-3">CEO</th><th className="px-3 py-3">ADMIN</th><th className="px-3 py-3">HR</th><th className="px-3 py-3">MANAGER</th><th className="px-3 py-3">EMPLOYEE</th></tr></thead><tbody className="divide-y divide-border">{[["Employees","All","All","All","Team","Self"],["Projects","All","All","—","Team","Assigned"],["Inventory","All","All","All","—","Assigned"],["Payroll","All","All","Review","—","Self"],["Organizations","All","All","—","—","—"],["Audit logs","All","All","—","—","—"]].map(r=><tr key={r[0]}><td className="px-3 py-3 font-semibold text-ink">{r[0]}</td>{r.slice(1).map((v,i)=><td key={i} className="px-3 py-3 text-muted">{v}</td>)}</tr>)}</tbody></table></div>
+        </div>
+
         <div className="card p-6">
           <SectionHeader title="Plan" />
           <div className="flex items-center justify-between rounded-2xl bg-surface-2 p-4">

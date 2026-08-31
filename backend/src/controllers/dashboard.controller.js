@@ -218,3 +218,127 @@ async function getRepairSpend(req, res, next) {
 }
 
 module.exports = { getStats, getRecentActivity, getLatestAssets, getInventoryActivitySeries, getRepairSpend }
+
+async function getExecutiveOverview(req, res, next) {
+  try {
+    const { organizationId, companyId, role } = req.user
+    const companyScope = ["ADMIN", "CEO"].includes(role) && String(req.query.scope || "").toLowerCase() === "company"
+    const orgWhere = companyScope ? { companyId, archivedAt: null } : { id: organizationId, archivedAt: null }
+    const organizations = await prisma.organization.findMany({
+      where: orgWhere,
+      select: { id: true, name: true, companyId: true, parentOrganizationId: true },
+      orderBy: { name: "asc" },
+    })
+    const orgIds = organizations.map((o) => o.id)
+    const today = toDateOnly(new Date())
+    const tomorrow = new Date(today)
+    tomorrow.setUTCDate(tomorrow.getUTCDate() + 1)
+
+    const [employees, presentToday, projects, assets, groupedProjects] = await Promise.all([
+      prisma.user.count({ where: { organizationId: { in: orgIds }, status: "ACTIVE" } }),
+      prisma.attendanceRecord.count({ where: { organizationId: { in: orgIds }, date: { gte: today, lt: tomorrow }, status: "PRESENT" } }),
+      prisma.project.count({ where: { organizationId: { in: orgIds } } }),
+      prisma.asset.count({ where: { organizationId: { in: orgIds } } }),
+      prisma.project.groupBy({ by: ["status"], where: { organizationId: { in: orgIds } }, _count: { _all: true } }),
+    ])
+
+    const projectStatus = { NOT_STARTED: 0, IN_PROGRESS: 0, COMPLETED: 0 }
+    groupedProjects.forEach((row) => { projectStatus[row.status] = row._count._all })
+
+    res.json({
+      scope: companyScope ? "company" : "organization",
+      organizations,
+      employees,
+      presentToday,
+      attendanceRate: employees ? Math.round((presentToday / employees) * 100) : 0,
+      projects,
+      assets,
+      projectStatus,
+    })
+  } catch (err) { next(err) }
+}
+
+async function getAttendanceAnomalies(req, res, next) {
+  try {
+    const { organizationId, companyId, role } = req.user
+    let organizationIds = [organizationId]
+    if (["ADMIN", "CEO"].includes(role) && String(req.query.scope || "").toLowerCase() === "company") {
+      organizationIds = (await prisma.organization.findMany({
+        where: { companyId, archivedAt: null }, select: { id: true },
+      })).map((o) => o.id)
+    }
+    const today = toDateOnly(new Date())
+    const tomorrow = new Date(today)
+    tomorrow.setUTCDate(tomorrow.getUTCDate() + 1)
+    const records = await prisma.attendanceRecord.findMany({
+      where: { organizationId: { in: organizationIds }, date: { gte: today, lt: tomorrow } },
+      include: { employee: { select: { id: true, name: true, email: true } } },
+    })
+    const anomalies = []
+    for (const row of records) {
+      if (row.autoFlagged || (row.distanceMeters != null && row.distanceMeters > 0)) {
+        anomalies.push({
+          type: "LOCATION", employee: row.employee,
+          message: row.autoFlagged ? "Attendance was flagged for an office-location mismatch." : `Attendance was recorded ${row.distanceMeters}m from the configured office.`,
+          distanceMeters: row.distanceMeters,
+        })
+      }
+      if (row.checkInAt && !row.checkOutAt) anomalies.push({ type: "MISSING_CHECKOUT", employee: row.employee, message: "Employee has checked in but has not checked out." })
+      if ((row.workingMinutes || 0) > 12 * 60) anomalies.push({ type: "LONG_DAY", employee: row.employee, message: `Working time is ${Math.round((row.workingMinutes / 60) * 10) / 10} hours.`, workingMinutes: row.workingMinutes })
+    }
+    res.json(anomalies.slice(0, 25))
+  } catch (err) { next(err) }
+}
+
+async function listAnnouncements(req, res, next) {
+  try {
+    const { organizationId } = req.user
+    const user = await prisma.user.findUnique({ where: { id: req.user.userId }, select: { departmentId: true } })
+    const rows = await prisma.announcement.findMany({
+      where: {
+        organizationId,
+        OR: [
+          { audienceType: "ALL" },
+          ...(user?.departmentId ? [{ audienceType: "DEPARTMENT", audienceId: user.departmentId }] : []),
+        ],
+      },
+      include: { createdBy: { select: { id: true, name: true } } },
+      orderBy: { publishedAt: "desc" }, take: 100,
+    })
+    res.json(rows)
+  } catch (err) { next(err) }
+}
+
+async function createAnnouncement(req, res, next) {
+  try {
+    const { organizationId, userId } = req.user
+    const { title, body, audienceType = "ALL", audienceId = null } = req.body
+    if (!title?.trim() || !body?.trim()) return res.status(400).json({ error: "title and body are required" })
+    if (!["ALL", "DEPARTMENT"].includes(audienceType)) return res.status(400).json({ error: "Invalid audienceType" })
+    if (audienceType === "DEPARTMENT") {
+      if (!audienceId) return res.status(400).json({ error: "audienceId is required for department announcements" })
+      const department = await prisma.department.findFirst({ where: { id: audienceId, organizationId } })
+      if (!department) return res.status(400).json({ error: "Department not found in this organization" })
+    }
+    const row = await prisma.announcement.create({
+      data: { organizationId, createdById: userId, title: title.trim(), body: body.trim(), audienceType, audienceId: audienceType === "DEPARTMENT" ? audienceId : null },
+      include: { createdBy: { select: { id: true, name: true } } },
+    })
+    res.status(201).json(row)
+  } catch (err) { next(err) }
+}
+
+async function deleteAnnouncement(req, res, next) {
+  try {
+    const { organizationId } = req.user
+    const row = await prisma.announcement.findFirst({ where: { id: req.params.id, organizationId } })
+    if (!row) return res.status(404).json({ error: "Announcement not found" })
+    await prisma.announcement.delete({ where: { id: row.id } })
+    res.status(204).send()
+  } catch (err) { next(err) }
+}
+
+module.exports = {
+  getStats, getRecentActivity, getLatestAssets, getInventoryActivitySeries, getRepairSpend,
+  getExecutiveOverview, getAttendanceAnomalies, listAnnouncements, createAnnouncement, deleteAnnouncement,
+}

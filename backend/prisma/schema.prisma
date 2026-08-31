@@ -56,12 +56,31 @@ model Organization {
   departments      Department[]
   holidays         Holiday[]
   projects         Project[]
+  announcements    Announcement[]
   tickets          Ticket[]
   users            User[]
 
   @@index([companyId])
   @@index([parentOrganizationId])
   @@index([archivedAt])
+}
+
+model Announcement {
+  id             String       @id @default(cuid())
+  organizationId String
+  createdById    String
+  title          String
+  body           String
+  audienceType   String       @default("ALL")
+  audienceId     String?
+  publishedAt    DateTime     @default(now())
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy      User         @relation("AnnouncementCreator", fields: [createdById], references: [id])
+
+  @@index([organizationId, publishedAt])
+  @@index([audienceType, audienceId])
 }
 
 model Holiday {
@@ -132,6 +151,7 @@ model User {
   payrollRecords            PayrollRecord[]           @relation("PayrollOf")
   payrollGeneratedBy        PayrollRecord[]           @relation("PayrollGeneratedBy")
   managedProjects           Project[]                 @relation("ProjectManager")
+  announcementsCreated      Announcement[]            @relation("AnnouncementCreator")
   projectMemberships        ProjectMember[]
   tickets                   Ticket[]                  @relation("TicketRaisedBy")
   department                Department?               @relation(fields: [departmentId], references: [id])

@@ -17,6 +17,7 @@ import {
   Laptop2,
   MonitorSmartphone,
   Smartphone,
+  Users, CalendarCheck, FolderKanban, Building2, AlertTriangle, Megaphone,
 } from "lucide-react"
 import {
   LineChart,
@@ -139,6 +140,22 @@ export default function Dashboard() {
   const { user } = useAuth()
   const [range, setRange] = useState(defaultRange)
 
+  const [executiveScope, setExecutiveScope] = useState("organization")
+  const { data: executive } = useQuery({
+    queryKey: ["dashboard-executive", executiveScope],
+    queryFn: () => api.get("/dashboard/executive", { params: { scope: executiveScope } }).then((r) => r.data),
+    enabled: ["ADMIN", "CEO"].includes(user?.role),
+  })
+  const { data: anomalies = [] } = useQuery({
+    queryKey: ["dashboard-attendance-anomalies"],
+    queryFn: () => api.get("/dashboard/attendance-anomalies").then((r) => r.data),
+    enabled: ["ADMIN", "CEO"].includes(user?.role),
+  })
+  const { data: announcements = [] } = useQuery({
+    queryKey: ["announcements"],
+    queryFn: () => api.get("/dashboard/announcements").then((r) => r.data),
+  })
+
   const { data: stats } = useQuery({
     queryKey: ["dashboard-stats"],
     queryFn: () => api.get("/dashboard/stats").then((r) => r.data),
@@ -251,6 +268,18 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-5">
+      {["ADMIN", "CEO"].includes(user?.role) && executive && (
+        <section className="card overflow-hidden p-5 sm:p-6">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div><p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted">Executive overview</p><h2 className="mt-1 text-2xl font-semibold text-ink">Good morning, {user?.name?.split(" ")[0] || "there"}</h2><p className="mt-1 text-sm text-muted">{executiveScope === "company" ? `${executive.mainCompany?.name || "Main Company"} · all organizations` : `${executive.organization?.name || "Current organization"} · selected organization`}</p></div>
+            <div className="flex items-center gap-2"><select value={executiveScope} onChange={e=>setExecutiveScope(e.target.value)} className="field min-w-[180px] text-xs font-semibold"><option value="organization">Current organization</option><option value="company">All organizations</option></select></div>
+          </div>
+          <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            {[{label:"Employees",value:executive.metrics.employees,icon:Users},{label:"Present today",value:executive.metrics.present,icon:CalendarCheck},{label:"Projects",value:executive.metrics.projects,icon:FolderKanban},{label:"Assets",value:executive.metrics.assets,icon:Package}].map(x=><div key={x.label} className="rounded-2xl bg-surface-2 p-4"><x.icon size={17} className="text-muted"/><p className="mt-3 text-2xl font-semibold text-ink">{x.value}</p><p className="text-xs text-muted">{x.label}</p></div>)}
+          </div>
+          <div className="mt-5 grid gap-4 lg:grid-cols-2"><div className="rounded-2xl border border-border p-4"><div className="flex items-center justify-between"><p className="text-sm font-semibold text-ink">Project status</p><Link to="/projects" className="text-xs font-semibold text-accent">View projects</Link></div><div className="mt-4 grid grid-cols-3 gap-2 text-center"><div><p className="text-xl font-semibold text-ink">{executive.projects.notStarted}</p><p className="text-[11px] text-muted">Not started</p></div><div><p className="text-xl font-semibold text-ink">{executive.projects.inProgress}</p><p className="text-[11px] text-muted">In progress</p></div><div><p className="text-xl font-semibold text-ink">{executive.projects.completed}</p><p className="text-[11px] text-muted">Completed</p></div></div></div><div className="rounded-2xl border border-border p-4"><p className="text-sm font-semibold text-ink">Attendance watch</p><div className="mt-3 flex flex-wrap gap-2"><span className="rounded-full bg-chip-yellow-bg px-3 py-1.5 text-xs font-semibold text-chip-yellow-fg">{executive.metrics.late} late today</span><span className="rounded-full bg-chip-pink-bg px-3 py-1.5 text-xs font-semibold text-chip-pink-fg">{executive.metrics.missingCheckout} missing check-out</span></div></div></div>
+        </section>
+      )}
       <section className="grid gap-4 lg:grid-cols-[minmax(260px,1fr)_repeat(3,minmax(0,1fr))]">
         <div className="flex flex-col justify-center px-2 sm:px-4">
           <h1
@@ -639,6 +668,13 @@ export default function Dashboard() {
           </ul>
         </div>
       </section>
+
+      {["ADMIN", "CEO"].includes(user?.role) && (anomalies.length > 0 || announcements.length > 0) && (
+        <section className="grid gap-4 lg:grid-cols-2">
+          <div className="card p-5"><SectionHeader title="Attendance anomalies" action={<Link to="/attendance" className="text-xs font-semibold text-accent">Open attendance</Link>} /><div className="mt-3 space-y-2">{anomalies.slice(0,4).map(a=><div key={a.id} className="flex items-start gap-3 rounded-2xl bg-surface-2 p-3"><IconChip icon={AlertTriangle} tone="orange" size="sm"/><div className="min-w-0"><p className="text-sm font-semibold text-ink">{a.employee?.name}</p><p className="text-xs text-muted">{a.reasons.join(" · ")}</p></div></div>)}</div></div>
+          <div className="card p-5"><SectionHeader title="Latest announcements" action={<Link to="/announcements" className="text-xs font-semibold text-accent">View all</Link>} /><div className="mt-3 space-y-2">{announcements.slice(0,4).map(a=><div key={a.id} className="rounded-2xl bg-surface-2 p-3"><div className="flex items-center gap-2"><Megaphone size={14} className="text-muted"/><p className="truncate text-sm font-semibold text-ink">{a.title}</p></div><p className="mt-1 line-clamp-2 text-xs text-muted">{a.body}</p></div>)}</div></div>
+        </section>
+      )}
 
       <div
         className="mt-8 overflow-hidden rounded-card"
