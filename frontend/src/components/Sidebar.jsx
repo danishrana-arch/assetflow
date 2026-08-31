@@ -16,6 +16,7 @@ import {
   ClipboardList,
   ShieldCheck,
   Bell,
+  Activity,
   Settings as SettingsIcon,
   Wallet,
   Sun,
@@ -39,8 +40,8 @@ function RailItem({ to, label, icon: Icon, end, isDark }) {
           isActive
             ? "text-[var(--on-primary-container)]"
             : isDark
-          ? "text-black/55 hover:bg-black/10 hover:text-black"
-          : "text-white/60 hover:bg-white/10 hover:text-white"
+              ? "text-black/55 hover:bg-black/10 hover:text-black"
+              : "text-white/60 hover:bg-white/10 hover:text-white"
         }`
       }
       style={({ isActive }) =>
@@ -122,7 +123,6 @@ export default function Sidebar() {
           : "0 8px 32px rgba(0,0,0,0.18), inset 0 1px 1px rgba(255,255,255,0.12)",
       }}
     >
-
       <div
         className={`
           mb-4
@@ -208,6 +208,7 @@ export default function Sidebar() {
               isDark={isDark}
             />
 
+            {/* Announcements */}
             <RailItem
               to="/announcements"
               label="Announcements"
@@ -273,17 +274,11 @@ export default function Sidebar() {
               isDark={isDark}
             />
 
+            {/* Activity - different icon from Announcements */}
             <RailItem
               to="/notifications"
               label="Activity"
-              icon={Bell}
-              isDark={isDark}
-            />
-
-            <RailItem
-              to="/announcements"
-              label="Announcements"
-              icon={Bell}
+              icon={Activity}
               isDark={isDark}
             />
 
@@ -302,7 +297,6 @@ export default function Sidebar() {
               icon={Wallet}
               isDark={isDark}
             />
-
           </>
         ) : (
           <>
