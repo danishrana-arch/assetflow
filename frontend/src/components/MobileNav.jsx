@@ -72,6 +72,7 @@ export default function MobileNav({ open, onClose }) {
               <Row to="/projects" icon={FolderKanban} label="Projects" onClick={onClose} />
               <Row to="/asset-requests" icon={PackageSearch} label="Asset Requests" onClick={onClose} />
               <Row to="/departments" icon={Building2} label="Departments" onClick={onClose} />
+              <Row to="/announcements" icon={Bell} label="Announcements" onClick={onClose} />
               <Row to="/tickets" icon={Ticket} label="Requests / Tickets" onClick={onClose} />
               {(["ADMIN", "CEO"].includes(user?.role) || user?.canManageAttendance) && (
                 <Row to="/attendance" icon={CalendarCheck} label="Attendance" onClick={onClose} />
@@ -95,6 +96,7 @@ export default function MobileNav({ open, onClose }) {
               <Row to="/projects" icon={FolderKanban} label="My Projects" onClick={onClose} />
               <Row to="/attendance/me" icon={CalendarCheck} label="My Attendance" onClick={onClose} />
               <Row to="/payroll/me" icon={Wallet} label="My Payslips" onClick={onClose} />
+              <Row to="/announcements" icon={Bell} label="Announcements" onClick={onClose} />
               <Row to="/tickets" icon={Ticket} label="Tickets" onClick={onClose} />
             </>
           )}
