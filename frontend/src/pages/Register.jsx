@@ -109,7 +109,7 @@ export default function Register() {
                 className="field"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="Muhammad Danish"
+                placeholder="Jane Doe"
                 required
               />
             </div>
