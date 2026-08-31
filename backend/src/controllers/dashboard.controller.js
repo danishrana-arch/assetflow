@@ -234,26 +234,46 @@ async function getExecutiveOverview(req, res, next) {
     const tomorrow = new Date(today)
     tomorrow.setUTCDate(tomorrow.getUTCDate() + 1)
 
-    const [employees, presentToday, projects, assets, groupedProjects] = await Promise.all([
-      prisma.user.count({ where: { organizationId: { in: orgIds }, status: "ACTIVE" } }),
-      prisma.attendanceRecord.count({ where: { organizationId: { in: orgIds }, date: { gte: today, lt: tomorrow }, status: "PRESENT" } }),
-      prisma.project.count({ where: { organizationId: { in: orgIds } } }),
-      prisma.asset.count({ where: { organizationId: { in: orgIds } } }),
-      prisma.project.groupBy({ by: ["status"], where: { organizationId: { in: orgIds } }, _count: { _all: true } }),
-    ])
+    const [employees, presentToday, lateToday, missingCheckout, projects, assets, groupedProjects, mainCompany, currentOrganization] =
+      await Promise.all([
+        prisma.user.count({ where: { organizationId: { in: orgIds }, status: "ACTIVE" } }),
+        prisma.attendanceRecord.count({ where: { organizationId: { in: orgIds }, date: { gte: today, lt: tomorrow }, status: "PRESENT" } }),
+        prisma.attendanceRecord.count({ where: { organizationId: { in: orgIds }, date: { gte: today, lt: tomorrow }, status: "LATE" } }),
+        prisma.attendanceRecord.count({
+          where: { organizationId: { in: orgIds }, date: { gte: today, lt: tomorrow }, checkInAt: { not: null }, checkOutAt: null },
+        }),
+        prisma.project.count({ where: { organizationId: { in: orgIds } } }),
+        prisma.asset.count({ where: { organizationId: { in: orgIds } } }),
+        prisma.project.groupBy({ by: ["status"], where: { organizationId: { in: orgIds } }, _count: { _all: true } }),
+        prisma.organization.findUnique({ where: { id: companyId }, select: { name: true } }),
+        prisma.organization.findUnique({ where: { id: organizationId }, select: { name: true } }),
+      ])
 
     const projectStatus = { NOT_STARTED: 0, IN_PROGRESS: 0, COMPLETED: 0 }
     groupedProjects.forEach((row) => { projectStatus[row.status] = row._count._all })
 
+    // Shape matches what the Dashboard's executive-overview card reads:
+    // metrics.* for the stat tiles, projects.* for the status breakdown,
+    // mainCompany/organization for the header subtitle.
     res.json({
       scope: companyScope ? "company" : "organization",
       organizations,
-      employees,
-      presentToday,
+      mainCompany,
+      organization: currentOrganization,
+      metrics: {
+        employees,
+        present: presentToday,
+        projects,
+        assets,
+        late: lateToday,
+        missingCheckout,
+      },
       attendanceRate: employees ? Math.round((presentToday / employees) * 100) : 0,
-      projects,
-      assets,
-      projectStatus,
+      projects: {
+        notStarted: projectStatus.NOT_STARTED,
+        inProgress: projectStatus.IN_PROGRESS,
+        completed: projectStatus.COMPLETED,
+      },
     })
   } catch (err) { next(err) }
 }
