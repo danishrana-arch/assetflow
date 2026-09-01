@@ -275,9 +275,9 @@ export default function Dashboard() {
             <div className="flex items-center gap-2"><select value={executiveScope} onChange={e=>setExecutiveScope(e.target.value)} className="field min-w-[180px] text-xs font-semibold"><option value="organization">Current organization</option><option value="company">All organizations</option></select></div>
           </div>
           <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            {[{label:"Employees",value:executive.metrics?.employees ?? 0,icon:Users},{label:"Present today",value:executive.metrics?.present ?? 0,icon:CalendarCheck},{label:"Projects",value:executive.metrics?.projects ?? 0,icon:FolderKanban},{label:"Assets",value:executive.metrics?.assets ?? 0,icon:Package}].map(x=><div key={x.label} className="rounded-2xl bg-surface-2 p-4"><x.icon size={17} className="text-muted"/><p className="mt-3 text-2xl font-semibold text-ink">{x.value}</p><p className="text-xs text-muted">{x.label}</p></div>)}
+            {[{label:"Employees",value:executive.metrics.employees,icon:Users},{label:"Present today",value:executive.metrics.present,icon:CalendarCheck},{label:"Projects",value:executive.metrics.projects,icon:FolderKanban},{label:"Assets",value:executive.metrics.assets,icon:Package}].map(x=><div key={x.label} className="rounded-2xl bg-surface-2 p-4"><x.icon size={17} className="text-muted"/><p className="mt-3 text-2xl font-semibold text-ink">{x.value}</p><p className="text-xs text-muted">{x.label}</p></div>)}
           </div>
-          <div className="mt-5 grid gap-4 lg:grid-cols-2"><div className="rounded-2xl border border-border p-4"><div className="flex items-center justify-between"><p className="text-sm font-semibold text-ink">Project status</p><Link to="/projects" className="text-xs font-semibold text-accent">View projects</Link></div><div className="mt-4 grid grid-cols-3 gap-2 text-center"><div><p className="text-xl font-semibold text-ink">{executive.projects?.notStarted ?? 0}</p><p className="text-[11px] text-muted">Not started</p></div><div><p className="text-xl font-semibold text-ink">{executive.projects?.inProgress ?? 0}</p><p className="text-[11px] text-muted">In progress</p></div><div><p className="text-xl font-semibold text-ink">{executive.projects?.completed ?? 0}</p><p className="text-[11px] text-muted">Completed</p></div></div></div><div className="rounded-2xl border border-border p-4"><p className="text-sm font-semibold text-ink">Attendance watch</p><div className="mt-3 flex flex-wrap gap-2"><span className="rounded-full bg-chip-yellow-bg px-3 py-1.5 text-xs font-semibold text-chip-yellow-fg">{executive.metrics?.late ?? 0} late today</span><span className="rounded-full bg-chip-pink-bg px-3 py-1.5 text-xs font-semibold text-chip-pink-fg">{executive.metrics?.missingCheckout ?? 0} missing check-out</span></div></div></div>
+          <div className="mt-5 grid gap-4 lg:grid-cols-2"><div className="rounded-2xl border border-border p-4"><div className="flex items-center justify-between"><p className="text-sm font-semibold text-ink">Project status</p><Link to="/projects" className="text-xs font-semibold text-accent">View projects</Link></div><div className="mt-4 grid grid-cols-3 gap-2 text-center"><div><p className="text-xl font-semibold text-ink">{executive.projects.notStarted}</p><p className="text-[11px] text-muted">Not started</p></div><div><p className="text-xl font-semibold text-ink">{executive.projects.inProgress}</p><p className="text-[11px] text-muted">In progress</p></div><div><p className="text-xl font-semibold text-ink">{executive.projects.completed}</p><p className="text-[11px] text-muted">Completed</p></div></div></div><div className="rounded-2xl border border-border p-4"><p className="text-sm font-semibold text-ink">Attendance watch</p><div className="mt-3 flex flex-wrap gap-2"><span className="rounded-full bg-chip-yellow-bg px-3 py-1.5 text-xs font-semibold text-chip-yellow-fg">{executive.metrics.late} late today</span><span className="rounded-full bg-chip-pink-bg px-3 py-1.5 text-xs font-semibold text-chip-pink-fg">{executive.metrics.missingCheckout} missing check-out</span></div></div></div>
         </section>
       )}
       <section className="grid gap-4 lg:grid-cols-[minmax(260px,1fr)_repeat(3,minmax(0,1fr))]">
@@ -677,10 +677,18 @@ export default function Dashboard() {
       )}
 
       <div
-        className="mt-8 overflow-hidden rounded-card"
-        style={{ backgroundColor: "var(--ink-strong)" }}
+        className="mt-8 w-full overflow-hidden rounded-[26px] border border-black/5 shadow-[0_18px_50px_rgba(0,0,0,0.10)] dark:border-white/5"
+        style={{ backgroundColor: "#050629" }}
       >
-        <ParticleText text="ASSETFLOW" />
+        <div className="h-[155px] w-full sm:h-[180px] lg:h-[200px]">
+          <ParticleText
+            text="ASSETFLOW"
+            height={200}
+            repelRadius={155}
+            repelStrength={210}
+            ease={0.065}
+          />
+        </div>
       </div>
     </div>
   )
