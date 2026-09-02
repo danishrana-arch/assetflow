@@ -1,4 +1,4 @@
-export const MANAGEMENT_ROLES = ["ADMIN", "CEO", "SALES_HEAD", "HR", "MANAGEMENT", "Dept-Head"]
+export const MANAGEMENT_ROLES = ["ADMIN", "CEO", "SALES_HEAD", "HR", "MANAGEMENT", "DEPARTMENT_HEAD"]
 
 export const ROLE_LABELS = {
   ADMIN: "Owner / Admin",
@@ -7,7 +7,7 @@ export const ROLE_LABELS = {
   HR: "HR",
   MANAGEMENT: "Management",
   EMPLOYEE: "Employee",
-  "Dept-Head": "Department Head",
+  DEPARTMENT_HEAD: "Department Head",
 }
 
 export function isManagement(role) {

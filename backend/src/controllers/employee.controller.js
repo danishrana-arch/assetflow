@@ -38,7 +38,7 @@ async function listEmployees(req, res, next) {
         prisma.user.count({ where }),
         prisma.user.findMany({
           where,
-          include: { department: true, assignedAssets: true },
+          include: { department: true, manager: true, assignedAssets: true },
           orderBy: { name: "asc" },
           skip: (pageNum - 1) * size,
           take: size,
@@ -58,7 +58,7 @@ async function listEmployees(req, res, next) {
 
     const employees = await prisma.user.findMany({
       where,
-      include: { department: true, assignedAssets: true },
+      include: { department: true, manager: true, assignedAssets: true },
       orderBy: { name: "asc" },
     })
 
@@ -184,6 +184,19 @@ async function updateEmployee(req, res, next) {
         }
         data.baseSalary = n
       } else data[field] = req.body[field]
+    }
+
+    if (data.managerId !== undefined) {
+      if (data.managerId === id) {
+        return res.status(400).json({ error: "An employee cannot report to themselves" })
+      }
+      if (data.managerId) {
+        const manager = await prisma.user.findFirst({
+          where: { id: data.managerId, organizationId, status: { not: "LEFT_COMPANY" } },
+          select: { id: true },
+        })
+        if (!manager) return res.status(400).json({ error: "Reporting manager must belong to this organization" })
+      }
     }
 
     if (data.email !== undefined) {

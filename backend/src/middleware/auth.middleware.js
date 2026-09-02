@@ -41,7 +41,34 @@ async function requireAuth(req, res, next) {
 
   try {
     const decoded = verifyToken(token)
-    req.user = decoded
+
+    // Refresh authorization-critical identity from the database on every
+    // request. The JWT still authenticates the session, but role/company/org
+    // changes made by an ADMIN/CEO take effect immediately instead of leaving
+    // a stale role in the browser until the token expires.
+    const dbUser = await prisma.user.findUnique({
+      where: { id: decoded.userId },
+      select: {
+        id: true,
+        organizationId: true,
+        role: true,
+        status: true,
+        organization: { select: { companyId: true, archivedAt: true } },
+      },
+    })
+
+    if (!dbUser || dbUser.status === "LEFT_COMPANY" || dbUser.organization?.archivedAt) {
+      return res.status(401).json({ error: "Your account or organization is no longer active" })
+    }
+
+    req.user = {
+      ...decoded,
+      userId: dbUser.id,
+      organizationId: dbUser.organizationId,
+      companyId: dbUser.organization?.companyId || decoded.companyId,
+      role: dbUser.role,
+    }
+
     await applyOrganizationScope(req)
     next()
   } catch (err) {

@@ -13,36 +13,34 @@ export default function StatCard({
 }) {
   const tones = {
     blue: {
-      iconBg: "#DCE7FF",
-      iconColor: "#0058BE",
+      iconBg: "bg-[#DCE7FF] dark:bg-[#18345F]",
+      iconColor: "text-[#0058BE] dark:text-[#6FA8FF]",
     },
 
     purple: {
-      iconBg: "#EEE5FF",
-      iconColor: "#7047C8",
+      iconBg: "bg-[#EEE5FF] dark:bg-[#34245A]",
+      iconColor: "text-[#7047C8] dark:text-[#B08AFF]",
     },
 
     cyan: {
-      iconBg: "#DDF5F4",
-      iconColor: "#147F7A",
+      iconBg: "bg-[#DDF5F4] dark:bg-[#163F3D]",
+      iconColor: "text-[#147F7A] dark:text-[#5FD1C9]",
     },
 
     green: {
-      iconBg: "#DFF5E7",
-      iconColor: "#24804B",
+      iconBg: "bg-[#DFF5E7] dark:bg-[#193B28]",
+      iconColor: "text-[#24804B] dark:text-[#65D394]",
     },
 
     orange: {
-      iconBg: "#FFF0D7",
-      iconColor: "#C77B00",
+      iconBg: "bg-[#FFF0D7] dark:bg-[#4A3517]",
+      iconColor: "text-[#C77B00] dark:text-[#FFBD55]",
     },
   }
 
-  const currentTone =
-    tones[tone] || tones.blue
+  const currentTone = tones[tone] || tones.blue
 
-  const isDown =
-    trend?.direction === "down"
+  const isDown = trend?.direction === "down"
 
   return (
     <div
@@ -55,24 +53,35 @@ export default function StatCard({
         border
         border-black/[0.035]
         bg-white
+        shadow-[0_8px_28px_rgba(30,50,40,0.055)]
+
+        dark:border-white/[0.06]
+        dark:bg-[#1B2421]
+        dark:shadow-[0_8px_28px_rgba(0,0,0,0.20)]
+
         px-5
         py-5
-        shadow-[0_8px_28px_rgba(30,50,40,0.055)]
+
         transition-all
         duration-200
+
         hover:-translate-y-[1px]
         hover:shadow-[0_12px_34px_rgba(30,50,40,0.08)]
+
+        dark:hover:shadow-[0_12px_34px_rgba(0,0,0,0.28)]
+
         sm:h-[154px]
         sm:px-5
         sm:py-5
+
         lg:h-[158px]
         lg:px-6
       "
     >
 
-      {/* ==================================================
-          BOTTOM DECORATIVE WAVE
-      ================================================== */}
+      {/* =====================================================
+          DECORATIVE BOTTOM WAVE
+      ====================================================== */}
 
       <div
         className="
@@ -106,7 +115,10 @@ export default function StatCard({
               L0 90
               Z
             "
-            fill="#F1F0EC"
+            className="
+              fill-[#F1F0EC]
+              dark:fill-[#202A27]
+            "
             opacity="0.8"
           />
 
@@ -120,20 +132,23 @@ export default function StatCard({
               L0 90
               Z
             "
-            fill="#E8E7E2"
+            className="
+              fill-[#E8E7E2]
+              dark:fill-[#26302D]
+            "
             opacity="0.42"
           />
         </svg>
       </div>
 
 
-      {/* ==================================================
+      {/* =====================================================
           CONTENT
-      ================================================== */}
+      ====================================================== */}
 
       <div className="relative z-10 flex h-full flex-col">
 
-        {/* TOP ROW */}
+        {/* TOP */}
         <div className="flex items-start justify-between gap-3">
 
           <p
@@ -145,6 +160,9 @@ export default function StatCard({
               font-medium
               leading-5
               text-[#454B4A]
+
+              dark:text-[#D5DDD9]
+
               sm:text-[13px]
             "
           >
@@ -154,7 +172,7 @@ export default function StatCard({
 
           {/* ICON */}
           <div
-            className="
+            className={`
               flex
               h-11
               w-11
@@ -162,20 +180,14 @@ export default function StatCard({
               items-center
               justify-center
               rounded-full
-            "
-            style={{
-              backgroundColor:
-                currentTone.iconBg,
-            }}
+              ${currentTone.iconBg}
+            `}
           >
             {Icon && (
               <Icon
                 size={20}
                 strokeWidth={1.8}
-                style={{
-                  color:
-                    currentTone.iconColor,
-                }}
+                className={currentTone.iconColor}
               />
             )}
           </div>
@@ -183,14 +195,13 @@ export default function StatCard({
         </div>
 
 
-        {/* VALUE + TREND */}
+        {/* VALUE */}
         <div
           className="
             mt-auto
             flex
             items-baseline
             gap-2
-            pb-0
           "
         >
 
@@ -201,6 +212,9 @@ export default function StatCard({
               leading-none
               tracking-[-0.035em]
               text-[#202322]
+
+              dark:text-[#F1F4F2]
+
               sm:text-[32px]
             "
           >
@@ -217,10 +231,11 @@ export default function StatCard({
                 text-[11px]
                 font-semibold
                 leading-none
+
                 ${
                   isDown
-                    ? "text-[#E5484D]"
-                    : "text-[#237A43]"
+                    ? "text-[#E5484D] dark:text-[#FF7277]"
+                    : "text-[#237A43] dark:text-[#65C987]"
                 }
               `}
             >
@@ -243,7 +258,7 @@ export default function StatCard({
         </div>
 
 
-        {/* SUBLABEL */}
+        {/* SUBTITLE */}
         <p
           className="
             relative
@@ -253,6 +268,9 @@ export default function StatCard({
             text-[11px]
             leading-4
             text-[#6B7370]
+
+            dark:text-[#9DA9A5]
+
             sm:text-xs
           "
         >

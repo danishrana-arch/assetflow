@@ -447,6 +447,8 @@ enum UserRole {
   CEO
   SALES_HEAD
   HR
+  MANAGEMENT
+  DEPARTMENT_HEAD
 }
 
 enum LeaveStatus {

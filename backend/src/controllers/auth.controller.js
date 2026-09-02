@@ -144,6 +144,7 @@ async function inviteEmployee(req, res, next) {
       name,
       email,
       departmentId,
+      managerId,
       phone,
       cnic,
       dob,
@@ -175,6 +176,14 @@ async function inviteEmployee(req, res, next) {
       assignedRole = role
     }
 
+    if (managerId) {
+      const manager = await prisma.user.findFirst({
+        where: { id: managerId, organizationId, status: { not: "LEFT_COMPANY" } },
+        select: { id: true },
+      })
+      if (!manager) return res.status(400).json({ error: "Reporting manager must belong to this organization" })
+    }
+
     const tempPassword = Math.random().toString(36).slice(2, 10)
     const hashed = await bcrypt.hash(tempPassword, 10)
 
@@ -185,6 +194,7 @@ async function inviteEmployee(req, res, next) {
         email,
         password: hashed,
         departmentId: departmentId || null,
+        managerId: managerId || null,
         role: assignedRole,
         phone: phone || null,
         cnic: encryptField(cnic || null),

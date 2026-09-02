@@ -46,7 +46,7 @@ async function listProjects(req, res, next) {
   try {
     const { organizationId, userId, role } = req.user
     const { status, search } = req.query
-    const management = ["ADMIN", "CEO", "SALES_HEAD", "HR", "MANAGEMENT", "Dept-Head"].includes(role)
+    const management = ["ADMIN", "CEO", "SALES_HEAD", "HR", "MANAGEMENT", "DEPARTMENT_HEAD"].includes(role)
     const where = management
       ? { organizationId }
       : { organizationId, members: { some: { employeeId: userId } } }
@@ -69,7 +69,7 @@ async function listProjects(req, res, next) {
 
 async function getProject(req, res, next) {
   try {
-    const management = ["ADMIN", "CEO", "SALES_HEAD", "HR", "MANAGEMENT", "Dept-Head"].includes(req.user.role)
+    const management = ["ADMIN", "CEO", "SALES_HEAD", "HR", "MANAGEMENT", "DEPARTMENT_HEAD"].includes(req.user.role)
     const project = await prisma.project.findFirst({
       where: {
         id: req.params.id,

@@ -1,6 +1,6 @@
-const MANAGEMENT_ROLES = ["ADMIN", "CEO", "SALES_HEAD", "HR", "MANAGEMENT", "Dept-Head"]
+const MANAGEMENT_ROLES = ["ADMIN", "CEO", "SALES_HEAD", "HR", "MANAGEMENT", "DEPARTMENT_HEAD"]
 
-const ASSIGNABLE_ROLES = ["ADMIN", "CEO", "SALES_HEAD", "HR", "MANAGEMENT", "EMPLOYEE", "Dept-Head"]
+const ASSIGNABLE_ROLES = ["ADMIN", "CEO", "SALES_HEAD", "HR", "MANAGEMENT", "EMPLOYEE", "DEPARTMENT_HEAD"]
 
 // The CEO is the top authority (org settings, payroll approval/payout,
 // the disbursement bank account) — capped at 2 per org so that authority

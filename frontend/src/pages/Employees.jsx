@@ -20,6 +20,7 @@ const emptyForm = {
   password: "",
   role: "EMPLOYEE",
   departmentId: "",
+  managerId: "",
   phone: "",
   cnic: "",
   dob: "",
@@ -76,6 +77,11 @@ export default function Employees() {
     placeholderData: keepPreviousData,
   })
   const employees = data?.data || []
+  const { data: managerCandidates = [] } = useQuery({
+    queryKey: ["employees", "manager-candidates"],
+    queryFn: () => api.get("/employees").then((r) => r.data),
+    enabled: canManageEmployees && showForm,
+  })
   const { data: departments } = useQuery({
     queryKey: ["departments"],
     queryFn: () => api.get("/departments").then((r) => r.data),
@@ -103,6 +109,7 @@ export default function Employees() {
         password: form.password || undefined,
         role: canManageEmployees ? form.role : undefined,
         departmentId: form.departmentId || undefined,
+        managerId: form.managerId || undefined,
         seniorityLevel: form.seniorityLevel || undefined,
       }),
     onSuccess: (res) => {
@@ -299,6 +306,14 @@ export default function Employees() {
             <SelectField label="Department" value={form.departmentId} onChange={(e) => updateField("departmentId", e.target.value)}>
               <option value="">None</option>
               {(departments || []).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+            </SelectField>
+            <SelectField label="Reporting Manager" value={form.managerId} onChange={(e) => updateField("managerId", e.target.value)}>
+              <option value="">None</option>
+              {(managerCandidates || []).map((manager) => (
+                <option key={manager.id} value={manager.id}>
+                  {manager.name}{manager.role ? ` — ${ROLE_LABELS[manager.role] || manager.role}` : ""}
+                </option>
+              ))}
             </SelectField>
             <TextField label="Phone" value={form.phone} onChange={(e) => updateField("phone", e.target.value)} />
             <TextField label="CNIC" value={form.cnic} onChange={(e) => updateField("cnic", e.target.value)} placeholder="XXXXX-XXXXXXX-X" hint="Stored encrypted" />

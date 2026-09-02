@@ -8,7 +8,7 @@ import {
 } from "lucide-react"
 import api from "../api/client"
 import { useAuth } from "../context/AuthContext"
-import { isManagement } from "../utils/roles"
+import { isManagement, ROLE_LABELS, MANAGEMENT_ROLES } from "../utils/roles"
 import StatusBadge from "../components/StatusBadge"
 import StatusPill from "../components/ui/StatusPill"
 import PageHeader from "../components/ui/PageHeader"
@@ -94,6 +94,12 @@ export default function EmployeeProfile() {
   const { data: departments } = useQuery({
     queryKey: ["departments"],
     queryFn: () => api.get("/departments").then((r) => r.data),
+    enabled: canEditFully,
+  })
+
+  const { data: managerCandidates = [] } = useQuery({
+    queryKey: ["employees", "manager-candidates"],
+    queryFn: () => api.get("/employees").then((r) => r.data),
     enabled: canEditFully,
   })
 
@@ -202,6 +208,8 @@ export default function EmployeeProfile() {
       email: employee.email || "",
       phone: employee.phone || "",
       departmentId: employee.department?.id || "",
+      managerId: employee.manager?.id || "",
+      role: employee.role || "EMPLOYEE",
       status: employee.status || "ACTIVE",
       cnic: employee.cnic || "",
       dob: employee.dob ? employee.dob.slice(0, 10) : "",
@@ -706,10 +714,27 @@ export default function EmployeeProfile() {
               <TextField label="Phone" value={editForm.phone} onChange={(e) => setEditForm((f) => ({ ...f, phone: e.target.value }))} />
               {canEditFully && (
                 <>
+                  {(user?.role === "ADMIN" || user?.role === "CEO") && (
+                    <SelectField label="Role" value={editForm.role} onChange={(e) => setEditForm((f) => ({ ...f, role: e.target.value }))}>
+                      {Object.entries(ROLE_LABELS)
+                        .filter(([value]) => value !== "CEO" || employee?.role === "CEO" || (employee?.role !== "CEO" && managerCandidates.filter((m) => m.role === "CEO").length < 2))
+                        .map(([value, label]) => (
+                          <option key={value} value={value}>{label}</option>
+                        ))}
+                    </SelectField>
+                  )}
                   <TextField label="Designation / Title" value={editForm.designation} onChange={(e) => setEditForm((f) => ({ ...f, designation: e.target.value }))} placeholder="e.g. Senior Backend Engineer" />
                   <SelectField label="Department" value={editForm.departmentId} onChange={(e) => setEditForm((f) => ({ ...f, departmentId: e.target.value }))}>
                     <option value="">None</option>
                     {(departments || []).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                  </SelectField>
+                  <SelectField label="Reporting Manager" value={editForm.managerId} onChange={(e) => setEditForm((f) => ({ ...f, managerId: e.target.value }))}>
+                    <option value="">None</option>
+                    {(managerCandidates || []).filter((manager) => manager.id !== employee?.id).map((manager) => (
+                      <option key={manager.id} value={manager.id}>
+                        {manager.name}{manager.role ? ` — ${ROLE_LABELS[manager.role] || manager.role}` : ""}
+                      </option>
+                    ))}
                   </SelectField>
                   <SelectField label="Status" value={editForm.status} onChange={(e) => setEditForm((f) => ({ ...f, status: e.target.value }))}>
                     <option value="ACTIVE">Active</option>

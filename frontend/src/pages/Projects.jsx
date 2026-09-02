@@ -332,7 +332,7 @@ export default function Projects() {
   const [selected, setSelected] = useState(null)
   const [expired, setExpired] = useState(null)
   const [createOpen, setCreateOpen] = useState(false)
-  const isManagement = ["ADMIN", "CEO", "SALES_HEAD", "HR", "MANAGEMENT", "Dept-Head"].includes(user?.role)
+  const isManagement = ["ADMIN", "CEO", "SALES_HEAD", "HR", "MANAGEMENT", "DEPARTMENT_HEAD"].includes(user?.role)
 
   const { data: projects = [], isLoading } = useQuery({
     queryKey: ["projects", activeStatus, search],
