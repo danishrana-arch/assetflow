@@ -45,7 +45,10 @@ async function getRecentActivity(req, res, next) {
 
     const events = await prisma.lifecycleEvent.findMany({
       where: { asset: { organizationId } },
-      include: { asset: true, actor: true },
+      include: {
+        asset: true,
+        actor: { select: { id: true, name: true, email: true, role: true } },
+      },
       orderBy: { occurredAt: "desc" },
       take: 15,
     })
@@ -61,7 +64,9 @@ async function getLatestAssets(req, res, next) {
     const { organizationId } = req.user
     const assets = await prisma.asset.findMany({
       where: { organizationId },
-      include: { assignedTo: true },
+      include: {
+        assignedTo: { select: { id: true, name: true, email: true, role: true } },
+      },
       orderBy: { createdAt: "desc" },
       take: 8,
     })
@@ -234,32 +239,44 @@ async function getExecutiveOverview(req, res, next) {
     const tomorrow = new Date(today)
     tomorrow.setUTCDate(tomorrow.getUTCDate() + 1)
 
-    const [employees, presentToday, lateToday, missingCheckout, projects, assets, groupedProjects, mainCompany, currentOrganization] =
-      await Promise.all([
-        prisma.user.count({ where: { organizationId: { in: orgIds }, status: "ACTIVE" } }),
-        prisma.attendanceRecord.count({ where: { organizationId: { in: orgIds }, date: { gte: today, lt: tomorrow }, status: "PRESENT" } }),
-        prisma.attendanceRecord.count({ where: { organizationId: { in: orgIds }, date: { gte: today, lt: tomorrow }, status: "LATE" } }),
-        prisma.attendanceRecord.count({
-          where: { organizationId: { in: orgIds }, date: { gte: today, lt: tomorrow }, checkInAt: { not: null }, checkOutAt: null },
-        }),
-        prisma.project.count({ where: { organizationId: { in: orgIds } } }),
-        prisma.asset.count({ where: { organizationId: { in: orgIds } } }),
-        prisma.project.groupBy({ by: ["status"], where: { organizationId: { in: orgIds } }, _count: { _all: true } }),
-        prisma.organization.findUnique({ where: { id: companyId }, select: { name: true } }),
-        prisma.organization.findUnique({ where: { id: organizationId }, select: { name: true } }),
-      ])
+    const [employees, presentToday, projects, assets, groupedProjects] = await Promise.all([
+      prisma.user.count({ where: { organizationId: { in: orgIds }, status: "ACTIVE" } }),
+      prisma.attendanceRecord.count({ where: { organizationId: { in: orgIds }, date: { gte: today, lt: tomorrow }, status: "PRESENT" } }),
+      prisma.project.count({ where: { organizationId: { in: orgIds } } }),
+      prisma.asset.count({ where: { organizationId: { in: orgIds } } }),
+      prisma.project.groupBy({ by: ["status"], where: { organizationId: { in: orgIds } }, _count: { _all: true } }),
+    ])
 
     const projectStatus = { NOT_STARTED: 0, IN_PROGRESS: 0, COMPLETED: 0 }
     groupedProjects.forEach((row) => { projectStatus[row.status] = row._count._all })
 
-    // Shape matches what the Dashboard's executive-overview card reads:
-    // metrics.* for the stat tiles, projects.* for the status breakdown,
-    // mainCompany/organization for the header subtitle.
+    const lateToday = await prisma.attendanceRecord.count({
+      where: {
+        organizationId: { in: orgIds },
+        date: { gte: today, lt: tomorrow },
+        status: "LATE",
+      },
+    })
+    const missingCheckout = await prisma.attendanceRecord.count({
+      where: {
+        organizationId: { in: orgIds },
+        date: { gte: today, lt: tomorrow },
+        checkInAt: { not: null },
+        checkOutAt: null,
+      },
+    })
+
+    // Keep the original top-level fields for backward compatibility and also
+    // expose the normalized shape consumed by the executive dashboard.
     res.json({
       scope: companyScope ? "company" : "organization",
       organizations,
-      mainCompany,
-      organization: currentOrganization,
+      employees,
+      presentToday,
+      attendanceRate: employees ? Math.round((presentToday / employees) * 100) : 0,
+      projects,
+      assets,
+      projectStatus,
       metrics: {
         employees,
         present: presentToday,
@@ -268,8 +285,7 @@ async function getExecutiveOverview(req, res, next) {
         late: lateToday,
         missingCheckout,
       },
-      attendanceRate: employees ? Math.round((presentToday / employees) * 100) : 0,
-      projects: {
+      projectsSummary: {
         notStarted: projectStatus.NOT_STARTED,
         inProgress: projectStatus.IN_PROGRESS,
         completed: projectStatus.COMPLETED,

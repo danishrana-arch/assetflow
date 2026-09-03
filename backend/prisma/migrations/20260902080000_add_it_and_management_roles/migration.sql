@@ -1,0 +1,4 @@
+-- Add the role values used by the role-based access matrix.
+ALTER TYPE "UserRole" ADD VALUE IF NOT EXISTS 'MANAGEMENT';
+ALTER TYPE "UserRole" ADD VALUE IF NOT EXISTS 'DEPARTMENT_HEAD';
+ALTER TYPE "UserRole" ADD VALUE IF NOT EXISTS 'IT_MANAGER';

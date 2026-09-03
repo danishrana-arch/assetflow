@@ -9,7 +9,7 @@ const {
   importTemplate,
 } = require("../controllers/employee.controller")
 const { resetPassword } = require("../controllers/auth.controller")
-const { requireAuth, requireManagement, requireManagementOrSelf, requireRole } = require("../middleware/auth.middleware")
+const { requireAuth, requireManagement, requireManagementOrSelf, requireRole, requireEmployeeDirectory } = require("../middleware/auth.middleware")
 
 const router = express.Router()
 
@@ -28,7 +28,7 @@ router.use(requireAuth)
 router.get("/import/template", requireManagement, importTemplate)
 router.post("/import", requireManagement, upload.single("file"), importEmployees)
 
-router.get("/", requireManagement, listEmployees)
+router.get("/", requireEmployeeDirectory, listEmployees)
 router.get("/:id", getEmployee)
 // Management can edit anyone; a non-management user can edit their own
 // phone/email only (enforced field-by-field in the controller).

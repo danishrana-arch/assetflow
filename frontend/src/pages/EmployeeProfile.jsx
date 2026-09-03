@@ -8,7 +8,7 @@ import {
 } from "lucide-react"
 import api from "../api/client"
 import { useAuth } from "../context/AuthContext"
-import { isManagement, ROLE_LABELS, MANAGEMENT_ROLES } from "../utils/roles"
+import { isManagement, canManageInventory, ROLE_LABELS } from "../utils/roles"
 import StatusBadge from "../components/StatusBadge"
 import StatusPill from "../components/ui/StatusPill"
 import PageHeader from "../components/ui/PageHeader"
@@ -42,6 +42,7 @@ function assetTabOf(asset) {
 // manager sees the operational picture — not every field on the record.
 function useProfileLens({ user, employee, isSelf }) {
   return useMemo(() => {
+    if (user?.role === "IT_MANAGER") return "it"
     if (isSelf || user?.role === "ADMIN" || user?.role === "CEO") return "full"
     const dept = (user?.department?.name || "").toLowerCase()
     if (dept.includes("it") || dept.includes("tech")) return "it"
@@ -57,16 +58,17 @@ export default function EmployeeProfile() {
   const { organization, user, refreshUser } = useAuth()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const canManageInventory = isManagement(user?.role)
+  const canManageAssets = canManageInventory(user?.role)
+  const isIT = user?.role === "IT_MANAGER"
   const isSelf = user?.id === id
   // Management can edit every field on anyone (including themselves); a
   // non-management viewer can only edit their own phone/email.
-  const canEditFully = canManageInventory
-  const canEditContactOnly = !canManageInventory && isSelf
+  const canEditFully = isManagement(user?.role)
+  const canEditContactOnly = !canEditFully && isSelf && user?.role !== "IT_MANAGER"
   // Only the Owner (ADMIN) can remove an employee outright.
   const canRemoveEmployee = user?.role === "ADMIN" && user?.id !== id
   // Any management user can reset a forgotten password to the temp value.
-  const canResetPassword = canManageInventory && !isSelf
+  const canResetPassword = isManagement(user?.role) && !isSelf
   const [showAssignForm, setShowAssignForm] = useState(false)
   const [selectedAssetId, setSelectedAssetId] = useState("")
   const [editing, setEditing] = useState(false)
@@ -88,8 +90,8 @@ export default function EmployeeProfile() {
 
   const lens = useProfileLens({ user, employee, isSelf })
   const showAssets = lens === "full" || lens === "it" || lens === "manager"
-  const showFinancial = lens === "full" || lens === "finance"
-  const showPersonalDetails = lens === "full" || lens === "hr"
+  const showFinancial = !isIT && (lens === "full" || lens === "finance")
+  const showPersonalDetails = !isIT && (lens === "full" || lens === "hr")
 
   const { data: departments } = useQuery({
     queryKey: ["departments"],
@@ -97,16 +99,16 @@ export default function EmployeeProfile() {
     enabled: canEditFully,
   })
 
-  const { data: managerCandidates = [] } = useQuery({
-    queryKey: ["employees", "manager-candidates"],
-    queryFn: () => api.get("/employees").then((r) => r.data),
+  const { data: managerOptions } = useQuery({
+    queryKey: ["employee-manager-options"],
+    queryFn: () => api.get("/employees", { params: { page: 1, pageSize: 100 } }).then((r) => r.data?.data || []),
     enabled: canEditFully,
   })
 
   const { data: availableAssets } = useQuery({
     queryKey: ["assets", "AVAILABLE"],
     queryFn: () => api.get("/assets", { params: { status: "AVAILABLE" } }).then((r) => r.data),
-    enabled: canManageInventory && showAssignForm,
+    enabled: canManageAssets && showAssignForm,
   })
 
   const invalidate = () => {
@@ -257,7 +259,7 @@ export default function EmployeeProfile() {
       <PageHeader
         title="Employee Profile"
         subtitle="Personal information, assigned assets and activity."
-        backTo={canManageInventory ? "/employees" : "/"}
+        backTo={canManageAssets || isManagement(user?.role) ? "/employees" : "/"}
         actions={
           canRemoveEmployee && (
             <button
@@ -329,6 +331,8 @@ export default function EmployeeProfile() {
         )}
       </div>
 
+      {!isIT && (
+        <>
       {/* Employee 360 overview */}
       <section className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {(() => {
@@ -353,6 +357,16 @@ export default function EmployeeProfile() {
         <div className="card p-5"><SectionHeader title="Projects & time"/><div className="mt-3 space-y-2">{(employee.projectMemberships||[]).slice(0,6).map(m=><div key={m.id} className="flex items-center justify-between rounded-2xl bg-surface-2 p-3"><div className="min-w-0"><p className="truncate text-sm font-semibold text-ink">{m.project?.name}</p><p className="text-xs text-muted">{m.project?.status?.replaceAll("_"," ")} · {Number(m.hoursSpent||0).toFixed(1)}h</p></div>{m.project?.deadline&&<span className="text-[11px] text-muted">Due {new Date(m.project.deadline).toLocaleDateString()}</span>}</div>)}{!(employee.projectMemberships||[]).length&&<p className="text-sm text-muted">No project assignments.</p>}</div></div>
         <div className="card p-5"><SectionHeader title="Recent payroll"/><div className="mt-3 space-y-2">{(employee.payrollRecords||[]).slice(0,5).map(p=><div key={p.id} className="flex items-center justify-between rounded-2xl bg-surface-2 p-3"><div><p className="text-sm font-semibold text-ink">{p.month}/{p.year}</p><p className="text-xs text-muted">{p.status}</p></div><span className="text-sm font-semibold text-ink">PKR {Number(p.netPay||0).toLocaleString()}</span></div>)}{!(employee.payrollRecords||[]).length&&<p className="text-sm text-muted">No payroll records.</p>}</div></div>
       </section>
+        </>
+      )}
+
+      {isIT && (
+        <section className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <div className="card p-4"><p className="text-xs text-muted">Assigned assets</p><p className="mt-1 text-2xl font-semibold text-ink">{assignedAssets.length}</p><p className="text-[11px] text-muted">Current assignments</p></div>
+          <div className="card p-4"><p className="text-xs text-muted">Laptops</p><p className="mt-1 text-2xl font-semibold text-ink">{laptopCount}</p><p className="text-[11px] text-muted">Assigned laptop devices</p></div>
+          <div className="card p-4"><p className="text-xs text-muted">Accessories</p><p className="mt-1 text-2xl font-semibold text-ink">{accessoryCount}</p><p className="text-[11px] text-muted">Monitors, phones and accessories</p></div>
+        </section>
+      )}
 
       {/**/}
       {/* Contact panel + content, matching the AssetFlow contact-detail layout */}
@@ -365,7 +379,7 @@ export default function EmployeeProfile() {
               <SectionHeader
                 title="Assigned Assets"
                 action={
-                  canManageInventory && (
+                  canManageAssets && (
                     <button
                       onClick={() => setShowAssignForm((v) => !v)}
                       className="pill-secondary flex items-center gap-1.5 px-3 py-1.5 text-xs"
@@ -434,7 +448,7 @@ export default function EmployeeProfile() {
                           </Link>
                           <p className="truncate font-mono text-[11px] text-muted">{asset.serialNumber}</p>
                         </div>
-                        {canManageInventory && (
+                        {canManageAssets && (
                           <button
                             onClick={() => removeAsset.mutate(asset.id)}
                             disabled={removeAsset.isPending}
@@ -566,6 +580,7 @@ export default function EmployeeProfile() {
             </div>
           )}
 
+          {!isIT && (
           <div className="card p-5">
             <SectionHeader title="Support History" />
             <ul className="max-h-80 space-y-2 overflow-y-auto">
@@ -584,8 +599,9 @@ export default function EmployeeProfile() {
                 <EmptyState icon={TicketIcon} title="No tickets" description="This employee hasn't raised any support requests." />
               )}
             </ul>
-          </div>
+          </div>          )}
 
+          {!isIT && (
           <div className="card p-5">
             <SectionHeader title="Activity" />
             <ul className="max-h-80 space-y-2 overflow-y-auto">
@@ -610,6 +626,7 @@ export default function EmployeeProfile() {
               )}
             </ul>
           </div>
+          )}
         </div>
 
         <div className="card p-6 lg:order-2">
@@ -692,6 +709,8 @@ export default function EmployeeProfile() {
             </div>
           </div>
 
+          {!isIT && (
+            <>
           <div className="my-5 divider" />
 
           <SectionHeader
@@ -714,26 +733,21 @@ export default function EmployeeProfile() {
               <TextField label="Phone" value={editForm.phone} onChange={(e) => setEditForm((f) => ({ ...f, phone: e.target.value }))} />
               {canEditFully && (
                 <>
-                  {(user?.role === "ADMIN" || user?.role === "CEO") && (
-                    <SelectField label="Role" value={editForm.role} onChange={(e) => setEditForm((f) => ({ ...f, role: e.target.value }))}>
-                      {Object.entries(ROLE_LABELS)
-                        .filter(([value]) => value !== "CEO" || employee?.role === "CEO" || (employee?.role !== "CEO" && managerCandidates.filter((m) => m.role === "CEO").length < 2))
-                        .map(([value, label]) => (
-                          <option key={value} value={value}>{label}</option>
-                        ))}
-                    </SelectField>
-                  )}
                   <TextField label="Designation / Title" value={editForm.designation} onChange={(e) => setEditForm((f) => ({ ...f, designation: e.target.value }))} placeholder="e.g. Senior Backend Engineer" />
                   <SelectField label="Department" value={editForm.departmentId} onChange={(e) => setEditForm((f) => ({ ...f, departmentId: e.target.value }))}>
                     <option value="">None</option>
                     {(departments || []).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
                   </SelectField>
+                  <SelectField label="Role" value={editForm.role} onChange={(e) => setEditForm((f) => ({ ...f, role: e.target.value }))}>
+                    {Object.entries(ROLE_LABELS)
+                      .filter(([value]) => ["ADMIN", "CEO", "SALES_HEAD", "HR", "MANAGEMENT", "DEPARTMENT_HEAD", "IT_MANAGER", "EMPLOYEE"].includes(value))
+                      .filter(([value]) => value !== "CEO" || employee.role === "CEO" || (managerOptions || []).filter((m) => m.role === "CEO").length < 2)
+                      .map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                  </SelectField>
                   <SelectField label="Reporting Manager" value={editForm.managerId} onChange={(e) => setEditForm((f) => ({ ...f, managerId: e.target.value }))}>
                     <option value="">None</option>
-                    {(managerCandidates || []).filter((manager) => manager.id !== employee?.id).map((manager) => (
-                      <option key={manager.id} value={manager.id}>
-                        {manager.name}{manager.role ? ` — ${ROLE_LABELS[manager.role] || manager.role}` : ""}
-                      </option>
+                    {(managerOptions || []).filter((manager) => manager.id !== employee.id).map((manager) => (
+                      <option key={manager.id} value={manager.id}>{manager.name} — {ROLE_LABELS[manager.role] || manager.role}</option>
                     ))}
                   </SelectField>
                   <SelectField label="Status" value={editForm.status} onChange={(e) => setEditForm((f) => ({ ...f, status: e.target.value }))}>
@@ -838,6 +852,8 @@ export default function EmployeeProfile() {
                 )}
               </div>
             </div>
+          )}
+            </>
           )}
         </div>
       </div>

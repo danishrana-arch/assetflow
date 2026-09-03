@@ -4,7 +4,7 @@ import { Link } from "react-router-dom"
 import { Search, Plus, X, Copy, Trash2, Upload, Download } from "lucide-react"
 import api from "../api/client"
 import { useAuth } from "../context/AuthContext"
-import { ROLE_LABELS } from "../utils/roles"
+import { ROLE_LABELS, EMPLOYEE_DIRECTORY_ROLES } from "../utils/roles"
 import StatusBadge from "../components/StatusBadge"
 import PageHeader from "../components/ui/PageHeader"
 import Avatar from "../components/ui/Avatar"
@@ -20,13 +20,13 @@ const emptyForm = {
   password: "",
   role: "EMPLOYEE",
   departmentId: "",
-  managerId: "",
   phone: "",
   cnic: "",
   dob: "",
   address: "",
   skill: "",
   seniorityLevel: "",
+  managerId: "",
 }
 
 function slugName(name) {
@@ -52,6 +52,7 @@ export default function Employees() {
   const { user } = useAuth()
   const isOwner = user?.role === "ADMIN"
   const canManageEmployees = user?.role === "ADMIN" || user?.role === "CEO"
+  const canViewEmployees = EMPLOYEE_DIRECTORY_ROLES.includes(user?.role)
   const canDeleteEmployee = (emp) => canManageEmployees && emp.id !== user?.id && (user?.role === "CEO" || emp.role !== "CEO")
   const [search, setSearch] = useState("")
   const debouncedSearch = useDebouncedValue(search)
@@ -77,10 +78,10 @@ export default function Employees() {
     placeholderData: keepPreviousData,
   })
   const employees = data?.data || []
-  const { data: managerCandidates = [] } = useQuery({
-    queryKey: ["employees", "manager-candidates"],
-    queryFn: () => api.get("/employees").then((r) => r.data),
-    enabled: canManageEmployees && showForm,
+  const { data: managerOptions } = useQuery({
+    queryKey: ["employee-manager-options"],
+    queryFn: () => api.get("/employees", { params: { page: 1, pageSize: 100 } }).then((r) => r.data?.data || []),
+    enabled: canManageEmployees,
   })
   const { data: departments } = useQuery({
     queryKey: ["departments"],
@@ -210,13 +211,15 @@ export default function Employees() {
                 />
               </>
             )}
-            <button
-              onClick={() => { setShowForm((v) => !v); setCreated(null) }}
-              className="pill-accent flex items-center gap-1.5 px-4 py-2.5 text-sm"
-            >
-              {showForm ? <X size={15} /> : <Plus size={15} />}
-              {showForm ? "Cancel" : "Add Employee"}
-            </button>
+            {canManageEmployees && (
+              <button
+                onClick={() => { setShowForm((v) => !v); setCreated(null) }}
+                className="pill-accent flex items-center gap-1.5 px-4 py-2.5 text-sm"
+              >
+                {showForm ? <X size={15} /> : <Plus size={15} />}
+                {showForm ? "Cancel" : "Add Employee"}
+              </button>
+            )}
           </>
         }
       />
@@ -295,6 +298,7 @@ export default function Employees() {
             {canManageEmployees ? (
               <SelectField label="Role" value={form.role} onChange={(e) => updateField("role", e.target.value)}>
                 {Object.entries(ROLE_LABELS)
+                  .filter(([value]) => ["ADMIN", "CEO", "SALES_HEAD", "HR", "MANAGEMENT", "DEPARTMENT_HEAD", "IT_MANAGER", "EMPLOYEE"].includes(value))
                   .filter(([value]) => value !== "CEO" || (data?.ceoCount || 0) < 2)
                   .map(([value, label]) => (
                     <option key={value} value={value}>{label}</option>
@@ -309,11 +313,7 @@ export default function Employees() {
             </SelectField>
             <SelectField label="Reporting Manager" value={form.managerId} onChange={(e) => updateField("managerId", e.target.value)}>
               <option value="">None</option>
-              {(managerCandidates || []).map((manager) => (
-                <option key={manager.id} value={manager.id}>
-                  {manager.name}{manager.role ? ` — ${ROLE_LABELS[manager.role] || manager.role}` : ""}
-                </option>
-              ))}
+              {(managerOptions || []).map((manager) => <option key={manager.id} value={manager.id}>{manager.name} — {ROLE_LABELS[manager.role] || manager.role}</option>)}
             </SelectField>
             <TextField label="Phone" value={form.phone} onChange={(e) => updateField("phone", e.target.value)} />
             <TextField label="CNIC" value={form.cnic} onChange={(e) => updateField("cnic", e.target.value)} placeholder="XXXXX-XXXXXXX-X" hint="Stored encrypted" />

@@ -303,6 +303,10 @@ export default function Dashboard() {
   })
 
 
+  // The executive endpoint has existed in more than one response shape.
+  // Normalize it here so the dashboard never crashes when metrics is absent.
+  const executiveMetrics = executive?.metrics ?? executive ?? {}
+
   /* ==========================================================
      ATTENDANCE ANOMALIES
   ========================================================== */
@@ -545,7 +549,9 @@ export default function Dashboard() {
             <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted sm:text-xs">
               {isManagement
                 ? "Executive overview"
-                : "Dashboard"}
+                : user?.role === "IT_MANAGER"
+                  ? "IT operations"
+                  : "Dashboard"}
             </p>
 
             <h1
@@ -560,8 +566,9 @@ export default function Dashboard() {
             </h1>
 
             <p className="mt-1.5 max-w-xl text-xs leading-5 text-muted sm:text-sm">
-              Here's your overview of what's
-              happening across AssetFlow today.
+              {user?.role === "IT_MANAGER"
+                ? "Monitor inventory, assigned assets, requests, and support activity."
+                : "Here's your overview of what's happening across AssetFlow today."}
             </p>
 
             {isManagement &&
@@ -614,56 +621,56 @@ export default function Dashboard() {
       </section>
 
 
-    {/* ======================================================
-    PRIMARY STATISTICS
-====================================================== */}
+      {/* ======================================================
+          PRIMARY STATISTICS
+      ======================================================= */}
 
-<section
-  className="
-    grid
-    grid-cols-1
-    gap-4
-    sm:grid-cols-2
-    lg:grid-cols-3
-    lg:gap-5
-  "
->
-  <StatCard
-    label="Total Assets"
-    value={stats?.totalAssets ?? "—"}
-    sublabel="From last month"
-    icon={Package}
-    tone="blue"
-    trend={{
-      value: "12%",
-      direction: "up",
-    }}
-  />
+      <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 xl:grid-cols-3">
 
-  <StatCard
-    label="Assigned Assets"
-    value={stats?.assignedAssets ?? "—"}
-    sublabel={`${utilization}% utilization`}
-    icon={Layers}
-    tone="purple"
-    trend={{
-      value: "8%",
-      direction: "up",
-    }}
-  />
+        <StatCard
+          label="Total Assets"
+          value={
+            stats?.totalAssets ?? "—"
+          }
+          sublabel="From last month"
+          icon={Package}
+          tone="blue"
+          trend={{
+            value: "12%",
+            direction: "up",
+          }}
+        />
 
-  <StatCard
-    label="Warranty Alerts"
-    value={stats?.expiringWarranties ?? "—"}
-    sublabel="Expiring in 30 days"
-    icon={ShieldAlert}
-    tone="cyan"
-    trend={{
-      value: "3%",
-      direction: "down",
-    }}
-  />
-</section>
+        <StatCard
+          label="Assigned Assets"
+          value={
+            stats?.assignedAssets ?? "—"
+          }
+          sublabel={`${utilization}% utilization`}
+          icon={Layers}
+          tone="purple"
+          trend={{
+            value: "8%",
+            direction: "up",
+          }}
+        />
+
+        <StatCard
+          label="Warranty Alerts"
+          value={
+            stats?.expiringWarranties ??
+            "—"
+          }
+          sublabel="Expiring in 30 days"
+          icon={ShieldAlert}
+          tone="cyan"
+          trend={{
+            value: "3%",
+            direction: "down",
+          }}
+        />
+
+      </section>
 
 
       {/* ======================================================
@@ -713,7 +720,7 @@ export default function Dashboard() {
 
                 <div className="min-w-0">
                   <p className="text-xl font-semibold text-ink">
-                    {executive.metrics
+                    {executiveMetrics
                       ?.employees ?? "—"}
                   </p>
 
@@ -737,7 +744,7 @@ export default function Dashboard() {
 
                 <div className="min-w-0">
                   <p className="text-xl font-semibold text-ink">
-                    {executive.metrics
+                    {executiveMetrics
                       ?.present ?? "—"}
                   </p>
 
@@ -761,9 +768,9 @@ export default function Dashboard() {
 
                 <div className="min-w-0">
                   <p className="text-xl font-semibold text-ink">
-                    {executive.projects
+                    {executive?.projects
                       ?.length ??
-                      executive.metrics
+                      executiveMetrics
                         ?.projects ??
                       "—"}
                   </p>
@@ -788,7 +795,7 @@ export default function Dashboard() {
 
                 <div className="min-w-0">
                   <p className="text-xl font-semibold text-ink">
-                    {executive.metrics
+                    {executiveMetrics
                       ?.assets ?? "—"}
                   </p>
 
@@ -834,7 +841,7 @@ export default function Dashboard() {
 
                   <div className="rounded-xl bg-surface-2 px-2 py-3 text-center">
                     <p className="text-xl font-semibold text-ink">
-                      {executive.projects
+                      {executive?.projects
                         ?.notStarted ?? "—"}
                     </p>
 
@@ -845,7 +852,7 @@ export default function Dashboard() {
 
                   <div className="rounded-xl bg-surface-2 px-2 py-3 text-center">
                     <p className="text-xl font-semibold text-ink">
-                      {executive.projects
+                      {executive?.projects
                         ?.inProgress ?? "—"}
                     </p>
 
@@ -856,7 +863,7 @@ export default function Dashboard() {
 
                   <div className="rounded-xl bg-surface-2 px-2 py-3 text-center">
                     <p className="text-xl font-semibold text-ink">
-                      {executive.projects
+                      {executive?.projects
                         ?.completed ?? "—"}
                     </p>
 
@@ -887,13 +894,13 @@ export default function Dashboard() {
                 <div className="mt-4 flex flex-wrap gap-2">
 
                   <span className="rounded-full bg-chip-yellow-bg px-3 py-1.5 text-[11px] font-semibold text-chip-yellow-fg sm:text-xs">
-                    {executive.metrics
+                    {executiveMetrics
                       ?.late ?? 0}{" "}
                     late today
                   </span>
 
                   <span className="rounded-full bg-chip-pink-bg px-3 py-1.5 text-[11px] font-semibold text-chip-pink-fg sm:text-xs">
-                    {executive.metrics
+                    {executiveMetrics
                       ?.missingCheckout ??
                       0}{" "}
                     missing check-out

@@ -11,16 +11,16 @@ const {
   rejectBatch,
   deleteAllForMonth,
 } = require("../controllers/payroll.controller")
-const { requireAuth, requireManagement, requireRole } = require("../middleware/auth.middleware")
+const { requireAuth, requireManagement, requireRole, requirePayrollAccess } = require("../middleware/auth.middleware")
 
 const router = express.Router()
 
 router.use(requireAuth)
 
 // Self-service — any authenticated employee sees only their own payslips.
-router.get("/me", myPayroll)
+router.get("/me", requirePayrollAccess, myPayroll)
 
-router.get("/", requireManagement, listPayroll)
+router.get("/", requirePayrollAccess, listPayroll)
 router.post("/generate", requireRole("ADMIN"), generatePayroll)
 // An admin/owner's final step: send a generated month to the CEO.
 router.post("/submit", requireRole("ADMIN"), submitForApproval)

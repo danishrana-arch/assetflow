@@ -42,7 +42,10 @@ async function listAssets(req, res, next) {
         prisma.asset.count({ where }),
         prisma.asset.findMany({
           where,
-          include: { assignedTo: true, department: true },
+          include: {
+            assignedTo: { select: { id: true, name: true, email: true, role: true, department: { select: { name: true } } } },
+            department: true,
+          },
           orderBy: { updatedAt: "desc" },
           skip: (pageNum - 1) * size,
           take: size,
@@ -60,7 +63,10 @@ async function listAssets(req, res, next) {
 
     const assets = await prisma.asset.findMany({
       where,
-      include: { assignedTo: true, department: true },
+      include: {
+        assignedTo: { select: { id: true, name: true, email: true, role: true, department: { select: { name: true } } } },
+        department: true,
+      },
       orderBy: { updatedAt: "desc" },
     })
 
@@ -78,10 +84,13 @@ async function getAsset(req, res, next) {
     const asset = await prisma.asset.findFirst({
       where: { id, organizationId },
       include: {
-        assignedTo: true,
+        assignedTo: { select: { id: true, name: true, email: true, role: true, department: { select: { name: true } } } },
         department: true,
         tickets: { orderBy: { createdAt: "desc" } },
-        lifecycleEvents: { orderBy: { occurredAt: "asc" }, include: { actor: true } },
+        lifecycleEvents: {
+          orderBy: { occurredAt: "asc" },
+          include: { actor: { select: { id: true, name: true, email: true, role: true } } },
+        },
       },
     })
 

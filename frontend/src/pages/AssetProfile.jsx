@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Boxes, Laptop2, MonitorSmartphone, Smartphone, Keyboard, PenLine, Ticket as TicketIcon, UserMinus } from "lucide-react"
 import api from "../api/client"
 import { useAuth } from "../context/AuthContext"
-import { isManagement } from "../utils/roles"
+import { canManageInventory } from "../utils/roles"
 import StatusBadge from "../components/StatusBadge"
 import LifecycleTimeline from "../components/LifecycleTimeline"
 import PageHeader from "../components/ui/PageHeader"
@@ -33,7 +33,7 @@ const STATUS_OPTIONS = [
 export default function AssetProfile() {
   const { id } = useParams()
   const { user } = useAuth()
-  const canManage = isManagement(user?.role)
+  const canManage = canManageInventory(user?.role)
   const queryClient = useQueryClient()
   const [selectedEmployeeId, setSelectedEmployeeId] = useState("")
 

@@ -449,6 +449,7 @@ enum UserRole {
   HR
   MANAGEMENT
   DEPARTMENT_HEAD
+  IT_MANAGER
 }
 
 enum LeaveStatus {

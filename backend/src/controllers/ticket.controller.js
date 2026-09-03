@@ -1,5 +1,5 @@
 const prisma = require("../lib/prisma")
-const { MANAGEMENT_ROLES } = require("../utils/roles")
+const { MANAGEMENT_ROLES, INVENTORY_ROLES } = require("../utils/roles")
 
 async function listTickets(req, res, next) {
   try {
@@ -9,7 +9,7 @@ async function listTickets(req, res, next) {
     const tickets = await prisma.ticket.findMany({
       where: {
         organizationId,
-        ...(!MANAGEMENT_ROLES.includes(role) ? { raisedById: userId } : {}),
+        ...(!MANAGEMENT_ROLES.includes(role) && !INVENTORY_ROLES.includes(role) ? { raisedById: userId } : {}),
         ...(status ? { status } : {}),
         ...(priority ? { priority } : {}),
         ...(category ? { category } : {}),

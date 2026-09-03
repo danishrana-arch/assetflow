@@ -1,5 +1,5 @@
 const prisma = require("../lib/prisma")
-const { MANAGEMENT_ROLES } = require("../utils/roles")
+const { MANAGEMENT_ROLES, INVENTORY_ROLES } = require("../utils/roles")
 const { logAudit } = require("../utils/audit")
 
 // Employee asks for something ("I need a monitor"). Doesn't hand over an
@@ -38,7 +38,7 @@ async function listRequests(req, res, next) {
   try {
     const { organizationId, userId, role } = req.user
     const { status } = req.query
-    const isManagement = MANAGEMENT_ROLES.includes(role)
+    const isManagement = MANAGEMENT_ROLES.includes(role) || INVENTORY_ROLES.includes(role)
 
     const requests = await prisma.assetRequest.findMany({
       where: {

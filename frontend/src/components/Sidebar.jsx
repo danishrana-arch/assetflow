@@ -25,7 +25,7 @@ import {
 } from "lucide-react"
 import { useAuth } from "../context/AuthContext"
 import { useTheme } from "../context/ThemeContext"
-import { isManagement } from "../utils/roles"
+import { isManagement, canAccessPayroll } from "../utils/roles"
 import Avatar from "./ui/Avatar"
 import logoFull from "../assets/logo1.png"
 
@@ -84,11 +84,12 @@ export default function Sidebar() {
   const { mode, toggleMode } = useTheme()
 
   const isAdmin = isManagement(user?.role)
+  const isIT = user?.role === "IT_MANAGER"
   const isOwner = ["ADMIN", "CEO"].includes(user?.role)
   const isDark = mode === "dark"
 
   const canManageAttendance =
-    ["ADMIN", "CEO"].includes(user?.role) || !!user?.canManageAttendance
+    ["ADMIN", "CEO", "HR"].includes(user?.role) || !!user?.canManageAttendance
 
   return (
     <aside
@@ -291,12 +292,23 @@ export default function Sidebar() {
               />
             )}
 
-            <RailItem
-              to="/payroll"
-              label="Payroll"
-              icon={Wallet}
-              isDark={isDark}
-            />
+            {canAccessPayroll(user?.role) && (
+              <RailItem
+                to="/payroll"
+                label="Payroll"
+                icon={Wallet}
+                isDark={isDark}
+              />
+            )}
+          </>
+        ) : isIT ? (
+          <>
+            <RailItem to="/" label="Dashboard" icon={LayoutDashboard} end isDark={isDark} />
+            <RailItem to="/inventory" label="Inventory" icon={Boxes} isDark={isDark} />
+            <RailItem to="/employees" label="Employees & Assets" icon={Users} isDark={isDark} />
+            <RailItem to="/assignments" label="Asset Assignments" icon={ClipboardCheck} isDark={isDark} />
+            <RailItem to="/asset-requests" label="Asset Requests" icon={PackageSearch} isDark={isDark} />
+            <RailItem to="/tickets" label="Requests / Tickets" icon={Ticket} isDark={isDark} />
           </>
         ) : (
           <>
@@ -325,13 +337,6 @@ export default function Sidebar() {
               to="/payroll/me"
               label="My Payslips"
               icon={Wallet}
-              isDark={isDark}
-            />
-
-            <RailItem
-              to="/announcements"
-              label="Announcements"
-              icon={Bell}
               isDark={isDark}
             />
 

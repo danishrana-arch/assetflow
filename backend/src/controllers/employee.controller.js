@@ -1,6 +1,6 @@
 const bcrypt = require("bcrypt")
 const prisma = require("../lib/prisma")
-const { MANAGEMENT_ROLES, ASSIGNABLE_ROLES, MAX_CEO_COUNT } = require("../utils/roles")
+const { MANAGEMENT_ROLES, ASSIGNABLE_ROLES, MAX_CEO_COUNT, EMPLOYEE_DIRECTORY_ROLES } = require("../utils/roles")
 const { encryptField, decryptField } = require("../utils/crypto")
 const { logAudit } = require("../utils/audit")
 const { parseCsv } = require("../utils/csv")
@@ -11,9 +11,14 @@ function stripSensitive(user, canSeeSensitive) {
   return { ...rest, cnic: decryptField(cnic), bankAccountNumber: decryptField(bankAccountNumber) }
 }
 
+function stripForIT(user) {
+  const { id, name, email, phone, role, status, photoUrl, designation, department, assignedAssets } = user
+  return { id, name, email, phone, role, status, photoUrl, designation, department, assignedAssets }
+}
+
 async function listEmployees(req, res, next) {
   try {
-    const { organizationId } = req.user
+    const { organizationId, role: requesterRole } = req.user
     const { search, department, status, page, pageSize } = req.query
 
     const where = {
@@ -38,7 +43,7 @@ async function listEmployees(req, res, next) {
         prisma.user.count({ where }),
         prisma.user.findMany({
           where,
-          include: { department: true, manager: true, assignedAssets: true },
+          include: { department: true, assignedAssets: true },
           orderBy: { name: "asc" },
           skip: (pageNum - 1) * size,
           take: size,
@@ -47,7 +52,9 @@ async function listEmployees(req, res, next) {
       ])
 
       return res.json({
-        data: employees.map(({ password, cnic, bankAccountNumber, ...e }) => e),
+        data: requesterRole === "IT_MANAGER"
+          ? employees.map(stripForIT)
+          : employees.map(({ password, cnic, bankAccountNumber, ...e }) => e),
         page: pageNum,
         pageSize: size,
         total,
@@ -58,13 +65,17 @@ async function listEmployees(req, res, next) {
 
     const employees = await prisma.user.findMany({
       where,
-      include: { department: true, manager: true, assignedAssets: true },
+      include: { department: true, assignedAssets: true },
       orderBy: { name: "asc" },
     })
 
     // List views never include CNIC — only the single-employee view does,
     // and even then only for the employee themselves or management.
-    res.json(employees.map(({ password, cnic, bankAccountNumber, ...e }) => e))
+    res.json(
+      requesterRole === "IT_MANAGER"
+        ? employees.map(stripForIT)
+        : employees.map(({ password, cnic, bankAccountNumber, ...e }) => e)
+    )
   } catch (err) {
     next(err)
   }
@@ -76,7 +87,7 @@ async function getEmployee(req, res, next) {
     const { id } = req.params
 
     // Employees can only view their own profile management roles can view anyone's.
-    if (!MANAGEMENT_ROLES.includes(role) && userId !== id) {
+    if (!EMPLOYEE_DIRECTORY_ROLES.includes(role) && userId !== id) {
       return res.status(403).json({ error: "You can only view your own profile" })
     }
 
@@ -92,6 +103,44 @@ async function getEmployee(req, res, next) {
     })
 
     if (!employee) return res.status(404).json({ error: "Employee not found" })
+
+    // IT is intentionally asset-only. Never send payroll, salary, CNIC, DOB,
+    // address, bank details, attendance, leave, or project data to an IT manager.
+    if (role === "IT_MANAGER") {
+      const {
+        id: employeeId,
+        name,
+        email,
+        phone,
+        role: employeeRole,
+        status,
+        photoUrl,
+        designation,
+        department,
+        manager,
+        assignedAssets,
+        tickets,
+        lifecycleEvents,
+      } = employee
+
+      return res.json({
+        id: employeeId,
+        name,
+        email,
+        phone,
+        role: employeeRole,
+        status,
+        photoUrl,
+        designation,
+        department,
+        manager: manager
+          ? { id: manager.id, name: manager.name, email: manager.email, role: manager.role }
+          : null,
+        assignedAssets,
+        tickets,
+        lifecycleEvents,
+      })
+    }
 
     // Sensitive personal fields (CNIC/DOB/address/bank details) are only
     // meaningful to the employee themselves or someone in a management
@@ -186,19 +235,6 @@ async function updateEmployee(req, res, next) {
       } else data[field] = req.body[field]
     }
 
-    if (data.managerId !== undefined) {
-      if (data.managerId === id) {
-        return res.status(400).json({ error: "An employee cannot report to themselves" })
-      }
-      if (data.managerId) {
-        const manager = await prisma.user.findFirst({
-          where: { id: data.managerId, organizationId, status: { not: "LEFT_COMPANY" } },
-          select: { id: true },
-        })
-        if (!manager) return res.status(400).json({ error: "Reporting manager must belong to this organization" })
-      }
-    }
-
     if (data.email !== undefined) {
       const emailTaken = await prisma.user.findFirst({
         where: { email: data.email, organizationId, NOT: { id } },
@@ -226,6 +262,12 @@ async function updateEmployee(req, res, next) {
         }
       }
       data.role = req.body.role
+    }
+
+    if (data.managerId) {
+      if (data.managerId === id) return res.status(400).json({ error: "An employee cannot report to themselves" })
+      const manager = await prisma.user.findFirst({ where: { id: data.managerId, organizationId }, select: { id: true } })
+      if (!manager) return res.status(400).json({ error: "Reporting Manager must belong to the current organization" })
     }
 
     const updated = await prisma.user.update({ where: { id }, data })

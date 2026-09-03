@@ -23,7 +23,7 @@ import {
   X,
 } from "lucide-react"
 import { useAuth } from "../context/AuthContext"
-import { isManagement } from "../utils/roles"
+import { isManagement, canAccessPayroll } from "../utils/roles"
 import OrganizationSwitcher from "./OrganizationSwitcher"
 
 function Row({ to, icon: Icon, label, end, onClick }) {
@@ -47,6 +47,7 @@ function Row({ to, icon: Icon, label, end, onClick }) {
 export default function MobileNav({ open, onClose }) {
   const { user, logout } = useAuth()
   const isAdmin = isManagement(user?.role)
+  const isIT = user?.role === "IT_MANAGER"
   if (!open) return null
 
   return (
@@ -59,9 +60,11 @@ export default function MobileNav({ open, onClose }) {
             <X size={18} />
           </button>
         </div>
-        <div className="mb-3 rounded-2xl border border-border bg-surface-2 p-3">
-          <OrganizationSwitcher />
-        </div>
+        {(["ADMIN", "CEO"].includes(user?.role)) && (
+          <div className="mb-3 rounded-2xl border border-border bg-surface-2 p-3">
+            <OrganizationSwitcher />
+          </div>
+        )}
         <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto pr-1">
           {isAdmin ? (
             <>
@@ -72,9 +75,8 @@ export default function MobileNav({ open, onClose }) {
               <Row to="/projects" icon={FolderKanban} label="Projects" onClick={onClose} />
               <Row to="/asset-requests" icon={PackageSearch} label="Asset Requests" onClick={onClose} />
               <Row to="/departments" icon={Building2} label="Departments" onClick={onClose} />
-              <Row to="/announcements" icon={Bell} label="Announcements" onClick={onClose} />
               <Row to="/tickets" icon={Ticket} label="Requests / Tickets" onClick={onClose} />
-              {(["ADMIN", "CEO"].includes(user?.role) || user?.canManageAttendance) && (
+              {(["ADMIN", "CEO", "HR"].includes(user?.role) || user?.canManageAttendance) && (
                 <Row to="/attendance" icon={CalendarCheck} label="Attendance" onClick={onClose} />
               )}
               <Row to="/attendance/me" icon={UserCheck} label="My Attendance" onClick={onClose} />
@@ -83,12 +85,21 @@ export default function MobileNav({ open, onClose }) {
               <Row to="/reports" icon={BarChart3} label="Reports" onClick={onClose} />
               <Row to="/export" icon={Download} label="Export" onClick={onClose} />
               <Row to="/audit-log" icon={ShieldCheck} label="Audit Log" onClick={onClose} />
-              <Row to="/payroll" icon={Wallet} label="Payroll" onClick={onClose} />
+              {canAccessPayroll(user?.role) && <Row to="/payroll" icon={Wallet} label="Payroll" onClick={onClose} />}
               <div className="my-2 divider" />
               <Row to="/notifications" icon={Bell} label="Notifications" onClick={onClose} />
               <Row to="/settings" icon={Settings} label="Settings" onClick={onClose} />
               <Row to="/holidays" icon={CalendarDays} label="Holidays" onClick={onClose} />
               <Row to="/profile" icon={UserCircle} label="Profile" onClick={onClose} />
+            </>
+          ) : isIT ? (
+            <>
+              <Row to="/" icon={LayoutDashboard} label="Dashboard" end onClick={onClose} />
+              <Row to="/inventory" icon={Boxes} label="Inventory" onClick={onClose} />
+              <Row to="/employees" icon={Users} label="Employees & Assets" onClick={onClose} />
+              <Row to="/assignments" icon={ClipboardCheck} label="Asset Assignments" onClick={onClose} />
+              <Row to="/asset-requests" icon={PackageSearch} label="Asset Requests" onClick={onClose} />
+              <Row to="/tickets" icon={Ticket} label="Requests / Tickets" onClick={onClose} />
             </>
           ) : (
             <>
@@ -96,7 +107,6 @@ export default function MobileNav({ open, onClose }) {
               <Row to="/projects" icon={FolderKanban} label="My Projects" onClick={onClose} />
               <Row to="/attendance/me" icon={CalendarCheck} label="My Attendance" onClick={onClose} />
               <Row to="/payroll/me" icon={Wallet} label="My Payslips" onClick={onClose} />
-              <Row to="/announcements" icon={Bell} label="Announcements" onClick={onClose} />
               <Row to="/tickets" icon={Ticket} label="Tickets" onClick={onClose} />
             </>
           )}
