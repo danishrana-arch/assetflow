@@ -14,7 +14,7 @@ const {
   deleteAsset,
   deleteCategory,
 } = require("../controllers/asset.controller");
-const { requireAuth, requireManagement } = require("../middleware/auth.middleware");
+const { requireAuth, requireManagement, requireInventoryAccess } = require("../middleware/auth.middleware");
 
 const router = express.Router();
 
@@ -30,18 +30,18 @@ const upload = multer({
 
 router.use(requireAuth);
 
-router.get("/import/template", requireManagement, importAssetsTemplate);
-router.post("/import", requireManagement, upload.single("file"), importAssets);
+router.get("/import/template", requireInventoryAccess, importAssetsTemplate);
+router.post("/import", requireInventoryAccess, upload.single("file"), importAssets);
 
 router.get("/categories", listCategories);
 router.get("/", listAssets);
 router.get("/:id", getAsset);
-router.post("/", requireManagement, createAsset);
-router.post("/:id/assign", requireManagement, assignAsset);
-router.post("/:id/unassign", requireManagement, unassignAsset);
-router.post("/:id/status", requireManagement, changeAssetStatus);
-router.post("/:id/lifecycle", requireManagement, addLifecycleNote);
-router.delete("/categories/:name", requireManagement, deleteCategory);
-router.delete("/:id", requireManagement, deleteAsset);
+router.post("/", requireInventoryAccess, createAsset);
+router.post("/:id/assign", requireInventoryAccess, assignAsset);
+router.post("/:id/unassign", requireInventoryAccess, unassignAsset);
+router.post("/:id/status", requireInventoryAccess, changeAssetStatus);
+router.post("/:id/lifecycle", requireInventoryAccess, addLifecycleNote);
+router.delete("/categories/:name", requireInventoryAccess, deleteCategory);
+router.delete("/:id", requireInventoryAccess, deleteAsset);
 
 module.exports = router;

@@ -36,6 +36,10 @@ model Organization {
   officeLatitude       Decimal? @db.Decimal(10, 7)
   officeLongitude      Decimal? @db.Decimal(10, 7)
   geofenceRadiusMeters Int      @default(200)
+  // Default shift times and lateness threshold (minutes)
+  shiftStartDefault    String?
+  shiftEndDefault      String?
+  lateThresholdMinutes Int      @default(15)
 
   // Company hierarchy
   // Main company: companyId = its own id, parentOrganizationId = null
@@ -57,8 +61,11 @@ model Organization {
   holidays         Holiday[]
   projects         Project[]
   announcements    Announcement[]
+  companyEvents     CompanyEvent[]
   tickets          Ticket[]
   users            User[]
+  employeeForms    EmployeeForm[]
+  formSubmissions  EmployeeFormSubmission[]
 
   @@index([companyId])
   @@index([parentOrganizationId])
@@ -68,7 +75,7 @@ model Organization {
 model Announcement {
   id             String       @id @default(cuid())
   organizationId String
-  createdById    String
+  createdById    String?
   title          String
   body           String
   audienceType   String       @default("ALL")
@@ -77,10 +84,29 @@ model Announcement {
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  createdBy      User         @relation("AnnouncementCreator", fields: [createdById], references: [id])
+  createdBy      User?        @relation("AnnouncementCreator", fields: [createdById], references: [id], onDelete: SetNull)
 
   @@index([organizationId, publishedAt])
   @@index([audienceType, audienceId])
+}
+
+
+model CompanyEvent {
+  id             String       @id @default(cuid())
+  organizationId String
+  createdById    String?
+  title          String
+  date           DateTime     @db.Date
+  description    String?
+  type           String       @default("ANNUAL_EVENT")
+  isAnnual       Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy      User?        @relation("CompanyEventCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, date])
+  @@index([organizationId, type])
 }
 
 model Holiday {
@@ -117,6 +143,13 @@ model User {
   email                     String                    @unique
   password                  String
   phone                     String?
+  personalEmail             String?
+  fatherName                String?
+  education                 String?
+  currentUniversity        String?
+  linkedinUrl              String?
+  shiftStart               String?
+  shiftEnd                 String?
   photoUrl                  String?
   role                      UserRole                  @default(EMPLOYEE)
   status                    EmployeeStatus            @default(ACTIVE)
@@ -153,11 +186,78 @@ model User {
   managedProjects           Project[]                 @relation("ProjectManager")
   announcementsCreated      Announcement[]            @relation("AnnouncementCreator")
   projectMemberships        ProjectMember[]
+  certifications            Certification[]
+  companyEvents              CompanyEvent[]             @relation("CompanyEventCreator")
+  employeeFormsCreated      EmployeeForm[]            @relation("EmployeeFormCreator")
+  formSubmissionsConverted  EmployeeFormSubmission[]  @relation("FormSubmissionEmployee")
   tickets                   Ticket[]                  @relation("TicketRaisedBy")
   department                Department?               @relation(fields: [departmentId], references: [id])
   manager                   User?                     @relation("ManagerReports", fields: [managerId], references: [id])
   reports                   User[]                    @relation("ManagerReports")
   organization              Organization              @relation(fields: [organizationId], references: [id])
+}
+
+model Certification {
+  id            String   @id @default(cuid())
+  employeeId    String
+  name          String
+  institute     String
+  credentialId  String?
+  credentialUrl String?
+  issuedDate    DateTime?
+  expiryDate    DateTime?
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  employee      User     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([employeeId])
+}
+
+model EmployeeForm {
+  id             String                    @id @default(cuid())
+  organizationId String
+  createdById    String?
+  title          String
+  tokenHash      String                    @unique
+  tokenEncrypted String?
+  active         Boolean                   @default(true)
+  expiresAt      DateTime?
+  createdAt      DateTime                  @default(now())
+  updatedAt      DateTime                  @updatedAt
+  organization   Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy      User?                     @relation("EmployeeFormCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  submissions    EmployeeFormSubmission[]
+
+  @@index([organizationId, active])
+}
+
+model EmployeeFormSubmission {
+  id                 String                   @id @default(cuid())
+  formId             String
+  organizationId     String
+  name               String
+  fatherName         String?
+  personalEmail      String?
+  phone              String?
+  address            String?
+  cnic               String?
+  dob                DateTime?
+  education          String?
+  currentUniversity  String?
+  seniorityLevel     SeniorityLevel?
+  companyEmail       String?
+  linkedinUrl        String?
+  notes              String?
+  status             EmployeeFormSubmissionStatus @default(SUBMITTED)
+  submittedAt        DateTime                 @default(now())
+  convertedEmployeeId String?
+  form               EmployeeForm              @relation(fields: [formId], references: [id], onDelete: Cascade)
+  organization       Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  convertedEmployee  User?                     @relation("FormSubmissionEmployee", fields: [convertedEmployeeId], references: [id], onDelete: SetNull)
+
+  @@index([formId, submittedAt])
+  @@index([organizationId, status])
 }
 
 model LeaveApplication {
@@ -449,6 +549,13 @@ enum UserRole {
   HR
   MANAGEMENT
   DEPARTMENT_HEAD
+  IT_MANAGER
+}
+
+enum EmployeeFormSubmissionStatus {
+  SUBMITTED
+  REVIEWED
+  CONVERTED
 }
 
 enum LeaveStatus {

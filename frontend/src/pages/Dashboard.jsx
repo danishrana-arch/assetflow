@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { useQuery } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "react-router-dom"
 import ParticleText from "../components/ParticleText"
 
@@ -20,6 +20,9 @@ import {
   Smartphone,
   Users,
   CalendarCheck,
+  CalendarDays,
+  X,
+  Plus,
   FolderKanban,
   AlertTriangle,
   Megaphone,
@@ -261,13 +264,23 @@ function GaugeRadial({
 ============================================================ */
 
 export default function Dashboard() {
-  const { user } = useAuth()
+  const { user, organization } = useAuth()
+  const queryClient = useQueryClient()
 
   const [range, setRange] =
     useState(defaultRange)
 
   const [executiveScope, setExecutiveScope] =
     useState("organization")
+  const [eventRange, setEventRange] = useState("week")
+  const [selectedEvent, setSelectedEvent] = useState(null)
+  const [showEventForm, setShowEventForm] = useState(false)
+  const [eventForm, setEventForm] = useState({
+    title: "",
+    date: "",
+    description: "",
+    isAnnual: true,
+  })
 
 
   /* ==========================================================
@@ -278,6 +291,8 @@ export default function Dashboard() {
     ["ADMIN", "CEO"].includes(
       user?.role
     )
+  const isIT = user?.role === "IT_MANAGER"
+  const isManager = ["ADMIN", "CEO", "HR"].includes(user?.role)
 
 
   /* ==========================================================
@@ -302,6 +317,10 @@ export default function Dashboard() {
     enabled: isManagement,
   })
 
+
+  // The executive endpoint has existed in more than one response shape.
+  // Normalize it here so the dashboard never crashes when metrics is absent.
+  const executiveMetrics = executive?.metrics ?? executive ?? {}
 
   /* ==========================================================
      ATTENDANCE ANOMALIES
@@ -401,6 +420,34 @@ export default function Dashboard() {
         .then((r) => r.data),
   })
 
+  const {
+    data: calendarData = { events: [], calendar: [] },
+    isLoading: loadingEvents,
+  } = useQuery({
+    queryKey: ["dashboard-calendar-events", eventRange],
+    queryFn: () =>
+      api
+        .get("/dashboard/events", { params: { range: eventRange } })
+        .then((r) => r.data),
+  })
+
+  const createEvent = useMutation({
+    mutationFn: () =>
+      api.post("/dashboard/events", eventForm).then((r) => r.data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["dashboard-calendar-events"],
+      })
+      setShowEventForm(false)
+      setEventForm({
+        title: "",
+        date: "",
+        description: "",
+        isAnnual: true,
+      })
+    },
+  })
+
 
   /* ==========================================================
      INVENTORY ACTIVITY
@@ -431,6 +478,7 @@ export default function Dashboard() {
         .then((r) => r.data),
 
     enabled:
+      !isIT &&
       !!range.start &&
       !!range.end,
   })
@@ -527,6 +575,102 @@ export default function Dashboard() {
     (latestAssets || []).slice(0, 3)
 
 
+  const calendarToday = new Date()
+  const calendarYear = calendarToday.getFullYear()
+  const calendarMonth = calendarToday.getMonth()
+  const firstDay = new Date(calendarYear, calendarMonth, 1).getDay()
+  const daysInMonth = new Date(calendarYear, calendarMonth + 1, 0).getDate()
+  const calendarCells = [
+    ...Array.from({ length: firstDay }, () => null),
+    ...Array.from({ length: daysInMonth }, (_, index) => index + 1),
+  ]
+  const calendarEventsByDate = (calendarData.calendar || []).reduce((acc, event) => {
+    if (!event?.date) return acc
+    const key = String(event.date).slice(0, 10)
+    if (!acc[key]) acc[key] = []
+    acc[key].push(event)
+    return acc
+  }, {})
+
+
+  /* ==========================================================
+     IT MANAGER DASHBOARD
+  ========================================================== */
+
+  if (isIT) {
+    const openTickets = (tickets || []).filter((ticket) =>
+      ["OPEN", "IN_PROGRESS"].includes(ticket.status)
+    ).length
+
+    return (
+      <div className="w-full space-y-4 overflow-x-hidden sm:space-y-5 lg:space-y-6">
+        <section className="card w-full overflow-hidden p-4 sm:p-5 lg:p-6">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted sm:text-xs">
+            IT operations
+          </p>
+          <h2 className="mt-1 text-2xl font-semibold leading-tight text-ink sm:text-[30px]">
+            Welcome back, {user?.name?.split(" ")[0] || "there"}
+          </h2>
+          <p className="mt-1.5 max-w-xl text-xs leading-5 text-muted sm:text-sm">
+            Asset inventory, assignments, requests and support at a glance.
+          </p>
+        </section>
+
+        <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 xl:grid-cols-4">
+          <StatCard label="Total Assets" value={stats?.totalAssets ?? "—"} sublabel="All organization assets" icon={Boxes} tone="blue" />
+          <StatCard label="Assigned" value={stats?.assignedAssets ?? "—"} sublabel="Currently assigned" icon={UserPlus} tone="green" />
+          <StatCard label="Available" value={stats?.availableAssets ?? "—"} sublabel="Ready to assign" icon={Package} tone="cyan" />
+          <StatCard label="Under Repair" value={stats?.assetsUnderRepair ?? "—"} sublabel={`${openTickets} open support tickets`} icon={Wrench} tone="orange" />
+        </section>
+
+        <section className="grid grid-cols-1 gap-4 sm:gap-5 lg:grid-cols-2">
+          <div className="card min-w-0 p-4 sm:p-5 lg:p-6">
+            <SectionHeader title="Recent Asset Activity" />
+            <ul className="mt-4 space-y-3">
+              {(activity || []).slice(0, 6).map((ev) => {
+                const cfg = ACTIVITY_ICONS[ev.type] || ACTIVITY_ICONS.NOTE
+                return (
+                  <li key={ev.id} className="flex min-w-0 items-center gap-3">
+                    <IconChip icon={cfg.icon} tone={cfg.tone} size="md" />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold text-ink">{humanEvent(ev.type)}</p>
+                      <p className="truncate text-xs text-muted">{ev.asset?.name || "—"}</p>
+                    </div>
+                    <span className="shrink-0 text-[11px] text-muted">{formatTime(ev.occurredAt)}</span>
+                  </li>
+                )
+              })}
+              {(!activity || activity.length === 0) && (
+                <li className="text-sm text-muted">No recent asset activity.</li>
+              )}
+            </ul>
+          </div>
+
+          <div className="card min-w-0 p-4 sm:p-5 lg:p-6">
+            <SectionHeader title="Latest Assets" />
+            <ul className="mt-4 space-y-3">
+              {topAssets.map((asset) => {
+                const cfg = CATEGORY_ICON[asset.category] || CATEGORY_ICON.Default
+                return (
+                  <li key={asset.id} className="flex min-w-0 items-center gap-3">
+                    <IconChip icon={cfg.icon} tone={cfg.tone} size="md" />
+                    <div className="min-w-0 flex-1">
+                      <Link to={`/inventory/${asset.id}`} className="block truncate text-sm font-semibold text-ink hover:text-accent">{asset.name}</Link>
+                      <p className="truncate font-mono text-[11px] text-muted">ID:{asset.serialNumber}</p>
+                    </div>
+                    <span className="shrink-0 text-right text-xs font-medium text-muted">{asset.assignedTo?.name ? "Assigned" : "Available"}</span>
+                  </li>
+                )
+              })}
+              {topAssets.length === 0 && <li className="text-sm text-muted">No assets yet.</li>}
+            </ul>
+          </div>
+        </section>
+      </div>
+    )
+  }
+
+
   /* ==========================================================
      RETURN
   ========================================================== */
@@ -545,7 +689,9 @@ export default function Dashboard() {
             <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted sm:text-xs">
               {isManagement
                 ? "Executive overview"
-                : "Dashboard"}
+                : user?.role === "IT_MANAGER"
+                  ? "IT operations"
+                  : "Dashboard"}
             </p>
 
             <h1
@@ -560,8 +706,9 @@ export default function Dashboard() {
             </h1>
 
             <p className="mt-1.5 max-w-xl text-xs leading-5 text-muted sm:text-sm">
-              Here's your overview of what's
-              happening across AssetFlow today.
+              {user?.role === "IT_MANAGER"
+                ? "Monitor inventory, assigned assets, requests, and support activity."
+                : "Here's your overview of what's happening across AssetFlow today."}
             </p>
 
             {isManagement &&
@@ -614,56 +761,56 @@ export default function Dashboard() {
       </section>
 
 
-    {/* ======================================================
-    PRIMARY STATISTICS
-====================================================== */}
+      {/* ======================================================
+          PRIMARY STATISTICS
+      ======================================================= */}
 
-<section
-  className="
-    grid
-    grid-cols-1
-    gap-4
-    sm:grid-cols-2
-    lg:grid-cols-3
-    lg:gap-5
-  "
->
-  <StatCard
-    label="Total Assets"
-    value={stats?.totalAssets ?? "—"}
-    sublabel="From last month"
-    icon={Package}
-    tone="blue"
-    trend={{
-      value: "12%",
-      direction: "up",
-    }}
-  />
+      <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 xl:grid-cols-3">
 
-  <StatCard
-    label="Assigned Assets"
-    value={stats?.assignedAssets ?? "—"}
-    sublabel={`${utilization}% utilization`}
-    icon={Layers}
-    tone="purple"
-    trend={{
-      value: "8%",
-      direction: "up",
-    }}
-  />
+        <StatCard
+          label="Total Assets"
+          value={
+            stats?.totalAssets ?? "—"
+          }
+          sublabel="From last month"
+          icon={Package}
+          tone="blue"
+          trend={{
+            value: "12%",
+            direction: "up",
+          }}
+        />
 
-  <StatCard
-    label="Warranty Alerts"
-    value={stats?.expiringWarranties ?? "—"}
-    sublabel="Expiring in 30 days"
-    icon={ShieldAlert}
-    tone="cyan"
-    trend={{
-      value: "3%",
-      direction: "down",
-    }}
-  />
-</section>
+        <StatCard
+          label="Assigned Assets"
+          value={
+            stats?.assignedAssets ?? "—"
+          }
+          sublabel={`${utilization}% utilization`}
+          icon={Layers}
+          tone="purple"
+          trend={{
+            value: "8%",
+            direction: "up",
+          }}
+        />
+
+        <StatCard
+          label="Warranty Alerts"
+          value={
+            stats?.expiringWarranties ??
+            "—"
+          }
+          sublabel="Expiring in 30 days"
+          icon={ShieldAlert}
+          tone="cyan"
+          trend={{
+            value: "3%",
+            direction: "down",
+          }}
+        />
+
+      </section>
 
 
       {/* ======================================================
@@ -713,7 +860,7 @@ export default function Dashboard() {
 
                 <div className="min-w-0">
                   <p className="text-xl font-semibold text-ink">
-                    {executive.metrics
+                    {executiveMetrics
                       ?.employees ?? "—"}
                   </p>
 
@@ -737,7 +884,7 @@ export default function Dashboard() {
 
                 <div className="min-w-0">
                   <p className="text-xl font-semibold text-ink">
-                    {executive.metrics
+                    {executiveMetrics
                       ?.present ?? "—"}
                   </p>
 
@@ -761,9 +908,9 @@ export default function Dashboard() {
 
                 <div className="min-w-0">
                   <p className="text-xl font-semibold text-ink">
-                    {executive.projects
+                    {executive?.projects
                       ?.length ??
-                      executive.metrics
+                      executiveMetrics
                         ?.projects ??
                       "—"}
                   </p>
@@ -788,7 +935,7 @@ export default function Dashboard() {
 
                 <div className="min-w-0">
                   <p className="text-xl font-semibold text-ink">
-                    {executive.metrics
+                    {executiveMetrics
                       ?.assets ?? "—"}
                   </p>
 
@@ -834,7 +981,7 @@ export default function Dashboard() {
 
                   <div className="rounded-xl bg-surface-2 px-2 py-3 text-center">
                     <p className="text-xl font-semibold text-ink">
-                      {executive.projects
+                      {executive?.projects
                         ?.notStarted ?? "—"}
                     </p>
 
@@ -845,7 +992,7 @@ export default function Dashboard() {
 
                   <div className="rounded-xl bg-surface-2 px-2 py-3 text-center">
                     <p className="text-xl font-semibold text-ink">
-                      {executive.projects
+                      {executive?.projects
                         ?.inProgress ?? "—"}
                     </p>
 
@@ -856,7 +1003,7 @@ export default function Dashboard() {
 
                   <div className="rounded-xl bg-surface-2 px-2 py-3 text-center">
                     <p className="text-xl font-semibold text-ink">
-                      {executive.projects
+                      {executive?.projects
                         ?.completed ?? "—"}
                     </p>
 
@@ -887,13 +1034,13 @@ export default function Dashboard() {
                 <div className="mt-4 flex flex-wrap gap-2">
 
                   <span className="rounded-full bg-chip-yellow-bg px-3 py-1.5 text-[11px] font-semibold text-chip-yellow-fg sm:text-xs">
-                    {executive.metrics
+                    {executiveMetrics
                       ?.late ?? 0}{" "}
                     late today
                   </span>
 
                   <span className="rounded-full bg-chip-pink-bg px-3 py-1.5 text-[11px] font-semibold text-chip-pink-fg sm:text-xs">
-                    {executive.metrics
+                    {executiveMetrics
                       ?.missingCheckout ??
                       0}{" "}
                     missing check-out
@@ -1173,6 +1320,99 @@ export default function Dashboard() {
       {/* ======================================================
           RECENT ACTIVITY / TOP ASSETS / ALERTS
       ======================================================= */}
+
+      {/* ======================================================
+          CALENDAR / EVENTS
+      ======================================================= */}
+      <section className="grid grid-cols-1 gap-4 sm:gap-5 lg:grid-cols-[minmax(0,1.65fr)_minmax(280px,1fr)]">
+        <div className="card min-w-0 overflow-hidden p-4 sm:p-5 lg:p-6">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-ink">Upcoming events</p>
+              <p className="mt-0.5 text-xs leading-5 text-muted">Birthdays, deadlines, holidays, annual events and employee leave.</p>
+            </div>
+            <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
+              <div className="flex rounded-full border border-border-strong p-0.5">
+                {[['week','This week'],['month','This month']].map(([value,label]) => (
+                  <button key={value} type="button" onClick={() => setEventRange(value)} className={`rounded-full px-3 py-1.5 text-[11px] font-semibold ${eventRange === value ? 'bg-accent text-white' : 'text-muted hover:text-ink'}`}>{label}</button>
+                ))}
+              </div>
+              {isManager && (
+                <button type="button" onClick={() => setShowEventForm((v) => !v)} className="pill-secondary flex items-center gap-1.5 px-3 py-1.5 text-xs">
+                  <Plus size={12} /> Add event
+                </button>
+              )}
+            </div>
+          </div>
+
+          {showEventForm && isManager && (
+            <form onSubmit={(e) => { e.preventDefault(); if (eventForm.title.trim() && eventForm.date) createEvent.mutate() }} className="mt-4 grid grid-cols-1 gap-2 rounded-2xl border border-border bg-surface-2 p-3 sm:grid-cols-2">
+              <input className="field min-w-0" placeholder="Event title" value={eventForm.title} onChange={(e) => setEventForm((v) => ({ ...v, title: e.target.value }))} required />
+              <input className="field min-w-0" type="date" value={eventForm.date} onChange={(e) => setEventForm((v) => ({ ...v, date: e.target.value }))} required />
+              <input className="field min-w-0 sm:col-span-2" placeholder="Details (optional)" value={eventForm.description} onChange={(e) => setEventForm((v) => ({ ...v, description: e.target.value }))} />
+              <label className="flex items-center gap-2 text-xs text-muted"><input type="checkbox" checked={eventForm.isAnnual} onChange={(e) => setEventForm((v) => ({ ...v, isAnnual: e.target.checked }))} /> Repeat every year</label>
+              <div className="flex justify-start sm:justify-end"><button type="submit" disabled={createEvent.isPending} className="pill-accent px-4 py-2 text-xs">{createEvent.isPending ? 'Saving…' : 'Save event'}</button></div>
+            </form>
+          )}
+
+          <div className="mt-4 space-y-2">
+            {loadingEvents && <p className="text-sm text-muted">Loading events…</p>}
+            {!loadingEvents && (calendarData.events || []).length === 0 && <p className="text-sm text-muted">No events in this period.</p>}
+            {(calendarData.events || []).map((event) => (
+              <button key={event.id} type="button" onClick={() => setSelectedEvent(event)} className="flex w-full min-w-0 items-start gap-3 rounded-2xl bg-surface-2 p-3 text-left hover:bg-surface-2/70">
+                <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-surface text-muted"><CalendarDays size={15} /></div>
+                <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-ink">{event.title}</p><p className="mt-0.5 truncate text-xs text-muted">{new Date(`${event.date}T00:00:00`).toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'})} · {(event.type || 'EVENT').replaceAll('_',' ')}</p></div>
+                <span className="shrink-0 text-[11px] font-semibold text-accent">View</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="card min-w-0 overflow-hidden p-4 sm:p-5 lg:p-6">
+          <div className="flex items-center justify-between gap-3"><div className="min-w-0"><p className="text-sm font-semibold text-ink">Calendar</p><p className="truncate text-xs text-muted">{calendarToday.toLocaleDateString(undefined,{month:'long',year:'numeric'})}</p></div><CalendarDays size={17} className="shrink-0 text-muted" /></div>
+          <div className="mt-4 grid grid-cols-7 gap-1 text-center text-[10px] font-semibold text-muted">{['S','M','T','W','T','F','S'].map((d,i)=><span key={i}>{d}</span>)}</div>
+          <div className="mt-2 grid grid-cols-7 gap-1">
+            {calendarCells.map((day,index) => {
+              if (!day) return <span key={index} className="h-8 sm:h-9" />
+              const key = `${calendarYear}-${String(calendarMonth+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`
+              const dayEvents = calendarEventsByDate[key] || []
+              return (
+                <button
+                  key={index}
+                  type="button"
+                  onClick={() => dayEvents[0] && setSelectedEvent(dayEvents[0])}
+                  className={`flex min-w-0 min-h-[52px] flex-col items-center justify-start rounded-lg px-0.5 py-1 text-[10px] sm:min-h-[58px] sm:text-xs ${dayEvents.length ? 'bg-accent/10 font-semibold text-accent' : 'text-ink hover:bg-surface-2'}`}
+                  title={dayEvents.map((e) => e.title).join(' · ')}
+                >
+                  <span className="leading-4">{day}</span>
+                  {dayEvents.length > 0 && (
+                    <span className="mt-0.5 w-full truncate px-0.5 text-[8px] font-medium leading-3 text-accent sm:text-[9px]">
+                      {dayEvents[0].title}
+                      {dayEvents.length > 1 ? ` +${dayEvents.length - 1}` : ''}
+                    </span>
+                  )}
+                </button>
+              )
+            })}
+          </div>
+          <div className="mt-4 space-y-2 border-t border-border pt-3">
+            {(calendarData.calendar || []).filter((e) => e.type === 'EMPLOYEE_LEAVE').slice(0,3).map((e) => (
+              <button key={e.id} type="button" onClick={() => setSelectedEvent(e)} className="flex w-full min-w-0 items-center gap-2 text-left text-xs text-muted"><span className="h-2 w-2 shrink-0 rounded-full bg-accent" /><span className="truncate"><span className="font-semibold text-ink">{e.employeeName}</span> is on leave · {new Date(`${e.date}T00:00:00`).toLocaleDateString(undefined,{month:'short',day:'numeric'})}</span></button>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {selectedEvent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={() => setSelectedEvent(null)}>
+          <div className="w-full max-w-md overflow-hidden rounded-3xl bg-surface p-4 shadow-xl sm:p-5" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="text-xs font-semibold uppercase tracking-wide text-muted">{(selectedEvent.type || 'EVENT').replaceAll('_',' ')}</p><h3 className="mt-1 break-words text-lg font-semibold text-ink">{selectedEvent.title}</h3></div><button type="button" onClick={() => setSelectedEvent(null)} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-surface-2 text-muted"><X size={14} /></button></div>
+            <p className="mt-4 text-sm text-muted">{new Date(`${selectedEvent.date}T00:00:00`).toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric',year:'numeric'})}</p>
+            {selectedEvent.description && <p className="mt-3 break-words rounded-2xl bg-surface-2 p-3 text-sm leading-6 text-ink">{selectedEvent.description}</p>}
+            {selectedEvent.employeeName && <p className="mt-3 text-xs text-muted">Employee: <span className="font-semibold text-ink">{selectedEvent.employeeName}</span></p>}
+          </div>
+        </div>
+      )}
 
       <section className="grid grid-cols-1 gap-4 sm:gap-5 lg:grid-cols-2 xl:grid-cols-3">
 
@@ -1532,7 +1772,7 @@ export default function Dashboard() {
         <div className="h-[120px] w-full sm:h-[160px] lg:h-[200px]">
 
           <ParticleText
-            text="ASSETFLOW"
+            text={(organization?.name && organization.name.trim() ? organization.name : "ASSETFLOW").toUpperCase()}
             height={200}
             repelRadius={155}
             repelStrength={210}

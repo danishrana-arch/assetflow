@@ -4,12 +4,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   BadgeCheck, Plus, X, Boxes, Ticket as TicketIcon, Activity, UserX, Pencil, Check,
   Mail, Phone, KeyRound, ChevronDown, ChevronUp, Laptop, PackageSearch, MapPin,
-  Calendar, Users as ManagerIcon, Briefcase, Send, AlertTriangle,
+  Calendar, Users as ManagerIcon, Briefcase, Send, AlertTriangle, Save, Minus,
 } from "lucide-react"
 import api from "../api/client"
 import { useAuth } from "../context/AuthContext"
-import { isManagement, ROLE_LABELS, MANAGEMENT_ROLES } from "../utils/roles"
+import { isManagement, canManageInventory, ROLE_LABELS } from "../utils/roles"
 import StatusBadge from "../components/StatusBadge"
+import ParticleText from "../components/ParticleText"
 import StatusPill from "../components/ui/StatusPill"
 import PageHeader from "../components/ui/PageHeader"
 import Avatar from "../components/ui/Avatar"
@@ -42,6 +43,7 @@ function assetTabOf(asset) {
 // manager sees the operational picture — not every field on the record.
 function useProfileLens({ user, employee, isSelf }) {
   return useMemo(() => {
+    if (user?.role === "IT_MANAGER") return "it"
     if (isSelf || user?.role === "ADMIN" || user?.role === "CEO") return "full"
     const dept = (user?.department?.name || "").toLowerCase()
     if (dept.includes("it") || dept.includes("tech")) return "it"
@@ -57,17 +59,20 @@ export default function EmployeeProfile() {
   const { organization, user, refreshUser } = useAuth()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const canManageInventory = isManagement(user?.role)
+  const canManageAssets = canManageInventory(user?.role)
+  const isIT = user?.role === "IT_MANAGER"
   const isSelf = user?.id === id
   // Management can edit every field on anyone (including themselves); a
   // non-management viewer can only edit their own phone/email.
-  const canEditFully = canManageInventory
-  const canEditContactOnly = !canManageInventory && isSelf
+  const canEditFully = isManagement(user?.role)
+  const canEditContactOnly = !canEditFully && isSelf && user?.role !== "IT_MANAGER"
   // Only the Owner (ADMIN) can remove an employee outright.
   const canRemoveEmployee = user?.role === "ADMIN" && user?.id !== id
   // Any management user can reset a forgotten password to the temp value.
-  const canResetPassword = canManageInventory && !isSelf
+  const canResetPassword = isManagement(user?.role) && !isSelf
   const [showAssignForm, setShowAssignForm] = useState(false)
+  const [showAddAssetForm, setShowAddAssetForm] = useState(false)
+  const [newAsset, setNewAsset] = useState({ name: "", category: "", serialNumber: "", cpu: "", ram: "", storage: "", purchaseDate: "", warrantyEnd: "" })
   const [selectedAssetId, setSelectedAssetId] = useState("")
   const [editing, setEditing] = useState(false)
   const [editForm, setEditForm] = useState(null)
@@ -80,16 +85,32 @@ export default function EmployeeProfile() {
   const [assetTab, setAssetTab] = useState("ALL")
   const [usageDrafts, setUsageDrafts] = useState({}) // { [assetId]: { notUsing: bool, actual: string } }
   const [usageSubmitted, setUsageSubmitted] = useState({}) // { [assetId]: true }
+  const [certificateDrafts, setCertificateDrafts] = useState([])
+  const canManageCertifications = ["ADMIN", "CEO"].includes(user?.role)
 
   const { data: employee, isLoading } = useQuery({
     queryKey: ["employee", id],
     queryFn: () => api.get(`/employees/${id}`).then((r) => r.data),
   })
 
+  useEffect(() => {
+    if (!employee) return
+    setCertificateDrafts((employee.certifications || []).map((certificate) => ({
+      id: certificate.id,
+      name: certificate.name || "",
+      institute: certificate.institute || "",
+      credentialId: certificate.credentialId || "",
+      credentialUrl: certificate.credentialUrl || "",
+      issuedDate: certificate.issuedDate ? certificate.issuedDate.slice(0, 10) : "",
+      expiryDate: certificate.expiryDate ? certificate.expiryDate.slice(0, 10) : "",
+      notes: certificate.notes || "",
+    })))
+  }, [employee])
+
   const lens = useProfileLens({ user, employee, isSelf })
   const showAssets = lens === "full" || lens === "it" || lens === "manager"
-  const showFinancial = lens === "full" || lens === "finance"
-  const showPersonalDetails = lens === "full" || lens === "hr"
+  const showFinancial = !isIT && (lens === "full" || lens === "finance")
+  const showPersonalDetails = !isIT && (lens === "full" || lens === "hr")
 
   const { data: departments } = useQuery({
     queryKey: ["departments"],
@@ -97,16 +118,16 @@ export default function EmployeeProfile() {
     enabled: canEditFully,
   })
 
-  const { data: managerCandidates = [] } = useQuery({
-    queryKey: ["employees", "manager-candidates"],
-    queryFn: () => api.get("/employees").then((r) => r.data),
+  const { data: managerOptions } = useQuery({
+    queryKey: ["employee-manager-options"],
+    queryFn: () => api.get("/employees", { params: { page: 1, pageSize: 100 } }).then((r) => r.data?.data || []),
     enabled: canEditFully,
   })
 
   const { data: availableAssets } = useQuery({
     queryKey: ["assets", "AVAILABLE"],
     queryFn: () => api.get("/assets", { params: { status: "AVAILABLE" } }).then((r) => r.data),
-    enabled: canManageInventory && showAssignForm,
+    enabled: canManageAssets && showAssignForm,
   })
 
   const invalidate = () => {
@@ -119,6 +140,23 @@ export default function EmployeeProfile() {
     onSuccess: () => { invalidate(); setShowAssignForm(false); setSelectedAssetId("") },
   })
 
+  const addAndAssignAsset = useMutation({
+    mutationFn: async () => {
+      const created = await api.post("/assets", {
+        ...newAsset,
+        purchaseDate: newAsset.purchaseDate || undefined,
+        warrantyEnd: newAsset.warrantyEnd || undefined,
+      })
+      await api.post(`/assets/${created.data.id}/assign`, { employeeId: id, note: `Added and assigned to ${employee?.name || "employee"}` })
+      return created.data
+    },
+    onSuccess: () => {
+      invalidate()
+      setShowAddAssetForm(false)
+      setNewAsset({ name: "", category: "", serialNumber: "", cpu: "", ram: "", storage: "", purchaseDate: "", warrantyEnd: "" })
+    },
+  })
+
   const removeAsset = useMutation({
     mutationFn: (assetId) =>
       api.post(`/assets/${assetId}/status`, {
@@ -127,6 +165,20 @@ export default function EmployeeProfile() {
         note: `Unassigned from ${employee?.name || "employee"}`,
       }),
     onSuccess: invalidate,
+  })
+
+  const saveCertification = useMutation({
+    mutationFn: ({ certificateId, data }) => certificateId
+      ? api.patch(`/employees/${id}/certifications/${certificateId}`, data)
+      : api.post(`/employees/${id}/certifications`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["employee", id] })
+    },
+  })
+
+  const deleteCertification = useMutation({
+    mutationFn: (certificateId) => api.delete(`/employees/${id}/certifications/${certificateId}`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["employee", id] }),
   })
 
   const removeEmployee = useMutation({
@@ -206,7 +258,14 @@ export default function EmployeeProfile() {
     setEditForm({
       name: employee.name || "",
       email: employee.email || "",
+      personalEmail: employee.personalEmail || "",
       phone: employee.phone || "",
+      fatherName: employee.fatherName || "",
+      education: employee.education || "",
+      currentUniversity: employee.currentUniversity || "",
+      linkedinUrl: employee.linkedinUrl || "",
+      shiftStart: employee.shiftStart || "",
+      shiftEnd: employee.shiftEnd || "",
       departmentId: employee.department?.id || "",
       managerId: employee.manager?.id || "",
       role: employee.role || "EMPLOYEE",
@@ -239,6 +298,13 @@ export default function EmployeeProfile() {
   if (isLoading) return <p className="text-sm text-muted">Loading...</p>
   if (!employee) return <p className="text-sm text-muted">Employee not found.</p>
 
+  // Today's attendance record (date-only comparison)
+  const todayIso = new Date().toISOString().slice(0, 10)
+  const todayRecord = (employee.attendanceRecords || []).find((r) => {
+    const d = r.date ? (typeof r.date === "string" ? r.date.slice(0, 10) : new Date(r.date).toISOString().slice(0, 10)) : null
+    return d === todayIso
+  })
+
   const level = employee.seniorityLevel
   const levelTone = LEVEL_TONE[level] || "slate"
   const canEdit = canEditFully || canEditContactOnly
@@ -257,7 +323,7 @@ export default function EmployeeProfile() {
       <PageHeader
         title="Employee Profile"
         subtitle="Personal information, assigned assets and activity."
-        backTo={canManageInventory ? "/employees" : "/"}
+        backTo={canManageAssets || isManagement(user?.role) ? "/employees" : "/"}
         actions={
           canRemoveEmployee && (
             <button
@@ -289,6 +355,22 @@ export default function EmployeeProfile() {
           </button>
         </div>
       )}
+
+      {/* Small particle banner showing employee's organization */}
+      <div
+        className="mt-2 w-full overflow-hidden rounded-2xl border border-black/5 shadow-[0_18px_50px_rgba(0,0,0,0.10)] dark:border-white/5"
+        style={{ backgroundColor: "#050629" }}
+      >
+        <div className="h-[120px] w-full sm:h-[160px] lg:h-[200px]">
+          <ParticleText
+            text={(employee?.organization?.name && employee.organization.name.trim() ? employee.organization.name : "ASSETFLOW").toUpperCase()}
+            height={200}
+            repelRadius={155}
+            repelStrength={210}
+            ease={0.065}
+          />
+        </div>
+      </div>
 
       {/* Top identity bar — name / designation / reporting manager / company
           email on the left, company name tag in the org's brand color on
@@ -327,8 +409,69 @@ export default function EmployeeProfile() {
             {organization.name}
           </span>
         )}
+
+        {/** Attendance timeline & status for today's record (visible to admins/CEO and employee) */}
+        {todayRecord && (
+          <div className="mb-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <p className="text-sm font-semibold text-ink">Today's shift</p>
+                {todayRecord.status === "LATE" && (
+                  <StatusPill tone="yellow">LATE</StatusPill>
+                )}
+              </div>
+              <div className="text-xs text-muted">
+                {todayRecord.checkInAt ? new Date(todayRecord.checkInAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "-"}
+                {todayRecord.checkOutAt ? ` — ${new Date(todayRecord.checkOutAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : ""}
+              </div>
+            </div>
+
+            {/* Timeline bar */}
+            <div className="mt-2 h-3 w-full rounded-full bg-surface-2 relative overflow-hidden">
+              {(() => {
+                const shiftStartStr = employee.shiftStart || organization?.shiftStartDefault || "09:00"
+                const workingHours = Number(organization?.workingHoursPerDay || 8)
+                const parseHHMM = (s) => { const [h,m] = String(s||"09:00").split(":").map((v)=>Number(v||0)); return (h||0)*60 + (m||0) }
+                const shiftStart = parseHHMM(shiftStartStr)
+                const shiftEnd = shiftStart + Math.round(workingHours * 60)
+                const clamp = (v, a, b) => Math.max(a, Math.min(b, v))
+                const parseTime = (t) => t ? new Date(t) : null
+                const inAt = parseTime(todayRecord.checkInAt) || null
+                const outAt = parseTime(todayRecord.checkOutAt) || new Date()
+                if (!inAt) return null
+                const inMin = inAt.getHours()*60 + inAt.getMinutes()
+                const outMin = outAt.getHours()*60 + outAt.getMinutes()
+                const total = Math.max(1, shiftEnd - shiftStart)
+                const workStart = clamp(inMin, shiftStart - total, shiftEnd + total)
+                const workEnd = clamp(outMin, shiftStart - total, shiftEnd + total)
+                const left = ((Math.max(workStart, shiftStart) - shiftStart) / total) * 100
+                const width = ((Math.max(0, Math.min(workEnd, shiftEnd) - Math.max(workStart, shiftStart))) / total) * 100
+                const leftOverflow = workStart < shiftStart ? ((shiftStart - workStart) / total) * 100 : 0
+                const rightOverflow = workEnd > shiftEnd ? ((workEnd - shiftEnd) / total) * 100 : 0
+                const color = organization?.primaryColor || "#3B82F6"
+                return (
+                  <>
+                    {/* worked inside shift */}
+                    <div style={{ left: `${left}%`, width: `${width}%` }} className="absolute top-0 h-3" />
+                    <div style={{ left: `${left}%`, width: `${width}%`, backgroundColor: color }} className="absolute top-0 h-3 rounded-full" />
+                    {/* overflow left */}
+                    {leftOverflow > 0 && (
+                      <div style={{ left: `${-leftOverflow}%`, width: `${leftOverflow}%`, backgroundColor: "#ff4d4f" }} className="absolute top-0 h-3 rounded-full" />
+                    )}
+                    {/* overflow right */}
+                    {rightOverflow > 0 && (
+                      <div style={{ right: `${-rightOverflow}%`, width: `${rightOverflow}%`, backgroundColor: "#ff4d4f" }} className="absolute top-0 h-3 rounded-full" />
+                    )}
+                  </>
+                )
+              })()}
+            </div>
+          </div>
+        )}
       </div>
 
+      {!isIT && (
+        <>
       {/* Employee 360 overview */}
       <section className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {(() => {
@@ -353,6 +496,16 @@ export default function EmployeeProfile() {
         <div className="card p-5"><SectionHeader title="Projects & time"/><div className="mt-3 space-y-2">{(employee.projectMemberships||[]).slice(0,6).map(m=><div key={m.id} className="flex items-center justify-between rounded-2xl bg-surface-2 p-3"><div className="min-w-0"><p className="truncate text-sm font-semibold text-ink">{m.project?.name}</p><p className="text-xs text-muted">{m.project?.status?.replaceAll("_"," ")} · {Number(m.hoursSpent||0).toFixed(1)}h</p></div>{m.project?.deadline&&<span className="text-[11px] text-muted">Due {new Date(m.project.deadline).toLocaleDateString()}</span>}</div>)}{!(employee.projectMemberships||[]).length&&<p className="text-sm text-muted">No project assignments.</p>}</div></div>
         <div className="card p-5"><SectionHeader title="Recent payroll"/><div className="mt-3 space-y-2">{(employee.payrollRecords||[]).slice(0,5).map(p=><div key={p.id} className="flex items-center justify-between rounded-2xl bg-surface-2 p-3"><div><p className="text-sm font-semibold text-ink">{p.month}/{p.year}</p><p className="text-xs text-muted">{p.status}</p></div><span className="text-sm font-semibold text-ink">PKR {Number(p.netPay||0).toLocaleString()}</span></div>)}{!(employee.payrollRecords||[]).length&&<p className="text-sm text-muted">No payroll records.</p>}</div></div>
       </section>
+        </>
+      )}
+
+      {isIT && (
+        <section className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <div className="card p-4"><p className="text-xs text-muted">Assigned assets</p><p className="mt-1 text-2xl font-semibold text-ink">{assignedAssets.length}</p><p className="text-[11px] text-muted">Current assignments</p></div>
+          <div className="card p-4"><p className="text-xs text-muted">Laptops</p><p className="mt-1 text-2xl font-semibold text-ink">{laptopCount}</p><p className="text-[11px] text-muted">Assigned laptop devices</p></div>
+          <div className="card p-4"><p className="text-xs text-muted">Accessories</p><p className="mt-1 text-2xl font-semibold text-ink">{accessoryCount}</p><p className="text-[11px] text-muted">Monitors, phones and accessories</p></div>
+        </section>
+      )}
 
       {/**/}
       {/* Contact panel + content, matching the AssetFlow contact-detail layout */}
@@ -365,17 +518,47 @@ export default function EmployeeProfile() {
               <SectionHeader
                 title="Assigned Assets"
                 action={
-                  canManageInventory && (
-                    <button
-                      onClick={() => setShowAssignForm((v) => !v)}
-                      className="pill-secondary flex items-center gap-1.5 px-3 py-1.5 text-xs"
-                    >
-                      {showAssignForm ? <X size={12} /> : <Plus size={12} />}
-                      {showAssignForm ? "Cancel" : "Assign"}
-                    </button>
+                  canManageAssets && (
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setShowAssignForm((v) => !v)}
+                        className="pill-secondary flex items-center gap-1.5 px-3 py-1.5 text-xs"
+                      >
+                        {showAssignForm ? <X size={12} /> : <Plus size={12} />}
+                        {showAssignForm ? "Cancel" : "Assign"}
+                      </button>
+                      <button
+                        onClick={() => setShowAddAssetForm((v) => !v)}
+                        className="pill-accent flex items-center gap-1.5 px-3 py-1.5 text-xs"
+                      >
+                        {showAddAssetForm ? <X size={12} /> : <Plus size={12} />}
+                        {showAddAssetForm ? "Cancel" : "Add asset"}
+                      </button>
+                    </div>
                   )
                 }
               />
+
+              {showAddAssetForm && (
+                <form
+                  onSubmit={(e) => { e.preventDefault(); if (newAsset.name.trim() && newAsset.serialNumber.trim()) addAndAssignAsset.mutate() }}
+                  className="mb-4 grid grid-cols-1 gap-2 rounded-2xl border border-border bg-surface-2 p-3 sm:grid-cols-2 lg:grid-cols-4"
+                >
+                  <TextField label="Asset name" value={newAsset.name} onChange={(e) => setNewAsset((v) => ({ ...v, name: e.target.value }))} required />
+                  <TextField label="Category" value={newAsset.category} onChange={(e) => setNewAsset((v) => ({ ...v, category: e.target.value }))} placeholder="Laptop, Monitor, Phone…" />
+                  <TextField label="Serial number" value={newAsset.serialNumber} onChange={(e) => setNewAsset((v) => ({ ...v, serialNumber: e.target.value }))} required />
+                  <TextField label="CPU" value={newAsset.cpu} onChange={(e) => setNewAsset((v) => ({ ...v, cpu: e.target.value }))} />
+                  <TextField label="RAM" value={newAsset.ram} onChange={(e) => setNewAsset((v) => ({ ...v, ram: e.target.value }))} />
+                  <TextField label="Storage" value={newAsset.storage} onChange={(e) => setNewAsset((v) => ({ ...v, storage: e.target.value }))} />
+                  <TextField label="Purchase date" type="date" value={newAsset.purchaseDate} onChange={(e) => setNewAsset((v) => ({ ...v, purchaseDate: e.target.value }))} />
+                  <TextField label="Warranty end" type="date" value={newAsset.warrantyEnd} onChange={(e) => setNewAsset((v) => ({ ...v, warrantyEnd: e.target.value }))} />
+                  <div className="sm:col-span-2 lg:col-span-4 flex justify-end">
+                    <button type="submit" disabled={addAndAssignAsset.isPending} className="pill-accent px-4 py-2 text-xs disabled:opacity-60">
+                      {addAndAssignAsset.isPending ? "Saving…" : "Add & assign asset"}
+                    </button>
+                  </div>
+                </form>
+              )}
 
               {showAssignForm && (
                 <form
@@ -434,7 +617,7 @@ export default function EmployeeProfile() {
                           </Link>
                           <p className="truncate font-mono text-[11px] text-muted">{asset.serialNumber}</p>
                         </div>
-                        {canManageInventory && (
+                        {canManageAssets && (
                           <button
                             onClick={() => removeAsset.mutate(asset.id)}
                             disabled={removeAsset.isPending}
@@ -566,6 +749,7 @@ export default function EmployeeProfile() {
             </div>
           )}
 
+          {!isIT && (
           <div className="card p-5">
             <SectionHeader title="Support History" />
             <ul className="max-h-80 space-y-2 overflow-y-auto">
@@ -584,8 +768,9 @@ export default function EmployeeProfile() {
                 <EmptyState icon={TicketIcon} title="No tickets" description="This employee hasn't raised any support requests." />
               )}
             </ul>
-          </div>
+          </div>          )}
 
+          {!isIT && (
           <div className="card p-5">
             <SectionHeader title="Activity" />
             <ul className="max-h-80 space-y-2 overflow-y-auto">
@@ -610,6 +795,7 @@ export default function EmployeeProfile() {
               )}
             </ul>
           </div>
+          )}
         </div>
 
         <div className="card p-6 lg:order-2">
@@ -635,6 +821,8 @@ export default function EmployeeProfile() {
                 {WORK_LOCATION_LABEL[employee.workLocationType] || "Office"}
               </span>
             </div>
+
+
 
             <div className="mt-4 flex items-center gap-2">
               {canEdit && !editing && (
@@ -692,6 +880,8 @@ export default function EmployeeProfile() {
             </div>
           </div>
 
+          {!isIT && (
+            <>
           <div className="my-5 divider" />
 
           <SectionHeader
@@ -710,30 +900,45 @@ export default function EmployeeProfile() {
               {canEditFully && (
                 <TextField label="Full name" value={editForm.name} onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))} />
               )}
-              <TextField label="Email" type="email" value={editForm.email} onChange={(e) => setEditForm((f) => ({ ...f, email: e.target.value }))} />
+              <TextField label="Company Email" type="email" value={editForm.email} onChange={(e) => setEditForm((f) => ({ ...f, email: e.target.value }))} />
               <TextField label="Phone" value={editForm.phone} onChange={(e) => setEditForm((f) => ({ ...f, phone: e.target.value }))} />
               {canEditFully && (
                 <>
-                  {(user?.role === "ADMIN" || user?.role === "CEO") && (
-                    <SelectField label="Role" value={editForm.role} onChange={(e) => setEditForm((f) => ({ ...f, role: e.target.value }))}>
-                      {Object.entries(ROLE_LABELS)
-                        .filter(([value]) => value !== "CEO" || employee?.role === "CEO" || (employee?.role !== "CEO" && managerCandidates.filter((m) => m.role === "CEO").length < 2))
-                        .map(([value, label]) => (
-                          <option key={value} value={value}>{label}</option>
-                        ))}
-                    </SelectField>
-                  )}
+                  <TextField label="Personal Email" type="email" value={editForm.personalEmail} onChange={(e) => setEditForm((f) => ({ ...f, personalEmail: e.target.value }))} />
+                  <TextField label="Father Name" value={editForm.fatherName} onChange={(e) => setEditForm((f) => ({ ...f, fatherName: e.target.value }))} />
+                  <TextField label="Education" value={editForm.education} onChange={(e) => setEditForm((f) => ({ ...f, education: e.target.value }))} />
+                  <TextField label="Current University" value={editForm.currentUniversity} onChange={(e) => setEditForm((f) => ({ ...f, currentUniversity: e.target.value }))} />
+                  <TextField label="LinkedIn" value={editForm.linkedinUrl} onChange={(e) => setEditForm((f) => ({ ...f, linkedinUrl: e.target.value }))} placeholder="https://linkedin.com/in/..." />
+                  <div className="grid grid-cols-2 gap-2">
+                    <TextField label="Shift Start" type="time" value={editForm.shiftStart} onChange={(e) => setEditForm((f) => ({ ...f, shiftStart: e.target.value }))} />
+                    <TextField label="Shift End" type="time" value={editForm.shiftEnd} onChange={(e) => setEditForm((f) => ({ ...f, shiftEnd: e.target.value }))} />
+                  </div>
+                </>
+              )}
+              {canEditFully && (
+                <>
                   <TextField label="Designation / Title" value={editForm.designation} onChange={(e) => setEditForm((f) => ({ ...f, designation: e.target.value }))} placeholder="e.g. Senior Backend Engineer" />
+                  <TextField label="Personal Email" type="email" value={editForm.personalEmail} onChange={(e) => setEditForm((f) => ({ ...f, personalEmail: e.target.value }))} />
+                  <TextField label="Father Name" value={editForm.fatherName} onChange={(e) => setEditForm((f) => ({ ...f, fatherName: e.target.value }))} />
+                  <TextField label="Education" value={editForm.education} onChange={(e) => setEditForm((f) => ({ ...f, education: e.target.value }))} placeholder="e.g. BS Computer Science" />
+                  <TextField label="Current University" value={editForm.currentUniversity} onChange={(e) => setEditForm((f) => ({ ...f, currentUniversity: e.target.value }))} />
+                  <TextField label="LinkedIn URL" value={editForm.linkedinUrl} onChange={(e) => setEditForm((f) => ({ ...f, linkedinUrl: e.target.value }))} placeholder="https://www.linkedin.com/in/..." />
+                  <TextField label="Shift Start" type="time" value={editForm.shiftStart} onChange={(e) => setEditForm((f) => ({ ...f, shiftStart: e.target.value }))} />
+                  <TextField label="Shift End" type="time" value={editForm.shiftEnd} onChange={(e) => setEditForm((f) => ({ ...f, shiftEnd: e.target.value }))} />
                   <SelectField label="Department" value={editForm.departmentId} onChange={(e) => setEditForm((f) => ({ ...f, departmentId: e.target.value }))}>
                     <option value="">None</option>
                     {(departments || []).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
                   </SelectField>
+                  <SelectField label="Role" value={editForm.role} onChange={(e) => setEditForm((f) => ({ ...f, role: e.target.value }))}>
+                    {Object.entries(ROLE_LABELS)
+                      .filter(([value]) => ["ADMIN", "CEO", "SALES_HEAD", "HR", "MANAGEMENT", "DEPARTMENT_HEAD", "IT_MANAGER", "EMPLOYEE"].includes(value))
+                      .filter(([value]) => value !== "CEO" || employee.role === "CEO" || (managerOptions || []).filter((m) => m.role === "CEO").length < 2)
+                      .map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                  </SelectField>
                   <SelectField label="Reporting Manager" value={editForm.managerId} onChange={(e) => setEditForm((f) => ({ ...f, managerId: e.target.value }))}>
                     <option value="">None</option>
-                    {(managerCandidates || []).filter((manager) => manager.id !== employee?.id).map((manager) => (
-                      <option key={manager.id} value={manager.id}>
-                        {manager.name}{manager.role ? ` — ${ROLE_LABELS[manager.role] || manager.role}` : ""}
-                      </option>
+                    {(managerOptions || []).filter((manager) => manager.id !== employee.id).map((manager) => (
+                      <option key={manager.id} value={manager.id}>{manager.name} — {ROLE_LABELS[manager.role] || manager.role}</option>
                     ))}
                   </SelectField>
                   <SelectField label="Status" value={editForm.status} onChange={(e) => setEditForm((f) => ({ ...f, status: e.target.value }))}>
@@ -791,12 +996,72 @@ export default function EmployeeProfile() {
             </form>
           ) : (
             <div className="space-y-3.5">
-              <FieldValue label="Email" value={employee.email} />
+              <FieldValue label="Company Email" value={employee.email} />
+              <FieldValue label="Personal Email" value={employee.personalEmail} />
               <FieldValue label="Phone" value={employee.phone} />
               <FieldValue label="Designation" value={employee.designation || employee.skill} />
               <FieldValue label="Department" value={employee.department?.name} />
               <FieldValue label="Reporting Manager" value={employee.manager?.name} />
 
+            {canManageCertifications && (
+              <div className="mt-5 w-full border-t border-border pt-4 text-left">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-muted">Certifications</p>
+                    <p className="mt-0.5 text-[11px] text-muted-2">Add verified certificates and credentials.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setCertificateDrafts((items) => [...items, { name: "", institute: "", credentialId: "", credentialUrl: "", issuedDate: "", expiryDate: "", notes: "" }])}
+                    className="flex h-8 w-8 items-center justify-center rounded-full border border-border-strong bg-surface text-ink hover:bg-surface-2"
+                    title="Add certification"
+                    aria-label="Add certification"
+                  >
+                    <Plus size={14} />
+                  </button>
+                </div>
+
+                <div className="mt-3 space-y-3">
+                  {certificateDrafts.map((certificate, index) => (
+                    <div key={certificate.id || `new-${index}`} className="rounded-2xl border border-border bg-surface-2 p-3">
+                      <div className="grid grid-cols-1 gap-2">
+                        <TextField label="Certificate name" value={certificate.name} onChange={(e) => setCertificateDrafts((items) => items.map((item, i) => i === index ? { ...item, name: e.target.value } : item))} placeholder="e.g. AWS Certified Developer" />
+                        <TextField label="Institute" value={certificate.institute} onChange={(e) => setCertificateDrafts((items) => items.map((item, i) => i === index ? { ...item, institute: e.target.value } : item))} placeholder="Issuing institute" />
+                        <TextField label="Credential ID" value={certificate.credentialId} onChange={(e) => setCertificateDrafts((items) => items.map((item, i) => i === index ? { ...item, credentialId: e.target.value } : item))} />
+                        <TextField label="Verification URL" type="url" value={certificate.credentialUrl} onChange={(e) => setCertificateDrafts((items) => items.map((item, i) => i === index ? { ...item, credentialUrl: e.target.value } : item))} placeholder="https://..." />
+                        <div className="grid grid-cols-2 gap-2">
+                          <TextField label="Issued" type="date" value={certificate.issuedDate} onChange={(e) => setCertificateDrafts((items) => items.map((item, i) => i === index ? { ...item, issuedDate: e.target.value } : item))} />
+                          <TextField label="Expiry" type="date" value={certificate.expiryDate} onChange={(e) => setCertificateDrafts((items) => items.map((item, i) => i === index ? { ...item, expiryDate: e.target.value } : item))} />
+                        </div>
+                        <div className="flex items-center justify-end gap-2 pt-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (certificate.id) deleteCertification.mutate(certificate.id)
+                              else setCertificateDrafts((items) => items.filter((_, i) => i !== index))
+                            }}
+                            className="flex h-8 w-8 items-center justify-center rounded-full border border-border-strong bg-surface text-danger hover:bg-chip-pink-bg"
+                            title="Remove certification"
+                            aria-label="Remove certification"
+                          >
+                            <Minus size={13} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => saveCertification.mutate({ certificateId: certificate.id, data: certificate })}
+                            disabled={saveCertification.isPending || !certificate.name.trim() || !certificate.institute.trim()}
+                            className="flex items-center gap-1.5 rounded-full bg-accent px-3 py-1.5 text-[11px] font-semibold text-white disabled:opacity-50"
+                          >
+                            <Save size={12} /> Save
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  {certificateDrafts.length === 0 && <p className="text-xs text-muted">No certifications added. Use + to add one.</p>}
+                </div>
+              </div>
+            )}
               {/* Collapsible "more details" card — DOB, joining date,
                   location and other less-frequently-needed fields. */}
               <div className="!mt-4 overflow-hidden rounded-2xl border border-border">
@@ -812,6 +1077,11 @@ export default function EmployeeProfile() {
                   <div className="space-y-3.5 border-t border-border bg-surface-2 px-3.5 py-4">
                     {showPersonalDetails ? (
                       <>
+                        <FieldValue label="Father Name" value={employee.fatherName} />
+                        <FieldValue label="Education" value={employee.education} />
+                        <FieldValue label="Current University" value={employee.currentUniversity} />
+                        <FieldValue label="LinkedIn" value={employee.linkedinUrl} />
+                        <FieldValue label="Shift" value={employee.shiftStart && employee.shiftEnd ? `${employee.shiftStart} - ${employee.shiftEnd}` : employee.shiftStart || employee.shiftEnd} />
                         <FieldValue label="Date of Birth" value={fmtDate(employee.dob)} />
                         <FieldValue
                           label="Joining Date"
@@ -838,6 +1108,8 @@ export default function EmployeeProfile() {
                 )}
               </div>
             </div>
+          )}
+            </>
           )}
         </div>
       </div>

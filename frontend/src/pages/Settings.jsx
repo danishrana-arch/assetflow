@@ -33,6 +33,8 @@ export default function Settings() {
   const [lateDeductionAmount, setLateDeductionAmount] = useState(500)
   const [workingHoursPerDay, setWorkingHoursPerDay] = useState(8)
   const [workingDaysPerWeek, setWorkingDaysPerWeek] = useState(5)
+  const [shiftStartDefault, setShiftStartDefault] = useState("09:00")
+  const [lateThresholdMinutes, setLateThresholdMinutes] = useState(15)
   const [subOrganizationName, setSubOrganizationName] = useState("")
   const [organizationError, setOrganizationError] = useState("")
   const [geofenceEnabled, setGeofenceEnabled] = useState(false)
@@ -57,6 +59,8 @@ export default function Settings() {
       setLateDeductionAmount(organization.lateDeductionAmount ?? 500)
       setWorkingHoursPerDay(organization.workingHoursPerDay ?? 8)
       setWorkingDaysPerWeek(organization.workingDaysPerWeek ?? 5)
+      setShiftStartDefault(organization.shiftStartDefault || "09:00")
+      setLateThresholdMinutes(organization.lateThresholdMinutes ?? 15)
       setGeofenceEnabled(!!organization.geofenceEnabled)
       setOfficeLatitude(organization.officeLatitude ?? "")
       setOfficeLongitude(organization.officeLongitude ?? "")
@@ -78,7 +82,7 @@ export default function Settings() {
   })
 
   const saveWorkSchedule = useMutation({
-    mutationFn: () => api.patch("/organization", { workingHoursPerDay, workingDaysPerWeek }),
+    mutationFn: () => api.patch("/organization", { workingHoursPerDay, workingDaysPerWeek, shiftStartDefault, lateThresholdMinutes }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["organization"] }),
   })
 
@@ -343,6 +347,22 @@ export default function Settings() {
                 step="1"
                 value={workingDaysPerWeek}
                 onChange={(e) => setWorkingDaysPerWeek(e.target.value)}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4 mt-4">
+              <TextField
+                label="Default shift start (HH:mm)"
+                type="time"
+                value={shiftStartDefault}
+                onChange={(e) => setShiftStartDefault(e.target.value)}
+              />
+              <TextField
+                label="Late threshold (minutes)"
+                type="number"
+                min={0}
+                max={480}
+                value={lateThresholdMinutes}
+                onChange={(e) => setLateThresholdMinutes(e.target.value)}
               />
             </div>
             <p className="mt-2 text-xs text-muted-2">

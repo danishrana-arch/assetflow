@@ -1,6 +1,6 @@
 const bcrypt = require("bcrypt")
 const prisma = require("../lib/prisma")
-const { MANAGEMENT_ROLES, ASSIGNABLE_ROLES, MAX_CEO_COUNT } = require("../utils/roles")
+const { MANAGEMENT_ROLES, ASSIGNABLE_ROLES, MAX_CEO_COUNT, EMPLOYEE_DIRECTORY_ROLES } = require("../utils/roles")
 const { encryptField, decryptField } = require("../utils/crypto")
 const { logAudit } = require("../utils/audit")
 const { parseCsv } = require("../utils/csv")
@@ -11,9 +11,14 @@ function stripSensitive(user, canSeeSensitive) {
   return { ...rest, cnic: decryptField(cnic), bankAccountNumber: decryptField(bankAccountNumber) }
 }
 
+function stripForIT(user) {
+  const { id, name, email, phone, role, status, photoUrl, designation, department, assignedAssets } = user
+  return { id, name, email, phone, role, status, photoUrl, designation, department, assignedAssets }
+}
+
 async function listEmployees(req, res, next) {
   try {
-    const { organizationId } = req.user
+    const { organizationId, role: requesterRole } = req.user
     const { search, department, status, page, pageSize } = req.query
 
     const where = {
@@ -38,7 +43,7 @@ async function listEmployees(req, res, next) {
         prisma.user.count({ where }),
         prisma.user.findMany({
           where,
-          include: { department: true, manager: true, assignedAssets: true },
+          include: { department: true, assignedAssets: true },
           orderBy: { name: "asc" },
           skip: (pageNum - 1) * size,
           take: size,
@@ -47,7 +52,9 @@ async function listEmployees(req, res, next) {
       ])
 
       return res.json({
-        data: employees.map(({ password, cnic, bankAccountNumber, ...e }) => e),
+        data: requesterRole === "IT_MANAGER"
+          ? employees.map(stripForIT)
+          : employees.map(({ password, cnic, bankAccountNumber, ...e }) => e),
         page: pageNum,
         pageSize: size,
         total,
@@ -58,13 +65,17 @@ async function listEmployees(req, res, next) {
 
     const employees = await prisma.user.findMany({
       where,
-      include: { department: true, manager: true, assignedAssets: true },
+      include: { department: true, assignedAssets: true },
       orderBy: { name: "asc" },
     })
 
     // List views never include CNIC — only the single-employee view does,
     // and even then only for the employee themselves or management.
-    res.json(employees.map(({ password, cnic, bankAccountNumber, ...e }) => e))
+    res.json(
+      requesterRole === "IT_MANAGER"
+        ? employees.map(stripForIT)
+        : employees.map(({ password, cnic, bankAccountNumber, ...e }) => e)
+    )
   } catch (err) {
     next(err)
   }
@@ -76,7 +87,7 @@ async function getEmployee(req, res, next) {
     const { id } = req.params
 
     // Employees can only view their own profile management roles can view anyone's.
-    if (!MANAGEMENT_ROLES.includes(role) && userId !== id) {
+    if (!EMPLOYEE_DIRECTORY_ROLES.includes(role) && userId !== id) {
       return res.status(403).json({ error: "You can only view your own profile" })
     }
 
@@ -84,14 +95,55 @@ async function getEmployee(req, res, next) {
       where: { id, organizationId },
       include: {
         department: true,
+        organization: true,
         manager: true,
         assignedAssets: true,
+        attendanceRecords: { orderBy: { date: "desc" }, take: 90 },
+        certifications: { orderBy: { createdAt: "asc" } },
         tickets: { orderBy: { createdAt: "desc" } },
         lifecycleEvents: { orderBy: { occurredAt: "desc" }, take: 20, include: { asset: true } },
       },
     })
 
     if (!employee) return res.status(404).json({ error: "Employee not found" })
+
+    // IT is intentionally asset-only. Never send payroll, salary, CNIC, DOB,
+    // address, bank details, attendance, leave, or project data to an IT manager.
+    if (role === "IT_MANAGER") {
+      const {
+        id: employeeId,
+        name,
+        email,
+        phone,
+        role: employeeRole,
+        status,
+        photoUrl,
+        designation,
+        department,
+        manager,
+        assignedAssets,
+        tickets,
+        lifecycleEvents,
+      } = employee
+
+      return res.json({
+        id: employeeId,
+        name,
+        email,
+        phone,
+        role: employeeRole,
+        status,
+        photoUrl,
+        designation,
+        department,
+        manager: manager
+          ? { id: manager.id, name: manager.name, email: manager.email, role: manager.role }
+          : null,
+        assignedAssets,
+        tickets,
+        lifecycleEvents,
+      })
+    }
 
     // Sensitive personal fields (CNIC/DOB/address/bank details) are only
     // meaningful to the employee themselves or someone in a management
@@ -102,6 +154,10 @@ async function getEmployee(req, res, next) {
     const safe = isSelfOrManagement
       ? { ...rest, cnic: decryptField(cnic), dob, address, bankAccountNumber: decryptField(bankAccountNumber) }
       : rest
+
+    // Certifications are restricted to ADMIN/CEO. They are not part of
+    // HR, manager, or employee profile responses.
+    if (!["ADMIN", "CEO"].includes(role)) delete safe.certifications
 
     res.json(safe)
   } catch (err) {
@@ -114,7 +170,15 @@ async function getEmployee(req, res, next) {
 const MANAGEMENT_EDITABLE_FIELDS = [
   "name",
   "email",
+  "personalEmail",
   "phone",
+  "personalEmail",
+  "fatherName",
+  "education",
+  "currentUniversity",
+  "linkedinUrl",
+  "shiftStart",
+  "shiftEnd",
   "departmentId",
   "managerId",
   "status",
@@ -171,6 +235,13 @@ async function updateEmployee(req, res, next) {
         }
         data.workLocationType = req.body.workLocationType
       }
+      else if (["shiftStart", "shiftEnd"].includes(field)) {
+        const value = req.body[field] || null
+        if (value !== null && !/^([01]\d|2[0-3]):[0-5]\d$/.test(String(value))) {
+          return res.status(400).json({ error: `${field} must use HH:mm format` })
+        }
+        data[field] = value
+      }
       else if (field === "cnic") data.cnic = encryptField(req.body.cnic)
       else if (field === "bankAccountNumber") data.bankAccountNumber = encryptField(req.body.bankAccountNumber)
       // Enum/foreign-key fields don't accept "" as a value — an empty
@@ -186,16 +257,18 @@ async function updateEmployee(req, res, next) {
       } else data[field] = req.body[field]
     }
 
-    if (data.managerId !== undefined) {
-      if (data.managerId === id) {
-        return res.status(400).json({ error: "An employee cannot report to themselves" })
+    if (data.personalEmail !== undefined && data.personalEmail) {
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(data.personalEmail))) {
+        return res.status(400).json({ error: "Invalid personal email" })
       }
-      if (data.managerId) {
-        const manager = await prisma.user.findFirst({
-          where: { id: data.managerId, organizationId, status: { not: "LEFT_COMPANY" } },
-          select: { id: true },
-        })
-        if (!manager) return res.status(400).json({ error: "Reporting manager must belong to this organization" })
+    }
+
+    if (data.linkedinUrl !== undefined && data.linkedinUrl) {
+      try {
+        const url = new URL(String(data.linkedinUrl))
+        if (!["http:", "https:"].includes(url.protocol) || !url.hostname.toLowerCase().includes("linkedin.com")) throw new Error()
+      } catch {
+        return res.status(400).json({ error: "LinkedIn must be a valid LinkedIn URL" })
       }
     }
 
@@ -226,6 +299,12 @@ async function updateEmployee(req, res, next) {
         }
       }
       data.role = req.body.role
+    }
+
+    if (data.managerId) {
+      if (data.managerId === id) return res.status(400).json({ error: "An employee cannot report to themselves" })
+      const manager = await prisma.user.findFirst({ where: { id: data.managerId, organizationId }, select: { id: true } })
+      if (!manager) return res.status(400).json({ error: "Reporting Manager must belong to the current organization" })
     }
 
     const updated = await prisma.user.update({ where: { id }, data })
@@ -301,7 +380,7 @@ async function deleteEmployee(req, res, next) {
   }
 }
 
-const IMPORT_COLUMNS = ["name", "email", "phone", "department", "cnic", "dob", "address", "skill", "seniorityLevel", "role"]
+const IMPORT_COLUMNS = ["name", "email", "personalEmail", "phone", "fatherName", "education", "currentUniversity", "linkedinUrl", "shiftStart", "shiftEnd", "department", "cnic", "dob", "address", "skill", "seniorityLevel", "role"]
 const VALID_LEVELS = ["INTERN", "JUNIOR", "SENIOR", "LEAD"]
 
 // Bulk-create employees from a CSV file. Expected header row (any order,
@@ -393,6 +472,13 @@ async function importEmployees(req, res, next) {
             password: hashed,
             role: assignedRole,
             phone: valueAt(row, "phone") || null,
+            personalEmail: valueAt(row, "personalEmail") || null,
+            fatherName: valueAt(row, "fatherName") || null,
+            education: valueAt(row, "education") || null,
+            currentUniversity: valueAt(row, "currentUniversity") || null,
+            linkedinUrl: valueAt(row, "linkedinUrl") || null,
+            shiftStart: valueAt(row, "shiftStart") || null,
+            shiftEnd: valueAt(row, "shiftEnd") || null,
             cnic: encryptField(valueAt(row, "cnic") || null),
             dob: dobRaw ? dob : null,
             address: valueAt(row, "address") || null,
@@ -420,7 +506,14 @@ async function importTemplate(req, res, next) {
     const example = [
       "Jane Doe",
       "jane@example.com",
+      "jane.personal@example.com",
       "0300-1234567",
+      "John Doe",
+      "BS Computer Science",
+      "University of Punjab",
+      "https://www.linkedin.com/in/jane-doe",
+      "09:00",
+      "17:00",
       "Engineering",
       "35202-1234567-1",
       "1995-01-20",

@@ -1,4 +1,11 @@
-export const MANAGEMENT_ROLES = ["ADMIN", "CEO", "SALES_HEAD", "HR", "MANAGEMENT", "DEPARTMENT_HEAD"]
+export const MANAGEMENT_ROLES = [
+  "ADMIN",
+  "CEO",
+  "SALES_HEAD",
+  "HR",
+  "MANAGEMENT",
+  "DEPARTMENT_HEAD",
+]
 
 export const ROLE_LABELS = {
   ADMIN: "Owner / Admin",
@@ -16,4 +23,23 @@ export function isManagement(role) {
 
 export function roleLabel(role) {
   return ROLE_LABELS[role] || role
+}
+
+export function canAccessPayroll(role) {
+  return ["ADMIN", "CEO", "HR", "MANAGEMENT"].includes(role)
+}
+
+export function canManageInventory(role) {
+  return ["ADMIN", "CEO", "IT_MANAGER"].includes(role)
+}
+
+export function canViewEmployeeDirectory(role) {
+  return [
+    "ADMIN",
+    "CEO",
+    "HR",
+    "MANAGEMENT",
+    "DEPARTMENT_HEAD",
+    "IT_MANAGER",
+  ].includes(role)
 }

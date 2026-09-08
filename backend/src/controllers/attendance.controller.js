@@ -221,9 +221,9 @@ async function markSelfAttendance(req, res, next) {
     const [organization, employee] = await Promise.all([
       prisma.organization.findUnique({
         where: { id: organizationId },
-        select: { geofenceEnabled: true, officeLatitude: true, officeLongitude: true, geofenceRadiusMeters: true },
+        select: { geofenceEnabled: true, officeLatitude: true, officeLongitude: true, geofenceRadiusMeters: true, shiftStartDefault: true, lateThresholdMinutes: true },
       }),
-      prisma.user.findUnique({ where: { id: userId }, select: { workLocationType: true } }),
+      prisma.user.findUnique({ where: { id: userId }, select: { workLocationType: true, shiftStart: true } }),
     ])
 
     const hasCoords = typeof latitude === "number" && typeof longitude === "number"
@@ -262,10 +262,26 @@ async function markSelfAttendance(req, res, next) {
       ? { latitude, longitude, distanceMeters: distance }
       : { latitude: null, longitude: null, distanceMeters: null }
 
+    // Determine check-in time and lateness
+    const now = new Date()
+    const shiftStartStr = (employee?.shiftStart && employee.shiftStart.trim()) || organization?.shiftStartDefault || "09:00"
+    const lateThreshold = Number.isFinite(Number(organization?.lateThresholdMinutes)) ? Number(organization.lateThresholdMinutes) : 15
+    const parseHHMM = (s) => {
+      const [hh, mm] = String(s || "09:00").split(":" ).map((v) => Number(v || 0))
+      return (Number.isFinite(hh) ? hh : 9) * 60 + (Number.isFinite(mm) ? mm : 0)
+    }
+    const checkInMinutes = now.getHours() * 60 + now.getMinutes()
+    const shiftStartMinutes = parseHHMM(shiftStartStr)
+    if (status === "PRESENT") {
+      if (checkInMinutes > shiftStartMinutes + lateThreshold) {
+        finalStatus = "LATE"
+      }
+    }
+
     const record = await prisma.attendanceRecord.upsert({
       where: { employeeId_date: { employeeId: userId, date: today } },
-      update: { status: finalStatus, markedById: userId, autoFlagged, ...locationData },
-      create: { organizationId, employeeId: userId, date: today, status: finalStatus, markedById: userId, autoFlagged, ...locationData },
+      update: { status: finalStatus, markedById: userId, autoFlagged, checkInAt: now, ...locationData },
+      create: { organizationId, employeeId: userId, date: today, status: finalStatus, markedById: userId, autoFlagged, checkInAt: now, ...locationData },
     })
 
     res.json({ ...record, requestedStatus: status, autoFlagged })

@@ -2,7 +2,7 @@ import { Suspense, lazy, useEffect } from "react"
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom"
 import { useAuth } from "./context/AuthContext"
 import { ThemeProvider, useTheme } from "./context/ThemeContext"
-import { isManagement } from "./utils/roles"
+import { isManagement, canManageInventory, canViewEmployeeDirectory, canAccessPayroll } from "./utils/roles"
 import DashboardLayout from "./layouts/DashboardLayout"
 const Login = lazy(() => import("./pages/Login"))
 const Register = lazy(() => import("./pages/Register"))
@@ -34,6 +34,8 @@ const Profile = lazy(() => import("./pages/Profile"))
 const Notifications = lazy(() => import("./pages/Notifications"))
 const Projects = lazy(() => import("./pages/Projects"))
 const Announcements = lazy(() => import("./pages/Announcements"))
+const EmployeeForms = lazy(() => import("./pages/EmployeeForms"))
+const PublicEmployeeForm = lazy(() => import("./pages/PublicEmployeeForm"))
 
 function PageFallback() {
   return (
@@ -59,6 +61,24 @@ function RequireOwner({ children }) {
   return children
 }
 
+function RequireInventoryAccess({ children }) {
+  const { user } = useAuth()
+  if (!canManageInventory(user?.role)) return <Navigate to={user?.id ? `/employees/${user.id}` : "/login"} replace />
+  return children
+}
+
+function RequireEmployeeDirectory({ children }) {
+  const { user } = useAuth()
+  if (!canViewEmployeeDirectory(user?.role)) return <Navigate to={user?.id ? `/employees/${user.id}` : "/login"} replace />
+  return children
+}
+
+function RequirePayrollAccess({ children }) {
+  const { user } = useAuth()
+  if (!canAccessPayroll(user?.role)) return <Navigate to={user?.id ? `/employees/${user.id}` : "/login"} replace />
+  return children
+}
+
 function ProtectedShell() {
   const { user, organization, loading } = useAuth()
   const { applyAccent } = useTheme()
@@ -80,20 +100,21 @@ function ProtectedShell() {
   if (!user) return <Navigate to="/login" replace />
 
   const isManager = isManagement(user.role)
+  const isIT = user.role === "IT_MANAGER"
 
   return (
     <Suspense fallback={<PageFallback />}>
       <Routes>
         <Route element={<DashboardLayout />}>
-          <Route index element={isManager ? <Dashboard /> : <Navigate to={`/employees/${user.id}`} replace />} />
-          <Route path="/dashboard" element={isManager ? <Dashboard /> : <Navigate to={`/employees/${user.id}`} replace />} />
-          <Route path="/employees" element={<RequireManagement><Employees /></RequireManagement>} />
+          <Route index element={isManager || isIT ? <Dashboard /> : <Navigate to={`/employees/${user.id}`} replace />} />
+          <Route path="/dashboard" element={isManager || isIT ? <Dashboard /> : <Navigate to={`/employees/${user.id}`} replace />} />
+          <Route path="/employees" element={<RequireEmployeeDirectory><Employees /></RequireEmployeeDirectory>} />
           <Route path="/employees/:id" element={<EmployeeProfile />} />
-          <Route path="/inventory" element={<RequireManagement><Inventory /></RequireManagement>} />
-          <Route path="/inventory/:id" element={<AssetProfile />} />
-          <Route path="/assignments" element={<RequireManagement><Assignments /></RequireManagement>} />
-          <Route path="/projects" element={<Projects />} />
-          <Route path="/asset-requests" element={<RequireManagement><AssetRequests /></RequireManagement>} />
+          <Route path="/inventory" element={<RequireInventoryAccess><Inventory /></RequireInventoryAccess>} />
+          <Route path="/inventory/:id" element={<RequireInventoryAccess><AssetProfile /></RequireInventoryAccess>} />
+          <Route path="/assignments" element={<RequireInventoryAccess><Assignments /></RequireInventoryAccess>} />
+          <Route path="/projects" element={isIT ? <Navigate to="/inventory" replace /> : <Projects />} />
+          <Route path="/asset-requests" element={<RequireInventoryAccess><AssetRequests /></RequireInventoryAccess>} />
           <Route path="/departments" element={<RequireManagement><Departments /></RequireManagement>} />
           <Route path="/attendance" element={<RequireManagement><Attendance /></RequireManagement>} />
           <Route path="/attendance/me" element={<MyAttendance />} />
@@ -101,13 +122,14 @@ function ProtectedShell() {
           <Route path="/leave-calendar" element={<RequireManagement><LeaveCalendar /></RequireManagement>} />
           <Route path="/holidays" element={<RequireManagement><Holidays /></RequireManagement>} />
           <Route path="/audit-log" element={<RequireManagement><AuditLog /></RequireManagement>} />
-          <Route path="/payroll" element={<RequireManagement><Payroll /></RequireManagement>} />
-          <Route path="/payroll/me" element={<MyPayroll />} />
+          <Route path="/payroll" element={<RequirePayrollAccess><Payroll /></RequirePayrollAccess>} />
+          <Route path="/payroll/me" element={<RequirePayrollAccess><MyPayroll /></RequirePayrollAccess>} />
           <Route path="/tickets" element={<Tickets />} />
           <Route path="/reports" element={<RequireManagement><Reports /></RequireManagement>} />
           <Route path="/export" element={<RequireManagement><Export /></RequireManagement>} />
           <Route path="/notifications" element={<RequireManagement><Notifications /></RequireManagement>} />
           <Route path="/announcements" element={<Announcements />} />
+          <Route path="/employee-forms" element={<RequireOwner><EmployeeForms /></RequireOwner>} />
           <Route path="/settings" element={<RequireOwner><Settings /></RequireOwner>} />
           <Route path="/settings/attendance-devices" element={<RequireOwner><AttendanceDevices /></RequireOwner>} />
           <Route path="/billing" element={<Navigate to="/" replace />} />
@@ -128,6 +150,7 @@ export default function App() {
             <Route path="/" element={<Welcome />} />
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
+            <Route path="/employee-form/:token" element={<PublicEmployeeForm />} />
             <Route path="/*" element={<ProtectedShell />} />
           </Routes>
         </Suspense>

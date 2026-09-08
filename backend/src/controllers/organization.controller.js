@@ -128,6 +128,7 @@ async function updateOrganization(req, res, next) {
       sickLeaveAllowance, casualLeaveAllowance,
       payrollBankName, payrollAccountNumber, lateDeductionAmount,
       workingHoursPerDay, workingDaysPerWeek,
+      shiftStartDefault, shiftEndDefault, lateThresholdMinutes,
       geofenceEnabled, officeLatitude, officeLongitude, geofenceRadiusMeters,
     } = req.body
 
@@ -169,6 +170,25 @@ async function updateOrganization(req, res, next) {
         return res.status(400).json({ error: "workingHoursPerDay must be between 1 and 24 hours" })
       }
       workingHoursUpdate = n
+    }
+
+    if (shiftStartDefault !== undefined) {
+      if (shiftStartDefault !== null && !/^([01]\d|2[0-3]):[0-5]\d$/.test(String(shiftStartDefault))) {
+        return res.status(400).json({ error: "shiftStartDefault must use HH:mm format" })
+      }
+    }
+
+    if (shiftEndDefault !== undefined) {
+      if (shiftEndDefault !== null && !/^([01]\d|2[0-3]):[0-5]\d$/.test(String(shiftEndDefault))) {
+        return res.status(400).json({ error: "shiftEndDefault must use HH:mm format" })
+      }
+    }
+
+    if (lateThresholdMinutes !== undefined) {
+      const n = Number(lateThresholdMinutes)
+      if (!Number.isFinite(n) || n < 0 || n > 24 * 60) {
+        return res.status(400).json({ error: "lateThresholdMinutes must be a number of minutes between 0 and 1440" })
+      }
     }
 
     if (workingDaysPerWeek !== undefined) {
@@ -227,6 +247,9 @@ async function updateOrganization(req, res, next) {
         ...(lateDeductionUpdate !== undefined ? { lateDeductionAmount: lateDeductionUpdate } : {}),
         ...(workingHoursUpdate !== undefined ? { workingHoursPerDay: workingHoursUpdate } : {}),
         ...(workingDaysUpdate !== undefined ? { workingDaysPerWeek: workingDaysUpdate } : {}),
+        ...(shiftStartDefault !== undefined ? { shiftStartDefault } : {}),
+        ...(shiftEndDefault !== undefined ? { shiftEndDefault } : {}),
+        ...(lateThresholdMinutes !== undefined ? { lateThresholdMinutes: Number(lateThresholdMinutes) } : {}),
         ...(geofenceEnabled !== undefined ? { geofenceEnabled: !!geofenceEnabled } : {}),
         ...(officeLatUpdate !== undefined ? { officeLatitude: officeLatUpdate } : {}),
         ...(officeLngUpdate !== undefined ? { officeLongitude: officeLngUpdate } : {}),
