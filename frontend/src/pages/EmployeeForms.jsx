@@ -1,6 +1,6 @@
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Copy, Link2, Plus, Power, Users, X } from "lucide-react"
+import { Copy, Link2, Plus, Power, Users, X, Send } from "lucide-react"
 import api from "../api/client"
 import { useAuth } from "../context/AuthContext"
 import PageHeader from "../components/ui/PageHeader"
@@ -21,6 +21,8 @@ export default function EmployeeForms() {
   const [createdLink, setCreatedLink] = useState("")
   const [selectedForm, setSelectedForm] = useState(null)
   const [error, setError] = useState("")
+  const [recipientEmployeeIds, setRecipientEmployeeIds] = useState([])
+  const [employeeSearch, setEmployeeSearch] = useState("")
 
   const { data: forms = [], isLoading } = useQuery({
     queryKey: ["employee-forms"],
@@ -33,13 +35,31 @@ export default function EmployeeForms() {
     enabled: !!selectedForm,
   })
 
+  const { data: employees = [], isLoading: employeesLoading } = useQuery({
+    queryKey: ["employee-form-recipients"],
+    queryFn: () => api.get("/employees", { params: { status: "ACTIVE" } }).then((r) => r.data?.data || r.data || []),
+    enabled: showCreate,
+  })
+
+  const filteredEmployees = useMemo(() => {
+    const query = employeeSearch.trim().toLowerCase()
+    if (!query) return employees
+    return employees.filter((employee) =>
+      `${employee.name || ""} ${employee.email || ""}`.toLowerCase().includes(query)
+    )
+  }, [employees, employeeSearch])
+
+  const selectedRecipients = employees.filter((employee) => recipientEmployeeIds.includes(employee.id))
+
   const createForm = useMutation({
-    mutationFn: () => api.post("/employee-forms", { title, expiresInDays: Number(expiresInDays) }),
+    mutationFn: () => api.post("/employee-forms", { title, expiresInDays: Number(expiresInDays), employeeIds: recipientEmployeeIds }),
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ["employee-forms"] })
-      setCreatedLink(`${window.location.origin}/employee-form/${res.data.token}`)
+      const link = `${window.location.origin}/employee-form/${res.data.token}`
+      setCreatedLink(link)
       setShowCreate(false)
       setError("")
+      setEmployeeSearch("")
     },
     onError: (err) => setError(err.response?.data?.error || "Could not create form"),
   })
@@ -48,6 +68,21 @@ export default function EmployeeForms() {
     mutationFn: (id) => api.patch(`/employee-forms/${id}/toggle`),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["employee-forms"] }),
   })
+
+  const toggleRecipient = (employeeId) => {
+    setRecipientEmployeeIds((current) =>
+      current.includes(employeeId)
+        ? current.filter((id) => id !== employeeId)
+        : [...current, employeeId]
+    )
+  }
+
+  const selectAllVisible = () => {
+    const visibleIds = filteredEmployees.map((employee) => employee.id)
+    setRecipientEmployeeIds((current) => Array.from(new Set([...current, ...visibleIds])))
+  }
+
+  const clearRecipients = () => setRecipientEmployeeIds([])
 
   if (!["ADMIN", "CEO"].includes(user?.role)) return null
 
@@ -77,7 +112,21 @@ export default function EmployeeForms() {
             <button onClick={() => navigator.clipboard.writeText(createdLink)} className="pill-secondary flex items-center justify-center gap-1.5 px-4 py-2.5 text-xs">
               <Copy size={13} /> Copy link
             </button>
+            {selectedRecipients.length > 0 && selectedRecipients.some((employee) => employee.email) && (
+              <a
+                href={`mailto:${selectedRecipients.filter((employee) => employee.email).map((employee) => employee.email).join(",")}?subject=${encodeURIComponent(title)}&body=${encodeURIComponent(`Hello,\n\nPlease complete your employee information form using this secure link:\n${createdLink}`)}`}
+                className="pill-accent flex items-center justify-center gap-1.5 px-4 py-2.5 text-xs"
+              >
+                <Send size={13} /> Send to {selectedRecipients.filter((employee) => employee.email).length} selected
+              </a>
+            )}
           </div>
+          {selectedRecipients.length > 0 && (
+            <p className="mt-2 text-[11px] text-muted">
+              Recipients: <span className="font-semibold text-ink">{selectedRecipients.map((employee) => employee.name).join(", ")}</span>
+              {selectedRecipients.some((employee) => !employee.email) ? " · Some selected employees have no email address" : ""}
+            </p>
+          )}
         </div>
       )}
 
@@ -86,7 +135,41 @@ export default function EmployeeForms() {
           <SectionHeader title="Create employee information form" />
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <TextField label="Form title" value={title} onChange={(e) => setTitle(e.target.value)} required />
-            <SelectField label="Link expires after" value={expiresInDays} onChange={(e) => setExpiresInDays(e.target.value)}>
+            <div className="sm:col-span-2">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <label className="text-xs font-semibold text-ink">Send to existing employees (optional)</label>
+                <span className="text-[11px] text-muted">{recipientEmployeeIds.length} selected</span>
+              </div>
+              <input
+                value={employeeSearch}
+                onChange={(e) => setEmployeeSearch(e.target.value)}
+                placeholder="Search employees by name or email…"
+                className="field mb-2 w-full"
+              />
+              <div className="mb-2 flex flex-wrap gap-2">
+                <button type="button" onClick={selectAllVisible} className="pill-secondary px-3 py-1.5 text-[11px]">Select all visible</button>
+                <button type="button" onClick={clearRecipients} className="pill-secondary px-3 py-1.5 text-[11px]" disabled={!recipientEmployeeIds.length}>Clear</button>
+              </div>
+              <div className="max-h-56 overflow-y-auto rounded-2xl border border-border bg-surface-2 p-2">
+                {employeesLoading ? (
+                  <p className="p-3 text-sm text-muted">Loading employees…</p>
+                ) : filteredEmployees.length === 0 ? (
+                  <p className="p-3 text-sm text-muted">No active employees found.</p>
+                ) : filteredEmployees.map((employee) => {
+                  const checked = recipientEmployeeIds.includes(employee.id)
+                  return (
+                    <label key={employee.id} className="flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 hover:bg-surface-1">
+                      <input type="checkbox" checked={checked} onChange={() => toggleRecipient(employee.id)} />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium text-ink">{employee.name}</span>
+                        <span className="block truncate text-[11px] text-muted">{employee.email || "No email address"}</span>
+                      </span>
+                    </label>
+                  )
+                })}
+              </div>
+            </div>
+            <SelectField label="Link expires after" value={expiresInDays} onChange={(e) => setExpiresInDays(e.target.value)} className="sm:col-span-2">
               <option value="7">7 days</option>
               <option value="14">14 days</option>
               <option value="30">30 days</option>
@@ -96,7 +179,7 @@ export default function EmployeeForms() {
             </SelectField>
           </div>
           <div className="rounded-2xl bg-surface-2 p-4 text-xs text-muted">
-            The form collects name, father name, personal/company email, phone, address, CNIC, date of birth, education, current university, employee type and LinkedIn ID.
+            The form collects name, father name, personal/company email, phone, address, CNIC, date of birth, education, current university, employee type and LinkedIn ID. Select one or multiple existing employees; after the form is created you can send the same secure link directly to all selected employees with one email action.
           </div>
           {error && <p className="text-sm text-danger">{error}</p>}
           <button type="submit" disabled={createForm.isPending} className="pill-accent px-5 py-2.5 text-sm disabled:opacity-60">

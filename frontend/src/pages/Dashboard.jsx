@@ -884,8 +884,7 @@ export default function Dashboard() {
 
                 <div className="min-w-0">
                   <p className="text-xl font-semibold text-ink">
-                    {executiveMetrics
-                      ?.present ?? "—"}
+                    {executiveMetrics?.presentToday ?? executiveMetrics?.present ?? "—"}
                   </p>
 
                   <p className="text-xs text-muted">
@@ -908,11 +907,7 @@ export default function Dashboard() {
 
                 <div className="min-w-0">
                   <p className="text-xl font-semibold text-ink">
-                    {executive?.projects
-                      ?.length ??
-                      executiveMetrics
-                        ?.projects ??
-                      "—"}
+                    {executiveMetrics?.projects ?? "—"}
                   </p>
 
                   <p className="text-xs text-muted">
@@ -981,8 +976,7 @@ export default function Dashboard() {
 
                   <div className="rounded-xl bg-surface-2 px-2 py-3 text-center">
                     <p className="text-xl font-semibold text-ink">
-                      {executive?.projects
-                        ?.notStarted ?? "—"}
+                      {executive?.projectStatus?.NOT_STARTED ?? executive?.projects?.notStarted ?? "—"}
                     </p>
 
                     <p className="mt-0.5 text-[10px] leading-4 text-muted sm:text-[11px]">
@@ -992,8 +986,7 @@ export default function Dashboard() {
 
                   <div className="rounded-xl bg-surface-2 px-2 py-3 text-center">
                     <p className="text-xl font-semibold text-ink">
-                      {executive?.projects
-                        ?.inProgress ?? "—"}
+                      {executive?.projectStatus?.IN_PROGRESS ?? executive?.projects?.inProgress ?? "—"}
                     </p>
 
                     <p className="mt-0.5 text-[10px] leading-4 text-muted sm:text-[11px]">
@@ -1003,8 +996,7 @@ export default function Dashboard() {
 
                   <div className="rounded-xl bg-surface-2 px-2 py-3 text-center">
                     <p className="text-xl font-semibold text-ink">
-                      {executive?.projects
-                        ?.completed ?? "—"}
+                      {executive?.projectStatus?.COMPLETED ?? executive?.projects?.completed ?? "—"}
                     </p>
 
                     <p className="mt-0.5 text-[10px] leading-4 text-muted sm:text-[11px]">
@@ -1020,15 +1012,24 @@ export default function Dashboard() {
               {/* Attendance */}
               <div className="rounded-2xl border border-border p-4 sm:p-5">
 
-                <div>
-                  <p className="text-sm font-semibold text-ink">
-                    Attendance watch
-                  </p>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-ink">
+                      Attendance watch
+                    </p>
 
-                  <p className="mt-0.5 text-xs leading-5 text-muted">
-                    Items that may need management
-                    attention
-                  </p>
+                    <p className="mt-0.5 text-xs leading-5 text-muted">
+                      Items that may need management
+                      attention
+                    </p>
+                  </div>
+
+                  <Link
+                    to="/attendance"
+                    className="shrink-0 text-xs font-semibold text-accent hover:underline"
+                  >
+                    Open attendance
+                  </Link>
                 </div>
 
                 <div className="mt-4 flex flex-wrap gap-2">

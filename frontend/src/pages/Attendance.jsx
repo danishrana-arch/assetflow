@@ -28,6 +28,38 @@ function formatPunchTime(value) {
   return new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
 }
 
+
+function AttendanceTimeline({ timeline }) {
+  if (!timeline) return null
+  const span = Math.max(1, timeline.endMinute - timeline.startMinute)
+  const label = (value) => {
+    const total = Math.round(value)
+    const h = Math.floor(total / 60) % 24
+    const m = total % 60
+    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`
+  }
+  return (
+    <div className="mt-2 min-w-[210px] w-full max-w-[340px]">
+      <div className="mb-1 flex items-center justify-between text-[9px] font-medium text-muted-2">
+        <span>{timeline.shiftStart || label(timeline.startMinute)}</span>
+        <span>{timeline.shiftEnd || label(timeline.endMinute)}</span>
+      </div>
+      <div className="relative h-2.5 w-full overflow-hidden rounded-full bg-chip-pink-bg" title="Green = inside/working · Red = outside · Gray = remaining time">
+        {(timeline.segments || []).map((segment, index) => {
+          const left = ((segment.startMinute - timeline.startMinute) / span) * 100
+          const width = ((segment.endMinute - segment.startMinute) / span) * 100
+          const cls = segment.state === "in" ? "bg-chip-green-fg" : segment.state === "leave" ? "bg-chip-yellow-fg" : segment.state === "future" ? "bg-surface-2" : "bg-chip-pink-fg"
+          return <span key={`${segment.startMinute}-${segment.endMinute}-${index}`} className={`absolute inset-y-0 ${cls}`} style={{ left: `${left}%`, width: `${width}%` }} />
+        })}
+      </div>
+      <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-[9px] text-muted-2">
+        <span><i className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-chip-green-fg" />Working</span>
+        <span><i className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-chip-pink-fg" />Outside</span>
+      </div>
+    </div>
+  )
+}
+
 function statusPill(status) {
   const cfg = STATUS_CONFIG[status] || { label: status, tone: "slate" }
   return <StatusPill tone={cfg.tone}>{cfg.label}</StatusPill>
@@ -191,6 +223,7 @@ export default function Attendance() {
                 <p className="mt-0.5 text-xs text-muted-2">
                   {formatPunchTime(row.checkInAt)} → {formatPunchTime(row.checkOutAt)} · {formatMinutes(row.workingMinutes)}
                 </p>
+                <AttendanceTimeline timeline={row.timeline} />
                 {row.markedByName && (
                   <p className="mt-0.5 text-xs text-muted-2">Marked by {row.markedByName}</p>
                 )}
@@ -228,6 +261,7 @@ export default function Attendance() {
               <th className="px-5 py-3.5">Department</th>
               <th className="px-5 py-3.5">Check in / out</th>
               <th className="px-5 py-3.5">Working time</th>
+              <th className="px-5 py-3.5 min-w-[260px]">Work timeline</th>
               <th className="px-5 py-3.5">Location</th>
               <th className="px-5 py-3.5">Status</th>
               <th className="px-5 py-3.5">Mark</th>
@@ -245,6 +279,7 @@ export default function Attendance() {
                 <td className="px-5 py-3.5 text-muted">{row.department || "—"}</td>
                 <td className="px-5 py-3.5 text-muted">{formatPunchTime(row.checkInAt)} → {formatPunchTime(row.checkOutAt)}</td>
                 <td className="px-5 py-3.5 font-medium text-ink">{formatMinutes(row.workingMinutes)}</td>
+                <td className="px-5 py-3.5"><AttendanceTimeline timeline={row.timeline} /></td>
                 <td className="px-5 py-3.5">
                   <LocationFlag row={row} />
                 </td>
@@ -272,7 +307,7 @@ export default function Attendance() {
               </tr>
             ))}
             {rows.length === 0 && !isLoading && (
-              <tr><td colSpan={4} className="px-5 py-10 text-center text-muted">No active employees.</td></tr>
+              <tr><td colSpan={8} className="px-5 py-10 text-center text-muted">No active employees.</td></tr>
             )}
           </tbody>
         </table>
