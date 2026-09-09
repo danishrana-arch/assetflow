@@ -377,8 +377,8 @@ async function getCalendarEvents(req, res, next) {
 
     const [employees, holidays, projects, leaves, companyEvents] = await Promise.all([
       prisma.user.findMany({
-        where: { organizationId, status: { not: "LEFT_COMPANY" }, dob: { not: null } },
-        select: { id: true, name: true, dob: true },
+        where: { organizationId, status: { not: "LEFT_COMPANY" }, OR: [{ dob: { not: null } }, { joiningDate: { not: null } }] },
+        select: { id: true, name: true, dob: true, joiningDate: true },
       }),
       prisma.holiday.findMany({
         where: { organizationId, date: { gte: start, lte: end } },
@@ -408,10 +408,30 @@ async function getCalendarEvents(req, res, next) {
     }
 
     for (const e of employees) {
-      const dob = new Date(e.dob)
-      const birthday = calendarDate(year, dob.getUTCMonth(), dob.getUTCDate())
-      if (birthday >= start && birthday <= end) {
-        push({ id: `birthday-${e.id}-${year}`, type: "BIRTHDAY", title: `${e.name}'s birthday`, description: `Birthday of ${e.name}`, date: birthday, employeeId: e.id, employeeName: e.name })
+      if (e.dob) {
+        const dob = new Date(e.dob)
+        const birthday = calendarDate(year, dob.getUTCMonth(), dob.getUTCDate())
+        if (birthday >= start && birthday <= end) {
+          push({ id: `birthday-${e.id}-${year}`, type: "BIRTHDAY", title: `${e.name}'s birthday`, description: `Birthday of ${e.name}`, date: birthday, employeeId: e.id, employeeName: e.name })
+        }
+      }
+
+      if (e.joiningDate) {
+        const joinDate = new Date(e.joiningDate)
+        const anniversary = calendarDate(year, joinDate.getUTCMonth(), joinDate.getUTCDate())
+        const yearsWorked = year - joinDate.getUTCFullYear()
+        if (yearsWorked >= 1 && anniversary >= start && anniversary <= end) {
+          const anniversaryLabel = yearsWorked === 1 ? "1-year work anniversary" : `${yearsWorked}-year work anniversary`
+          push({
+            id: `anniversary-${e.id}-${year}`,
+            type: "WORK_ANNIVERSARY",
+            title: `${e.name}'s ${anniversaryLabel}`,
+            description: yearsWorked === 1 ? `Completed 1 year with the company` : `Completed ${yearsWorked} years with the company`,
+            date: anniversary,
+            employeeId: e.id,
+            employeeName: e.name,
+          })
+        }
       }
     }
     for (const h of holidays) push({ id: h.id, type: "NATIONAL_HOLIDAY", title: h.name, description: "National/company holiday", date: h.date })
