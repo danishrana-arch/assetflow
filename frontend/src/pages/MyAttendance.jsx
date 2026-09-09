@@ -17,6 +17,32 @@ function fmt(dateStr) {
   return new Date(dateStr).toLocaleDateString(undefined, { timeZone: "UTC", month: "short", day: "numeric", year: "numeric" })
 }
 
+
+function AttendanceTimeline({ timeline }) {
+  if (!timeline) return null
+  const span = Math.max(1, timeline.endMinute - timeline.startMinute)
+  return (
+    <div className="mt-4 rounded-2xl bg-surface-2 p-3">
+      <div className="mb-2 flex items-center justify-between gap-3 text-[10px] font-semibold text-muted">
+        <span>{timeline.shiftStart}</span><span>{timeline.shiftEnd}</span>
+      </div>
+      <div className="relative h-3 w-full overflow-hidden rounded-full bg-chip-pink-bg">
+        {(timeline.segments || []).map((segment, index) => {
+          const left = ((segment.startMinute - timeline.startMinute) / span) * 100
+          const width = ((segment.endMinute - segment.startMinute) / span) * 100
+          const cls = segment.state === "in" ? "bg-chip-green-fg" : segment.state === "leave" ? "bg-chip-yellow-fg" : segment.state === "future" ? "bg-surface" : "bg-chip-pink-fg"
+          return <span key={`${segment.startMinute}-${segment.endMinute}-${index}`} className={`absolute inset-y-0 ${cls}`} style={{ left: `${left}%`, width: `${width}%` }} />
+        })}
+      </div>
+      <div className="mt-2 flex flex-wrap gap-3 text-[10px] text-muted-2">
+        <span><i className="mr-1 inline-block h-2 w-2 rounded-full bg-chip-green-fg" />Working / inside</span>
+        <span><i className="mr-1 inline-block h-2 w-2 rounded-full bg-chip-pink-fg" />Outside</span>
+      </div>
+      <p className="mt-2 text-[10px] text-muted-2">The red portions show time outside between biometric punches.</p>
+    </div>
+  )
+}
+
 function fmtTime(dateStr) {
   if (!dateStr) return "—"
   return new Date(dateStr).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
@@ -183,6 +209,7 @@ export default function MyAttendance() {
               {attendance?.today?.updatedAt && (
                 <p className="mb-3 text-sm text-muted-2">Marked at {fmtTime(attendance.today.updatedAt)}</p>
               )}
+              <AttendanceTimeline timeline={attendance?.timeline} />
               {attendance?.today?.autoFlagged && (
                 <div className="mb-3 flex items-start gap-2 rounded-2xl bg-chip-pink-bg px-3.5 py-2.5 text-xs text-chip-pink-fg">
                   <AlertTriangle size={14} className="mt-0.5 shrink-0" />

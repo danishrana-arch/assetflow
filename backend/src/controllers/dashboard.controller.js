@@ -239,10 +239,11 @@ async function getExecutiveOverview(req, res, next) {
     const tomorrow = new Date(today)
     tomorrow.setUTCDate(tomorrow.getUTCDate() + 1)
 
-    const [employees, presentToday, lateToday, projects, assets, groupedProjects] = await Promise.all([
+    const [employees, presentToday, lateToday, missingCheckout, projects, assets, groupedProjects] = await Promise.all([
       prisma.user.count({ where: { organizationId: { in: orgIds }, status: "ACTIVE" } }),
       prisma.attendanceRecord.count({ where: { organizationId: { in: orgIds }, date: { gte: today, lt: tomorrow }, status: { in: ["PRESENT", "LATE"] } } }),
       prisma.attendanceRecord.count({ where: { organizationId: { in: orgIds }, date: { gte: today, lt: tomorrow }, status: "LATE" } }),
+      prisma.attendanceRecord.count({ where: { organizationId: { in: orgIds }, date: { gte: today, lt: tomorrow }, checkInAt: { not: null }, checkOutAt: null, status: { in: ["PRESENT", "LATE"] } } }),
       prisma.project.count({ where: { organizationId: { in: orgIds } } }),
       prisma.asset.count({ where: { organizationId: { in: orgIds } } }),
       prisma.project.groupBy({ by: ["status"], where: { organizationId: { in: orgIds } }, _count: { _all: true } }),
@@ -257,6 +258,7 @@ async function getExecutiveOverview(req, res, next) {
       employees,
       presentToday,
       late: lateToday,
+      missingCheckout,
       attendanceRate: employees ? Math.round((presentToday / employees) * 100) : 0,
       projects,
       assets,

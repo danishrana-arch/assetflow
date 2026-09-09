@@ -13,7 +13,7 @@ async function getDailyAttendance(req, res, next) {
     const { organizationId } = req.user
     const date = startOfDay(req.query.date)
 
-    const [organization, employees, records] = await Promise.all([
+    const [organization, employees, records, punches] = await Promise.all([
       prisma.organization.findUnique({
         where: { id: organizationId },
         select: {

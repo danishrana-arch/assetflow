@@ -37,9 +37,18 @@ async function syncAttendanceFromPunches({ organizationId, employeeId, deviceId,
 
   const checkInAt = punches[0].occurredAt
   const checkOutAt = punches.length > 1 ? punches[punches.length - 1].occurredAt : null
-  const workingMinutes = checkOutAt
-    ? Math.max(0, Math.round((checkOutAt.getTime() - checkInAt.getTime()) / 60000))
-    : null
+
+  // Biometric punches alternate IN / OUT. Calculate actual working time
+  // from the IN→OUT pairs so time spent outside between punches is not
+  // counted as working time.
+  let workingMinutes = null
+  if (punches.length >= 2) {
+    let total = 0
+    for (let i = 0; i + 1 < punches.length; i += 2) {
+      total += Math.max(0, Math.round((punches[i + 1].occurredAt.getTime() - punches[i].occurredAt.getTime()) / 60000))
+    }
+    workingMinutes = total
+  }
 
   await prisma.attendanceRecord.upsert({
     where: { employeeId_date: { employeeId, date } },

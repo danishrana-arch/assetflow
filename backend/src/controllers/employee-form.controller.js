@@ -32,6 +32,26 @@ async function createEmployeeForm(req, res, next) {
       return res.status(400).json({ error: "expiresInDays must be a whole number between 1 and 365" })
     }
 
+    const rawEmployeeIds = Array.isArray(req.body.employeeIds)
+      ? req.body.employeeIds
+      : req.body.employeeId
+        ? [req.body.employeeId]
+        : []
+    const employeeIds = Array.from(
+      new Set(rawEmployeeIds.map((id) => clean(id, 100)).filter(Boolean))
+    )
+    let recipients = []
+    if (employeeIds.length) {
+      recipients = await prisma.user.findMany({
+        where: { id: { in: employeeIds }, organizationId, status: "ACTIVE" },
+        select: { id: true, name: true, email: true },
+        orderBy: { name: "asc" },
+      })
+      if (recipients.length !== employeeIds.length) {
+        return res.status(404).json({ error: "One or more selected employees were not found in your organization" })
+      }
+    }
+
     const token = makeToken()
     const expiresAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000)
     const form = await prisma.employeeForm.create({
@@ -52,6 +72,8 @@ async function createEmployeeForm(req, res, next) {
       active: form.active,
       expiresAt: form.expiresAt,
       token,
+      recipients,
+      recipient: recipients[0] || null,
     })
   } catch (err) {
     next(err)

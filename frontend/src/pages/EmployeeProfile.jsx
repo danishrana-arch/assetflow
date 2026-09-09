@@ -907,7 +907,7 @@ export default function EmployeeProfile() {
                   <TextField label="Personal Email" type="email" value={editForm.personalEmail} onChange={(e) => setEditForm((f) => ({ ...f, personalEmail: e.target.value }))} />
                   <TextField label="Father Name" value={editForm.fatherName} onChange={(e) => setEditForm((f) => ({ ...f, fatherName: e.target.value }))} />
                   <TextField label="Education" value={editForm.education} onChange={(e) => setEditForm((f) => ({ ...f, education: e.target.value }))} />
-                  <TextField label="Current University" value={editForm.currentUniversity} onChange={(e) => setEditForm((f) => ({ ...f, currentUniversity: e.target.value }))} />
+                  <TextField label="University" value={editForm.University} onChange={(e) => setEditForm((f) => ({ ...f, University: e.target.value }))} />
                   <TextField label="LinkedIn" value={editForm.linkedinUrl} onChange={(e) => setEditForm((f) => ({ ...f, linkedinUrl: e.target.value }))} placeholder="https://linkedin.com/in/..." />
                   <div className="grid grid-cols-2 gap-2">
                     <TextField label="Shift Start" type="time" value={editForm.shiftStart} onChange={(e) => setEditForm((f) => ({ ...f, shiftStart: e.target.value }))} />
@@ -921,7 +921,7 @@ export default function EmployeeProfile() {
                   <TextField label="Personal Email" type="email" value={editForm.personalEmail} onChange={(e) => setEditForm((f) => ({ ...f, personalEmail: e.target.value }))} />
                   <TextField label="Father Name" value={editForm.fatherName} onChange={(e) => setEditForm((f) => ({ ...f, fatherName: e.target.value }))} />
                   <TextField label="Education" value={editForm.education} onChange={(e) => setEditForm((f) => ({ ...f, education: e.target.value }))} placeholder="e.g. BS Computer Science" />
-                  <TextField label="Current University" value={editForm.currentUniversity} onChange={(e) => setEditForm((f) => ({ ...f, currentUniversity: e.target.value }))} />
+                  <TextField label="University" value={editForm.University} onChange={(e) => setEditForm((f) => ({ ...f, University: e.target.value }))} />
                   <TextField label="LinkedIn URL" value={editForm.linkedinUrl} onChange={(e) => setEditForm((f) => ({ ...f, linkedinUrl: e.target.value }))} placeholder="https://www.linkedin.com/in/..." />
                   <TextField label="Shift Start" type="time" value={editForm.shiftStart} onChange={(e) => setEditForm((f) => ({ ...f, shiftStart: e.target.value }))} />
                   <TextField label="Shift End" type="time" value={editForm.shiftEnd} onChange={(e) => setEditForm((f) => ({ ...f, shiftEnd: e.target.value }))} />
