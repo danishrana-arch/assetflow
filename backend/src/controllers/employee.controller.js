@@ -155,9 +155,9 @@ async function getEmployee(req, res, next) {
       ? { ...rest, cnic: decryptField(cnic), dob, address, bankAccountNumber: decryptField(bankAccountNumber) }
       : rest
 
-    // Certifications are restricted to ADMIN/CEO. They are not part of
-    // HR, manager, or employee profile responses.
-    if (!["ADMIN", "CEO"].includes(role)) delete safe.certifications
+    // Certifications are visible to ADMIN/CEO and to the employee themselves.
+    // They are not part of other viewers' profile responses.
+    if (!(["ADMIN", "CEO"].includes(role) || userId === id)) delete safe.certifications
 
     res.json(safe)
   } catch (err) {

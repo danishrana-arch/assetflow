@@ -23,6 +23,7 @@ const projectRoutes = require("./routes/project.routes")
 const certificationRoutes = require("./routes/certification.routes")
 const employeeFormRoutes = require("./routes/employee-form.routes")
 const publicEmployeeFormRoutes = require("./routes/public-employee-form.routes")
+const notificationRoutes = require("./routes/notification.routes")
 const { notFound, errorHandler } = require("./middleware/error.middleware")
 
 if (!process.env.JWT_SECRET) {
@@ -43,7 +44,28 @@ app.disable("x-powered-by")
 app.set("trust proxy", 1)
 
 app.use(helmet())
-app.use(cors({ origin: process.env.CLIENT_ORIGIN || "*" }))
+const configuredOrigins = String(process.env.CLIENT_ORIGIN || "")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean)
+
+app.use(
+  cors({
+    origin(origin, callback) {
+      // Allow non-browser requests (curl/Postman) and wildcard configuration.
+      if (!origin || configuredOrigins.length === 0 || configuredOrigins.includes("*")) {
+        return callback(null, true)
+      }
+
+      if (configuredOrigins.includes(origin)) {
+        return callback(null, true)
+      }
+
+      return callback(new Error("CORS origin is not allowed"))
+    },
+    credentials: false,
+  })
+)
 app.use(express.json({ limit: "2mb" }))
 
 app.use(
@@ -77,6 +99,7 @@ app.use("/api/projects", projectRoutes)
 app.use("/api/employees", certificationRoutes)
 app.use("/api/employee-forms", employeeFormRoutes)
 app.use("/api/public/employee-forms", publicEmployeeFormRoutes)
+app.use("/api/notifications", notificationRoutes)
 
 app.use(notFound)
 app.use(errorHandler)

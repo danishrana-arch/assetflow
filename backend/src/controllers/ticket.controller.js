@@ -1,5 +1,6 @@
 const prisma = require("../lib/prisma")
 const { MANAGEMENT_ROLES } = require("../utils/roles")
+const { notifyManagement, createNotification } = require("../utils/notifications")
 
 async function listTickets(req, res, next) {
   try {
@@ -46,6 +47,15 @@ async function createTicket(req, res, next) {
       },
     })
 
+    await notifyManagement({
+      organizationId,
+      createdById: userId,
+      type: "TICKET",
+      title: "New support ticket",
+      message: subject,
+      link: "/tickets",
+    })
+
     res.status(201).json(ticket)
   } catch (err) {
     next(err)
@@ -67,6 +77,19 @@ async function updateTicketStatus(req, res, next) {
     if (!existing) return res.status(404).json({ error: "Ticket not found" })
 
     const updated = await prisma.ticket.update({ where: { id }, data: { status } })
+
+    if (existing.raisedById && existing.raisedById !== req.user.userId) {
+      await createNotification({
+        organizationId,
+        recipientId: existing.raisedById,
+        createdById: req.user.userId,
+        type: "TICKET",
+        title: "Ticket updated",
+        message: `${existing.subject} is now ${status.replaceAll("_", " ").toLowerCase()}.`,
+        link: "/tickets",
+      })
+    }
+
     res.json(updated)
   } catch (err) {
     next(err)

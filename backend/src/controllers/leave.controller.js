@@ -2,6 +2,7 @@ const prisma = require("../lib/prisma")
 const { MANAGEMENT_ROLES } = require("../utils/roles")
 const { logAudit } = require("../utils/audit")
 const { toDateOnly } = require("../utils/date")
+const { notifyManagement, createNotification } = require("../utils/notifications")
 
 function eachDate(start, end) {
   const days = []
@@ -100,6 +101,15 @@ async function createLeave(req, res, next) {
         type: leaveType,
         isHalfDay: halfDay,
       },
+    })
+
+    await notifyManagement({
+      organizationId,
+      createdById: userId,
+      type: "LEAVE_REQUEST",
+      title: "New leave request",
+      message: `${leave.type} leave from ${startDate} to ${endDate}.`,
+      link: "/leave-requests",
     })
 
     res.status(201).json(leave)
@@ -306,6 +316,16 @@ async function reviewLeave(req, res, next) {
       targetType: "LeaveApplication",
       targetId: id,
       note: `${leave.type}${leave.isHalfDay ? " (half-day)" : ""} for employee ${leave.employeeId}`,
+    })
+
+    await createNotification({
+      organizationId,
+      recipientId: leave.employeeId,
+      createdById: userId,
+      type: "LEAVE_REQUEST",
+      title: `Leave request ${decision.toLowerCase()}`,
+      message: `${leave.type} leave was ${decision.toLowerCase()}.${reviewNote ? ` ${reviewNote}` : ""}`,
+      link: "/leave-requests",
     })
 
     res.json(updated)

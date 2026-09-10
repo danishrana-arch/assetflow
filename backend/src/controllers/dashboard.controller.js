@@ -1,4 +1,5 @@
 const prisma = require("../lib/prisma")
+const { notifyUsers } = require("../utils/notifications")
 const { toDateOnly } = require("../utils/date")
 
 async function getStats(req, res, next) {
@@ -239,11 +240,10 @@ async function getExecutiveOverview(req, res, next) {
     const tomorrow = new Date(today)
     tomorrow.setUTCDate(tomorrow.getUTCDate() + 1)
 
-    const [employees, presentToday, lateToday, missingCheckout, projects, assets, groupedProjects] = await Promise.all([
+    const [employees, presentToday, lateToday, projects, assets, groupedProjects] = await Promise.all([
       prisma.user.count({ where: { organizationId: { in: orgIds }, status: "ACTIVE" } }),
       prisma.attendanceRecord.count({ where: { organizationId: { in: orgIds }, date: { gte: today, lt: tomorrow }, status: { in: ["PRESENT", "LATE"] } } }),
       prisma.attendanceRecord.count({ where: { organizationId: { in: orgIds }, date: { gte: today, lt: tomorrow }, status: "LATE" } }),
-      prisma.attendanceRecord.count({ where: { organizationId: { in: orgIds }, date: { gte: today, lt: tomorrow }, checkInAt: { not: null }, checkOutAt: null, status: { in: ["PRESENT", "LATE"] } } }),
       prisma.project.count({ where: { organizationId: { in: orgIds } } }),
       prisma.asset.count({ where: { organizationId: { in: orgIds } } }),
       prisma.project.groupBy({ by: ["status"], where: { organizationId: { in: orgIds } }, _count: { _all: true } }),
@@ -258,7 +258,6 @@ async function getExecutiveOverview(req, res, next) {
       employees,
       presentToday,
       late: lateToday,
-      missingCheckout,
       attendanceRate: employees ? Math.round((presentToday / employees) * 100) : 0,
       projects,
       assets,
@@ -333,6 +332,25 @@ async function createAnnouncement(req, res, next) {
       data: { organizationId, createdById: userId, title: title.trim(), body: body.trim(), audienceType, audienceId: audienceType === "DEPARTMENT" ? audienceId : null },
       include: { createdBy: { select: { id: true, name: true } } },
     })
+    const audienceUsers = await prisma.user.findMany({
+      where: {
+        organizationId,
+        status: "ACTIVE",
+        ...(audienceType === "DEPARTMENT" ? { departmentId: audienceId } : {}),
+      },
+      select: { id: true },
+    })
+
+    await notifyUsers({
+      organizationId,
+      recipientIds: audienceUsers.map((user) => user.id),
+      createdById: userId,
+      type: "ANNOUNCEMENT",
+      title: "New company announcement",
+      message: row.title,
+      link: "/announcements",
+    })
+
     res.status(201).json(row)
   } catch (err) { next(err) }
 }
@@ -379,8 +397,8 @@ async function getCalendarEvents(req, res, next) {
 
     const [employees, holidays, projects, leaves, companyEvents] = await Promise.all([
       prisma.user.findMany({
-        where: { organizationId, status: { not: "LEFT_COMPANY" }, OR: [{ dob: { not: null } }, { joiningDate: { not: null } }] },
-        select: { id: true, name: true, dob: true, joiningDate: true },
+        where: { organizationId, status: { not: "LEFT_COMPANY" }, dob: { not: null } },
+        select: { id: true, name: true, dob: true },
       }),
       prisma.holiday.findMany({
         where: { organizationId, date: { gte: start, lte: end } },
@@ -410,30 +428,10 @@ async function getCalendarEvents(req, res, next) {
     }
 
     for (const e of employees) {
-      if (e.dob) {
-        const dob = new Date(e.dob)
-        const birthday = calendarDate(year, dob.getUTCMonth(), dob.getUTCDate())
-        if (birthday >= start && birthday <= end) {
-          push({ id: `birthday-${e.id}-${year}`, type: "BIRTHDAY", title: `${e.name}'s birthday`, description: `Birthday of ${e.name}`, date: birthday, employeeId: e.id, employeeName: e.name })
-        }
-      }
-
-      if (e.joiningDate) {
-        const joinDate = new Date(e.joiningDate)
-        const anniversary = calendarDate(year, joinDate.getUTCMonth(), joinDate.getUTCDate())
-        const yearsWorked = year - joinDate.getUTCFullYear()
-        if (yearsWorked >= 1 && anniversary >= start && anniversary <= end) {
-          const anniversaryLabel = yearsWorked === 1 ? "1-year work anniversary" : `${yearsWorked}-year work anniversary`
-          push({
-            id: `anniversary-${e.id}-${year}`,
-            type: "WORK_ANNIVERSARY",
-            title: `${e.name}'s ${anniversaryLabel}`,
-            description: yearsWorked === 1 ? `Completed 1 year with the company` : `Completed ${yearsWorked} years with the company`,
-            date: anniversary,
-            employeeId: e.id,
-            employeeName: e.name,
-          })
-        }
+      const dob = new Date(e.dob)
+      const birthday = calendarDate(year, dob.getUTCMonth(), dob.getUTCDate())
+      if (birthday >= start && birthday <= end) {
+        push({ id: `birthday-${e.id}-${year}`, type: "BIRTHDAY", title: `${e.name}'s birthday`, description: `Birthday of ${e.name}`, date: birthday, employeeId: e.id, employeeName: e.name })
       }
     }
     for (const h of holidays) push({ id: h.id, type: "NATIONAL_HOLIDAY", title: h.name, description: "National/company holiday", date: h.date })

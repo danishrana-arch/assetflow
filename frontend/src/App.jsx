@@ -127,7 +127,7 @@ function ProtectedShell() {
           <Route path="/tickets" element={<Tickets />} />
           <Route path="/reports" element={<RequireManagement><Reports /></RequireManagement>} />
           <Route path="/export" element={<RequireManagement><Export /></RequireManagement>} />
-          <Route path="/notifications" element={<RequireManagement><Notifications /></RequireManagement>} />
+          <Route path="/notifications" element={<Notifications />} />
           <Route path="/announcements" element={<Announcements />} />
           <Route path="/employee-forms" element={<RequireOwner><EmployeeForms /></RequireOwner>} />
           <Route path="/settings" element={<RequireOwner><Settings /></RequireOwner>} />

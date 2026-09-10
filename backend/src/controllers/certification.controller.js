@@ -10,8 +10,10 @@ function parseDate(value) {
 
 async function addCertification(req, res, next) {
   try {
-    if (!MANAGEMENT_ROLES.includes(req.user?.role) || !["ADMIN", "CEO"].includes(req.user.role)) {
-      return res.status(403).json({ error: "Only an ADMIN or CEO can manage certifications" })
+    const isManagement = MANAGEMENT_ROLES.includes(req.user?.role) && ["ADMIN", "CEO"].includes(req.user.role)
+    const isSelf = req.user?.userId === req.params.id
+    if (!isManagement && !isSelf) {
+      return res.status(403).json({ error: "Only the employee or an ADMIN/CEO can manage certifications" })
     }
 
     const { id: employeeId } = req.params
@@ -60,8 +62,10 @@ async function addCertification(req, res, next) {
 
 async function updateCertification(req, res, next) {
   try {
-    if (!MANAGEMENT_ROLES.includes(req.user?.role) || !["ADMIN", "CEO"].includes(req.user.role)) {
-      return res.status(403).json({ error: "Only an ADMIN or CEO can manage certifications" })
+    const isManagement = MANAGEMENT_ROLES.includes(req.user?.role) && ["ADMIN", "CEO"].includes(req.user.role)
+    const isSelf = req.user?.userId === req.params.id
+    if (!isManagement && !isSelf) {
+      return res.status(403).json({ error: "Only the employee or an ADMIN/CEO can manage certifications" })
     }
 
     const { id: employeeId, certificationId } = req.params
@@ -109,8 +113,10 @@ async function updateCertification(req, res, next) {
 
 async function deleteCertification(req, res, next) {
   try {
-    if (!MANAGEMENT_ROLES.includes(req.user?.role) || !["ADMIN", "CEO"].includes(req.user.role)) {
-      return res.status(403).json({ error: "Only an ADMIN or CEO can manage certifications" })
+    const isManagement = MANAGEMENT_ROLES.includes(req.user?.role) && ["ADMIN", "CEO"].includes(req.user.role)
+    const isSelf = req.user?.userId === req.params.id
+    if (!isManagement && !isSelf) {
+      return res.status(403).json({ error: "Only the employee or an ADMIN/CEO can manage certifications" })
     }
     const { id: employeeId, certificationId } = req.params
     const { organizationId } = req.user

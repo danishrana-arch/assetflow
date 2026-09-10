@@ -27,10 +27,12 @@ import {
 import { useAuth } from "../context/AuthContext"
 import { useTheme } from "../context/ThemeContext"
 import { isManagement, canAccessPayroll } from "../utils/roles"
+import { useQuery } from "@tanstack/react-query"
+import api from "../api/client"
 import Avatar from "./ui/Avatar"
 import logoFull from "../assets/logo1.png"
 
-function RailItem({ to, label, icon: Icon, end, isDark }) {
+function RailItem({ to, label, icon: Icon, end, isDark, showNotificationDot = false }) {
   return (
     <NavLink
       to={to}
@@ -55,6 +57,9 @@ function RailItem({ to, label, icon: Icon, end, isDark }) {
       }
     >
       <Icon size={19} strokeWidth={2} />
+      {showNotificationDot && (
+        <span className="absolute right-0.5 top-0.5 h-2 w-2 rounded-full bg-danger ring-2 ring-transparent" />
+      )}
 
       <span
         className={`
@@ -91,6 +96,15 @@ export default function Sidebar() {
 
   const canManageAttendance =
     ["ADMIN", "CEO", "HR"].includes(user?.role) || !!user?.canManageAttendance
+
+  const { data: unreadNotifications } = useQuery({
+    queryKey: ["notifications-unread-count"],
+    queryFn: () => api.get("/notifications/unread-count").then((r) => r.data),
+    refetchInterval: 15000,
+    staleTime: 5000,
+  })
+
+  const hasUnreadNotifications = Number(unreadNotifications?.count || 0) > 0
 
   return (
     <aside
@@ -282,6 +296,7 @@ export default function Sidebar() {
               label="Activity"
               icon={Activity}
               isDark={isDark}
+              showNotificationDot={hasUnreadNotifications}
             />
 
             {isOwner && (
@@ -319,6 +334,7 @@ export default function Sidebar() {
             <RailItem to="/assignments" label="Asset Assignments" icon={ClipboardCheck} isDark={isDark} />
             <RailItem to="/asset-requests" label="Asset Requests" icon={PackageSearch} isDark={isDark} />
             <RailItem to="/tickets" label="Requests / Tickets" icon={Ticket} isDark={isDark} />
+            <RailItem to="/notifications" label="Notifications" icon={Activity} isDark={isDark} showNotificationDot={hasUnreadNotifications} />
           </>
         ) : (
           <>
@@ -355,6 +371,14 @@ export default function Sidebar() {
               label="Tickets"
               icon={Ticket}
               isDark={isDark}
+            />
+
+            <RailItem
+              to="/notifications"
+              label="Notifications"
+              icon={Activity}
+              isDark={isDark}
+              showNotificationDot={hasUnreadNotifications}
             />
           </>
         )}

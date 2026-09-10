@@ -62,11 +62,11 @@ model Organization {
   projects         Project[]
   announcements    Announcement[]
   companyEvents     CompanyEvent[]
+  notifications     Notification[]
   tickets          Ticket[]
   users            User[]
   employeeForms    EmployeeForm[]
   formSubmissions  EmployeeFormSubmission[]
-
   @@index([companyId])
   @@index([parentOrganizationId])
   @@index([archivedAt])
@@ -191,10 +191,31 @@ model User {
   employeeFormsCreated      EmployeeForm[]            @relation("EmployeeFormCreator")
   formSubmissionsConverted  EmployeeFormSubmission[]  @relation("FormSubmissionEmployee")
   tickets                   Ticket[]                  @relation("TicketRaisedBy")
+  notifications              Notification[]             @relation("NotificationRecipient")
+  notificationsCreated      Notification[]             @relation("NotificationCreator")
   department                Department?               @relation(fields: [departmentId], references: [id])
   manager                   User?                     @relation("ManagerReports", fields: [managerId], references: [id])
   reports                   User[]                    @relation("ManagerReports")
   organization              Organization              @relation(fields: [organizationId], references: [id])
+}
+
+model Notification {
+  id             String    @id @default(cuid())
+  organizationId String
+  recipientId    String
+  createdById    String?
+  type           String    @default("INFO")
+  title          String
+  message        String?
+  link           String?
+  createdAt      DateTime  @default(now())
+  readAt         DateTime?
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  recipient      User       @relation("NotificationRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+  createdBy      User?      @relation("NotificationCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([recipientId, readAt, createdAt])
+  @@index([organizationId, createdAt])
 }
 
 model Certification {

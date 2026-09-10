@@ -1,6 +1,7 @@
 const prisma = require("../lib/prisma")
 const { MANAGEMENT_ROLES } = require("../utils/roles")
 const { logAudit } = require("../utils/audit")
+const { notifyManagement, createNotification } = require("../utils/notifications")
 
 // Employee asks for something ("I need a monitor"). Doesn't hand over an
 // asset by itself — that happens separately via fulfillRequest, once
@@ -24,6 +25,15 @@ async function createRequest(req, res, next) {
         category: category.trim(),
         reason: reason.trim().slice(0, 1000),
       },
+    })
+
+    await notifyManagement({
+      organizationId,
+      createdById: userId,
+      type: "ASSET_REQUEST",
+      title: "New asset request",
+      message: `${request.category}: ${request.reason}` ,
+      link: "/asset-requests",
     })
 
     res.status(201).json(request)
@@ -89,6 +99,16 @@ async function reviewRequest(req, res, next) {
       },
     })
 
+    await createNotification({
+      organizationId,
+      recipientId: request.employeeId,
+      createdById: userId,
+      type: "ASSET_REQUEST",
+      title: `Asset request ${decision.toLowerCase()}`,
+      message: `${request.category} request was ${decision.toLowerCase()}.${reviewNote ? ` ${reviewNote}` : ""}`,
+      link: "/asset-requests",
+    })
+
     res.json(updated)
   } catch (err) {
     next(err)
@@ -134,6 +154,17 @@ async function fulfillRequest(req, res, next) {
     ])
 
     logAudit({ organizationId, actorId: userId, action: "asset_request.fulfilled", targetType: "AssetRequest", targetId: id, note: `${asset.name} -> ${employee?.name || request.employeeId}` })
+
+    await createNotification({
+      organizationId,
+      recipientId: request.employeeId,
+      createdById: userId,
+      type: "ASSET_REQUEST",
+      title: "Asset request fulfilled",
+      message: `${asset.name} has been assigned to you.`,
+      link: "/asset-requests",
+    })
+
     res.json(updatedRequest)
   } catch (err) {
     next(err)

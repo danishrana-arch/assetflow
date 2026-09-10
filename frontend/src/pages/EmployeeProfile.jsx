@@ -86,7 +86,7 @@ export default function EmployeeProfile() {
   const [usageDrafts, setUsageDrafts] = useState({}) // { [assetId]: { notUsing: bool, actual: string } }
   const [usageSubmitted, setUsageSubmitted] = useState({}) // { [assetId]: true }
   const [certificateDrafts, setCertificateDrafts] = useState([])
-  const canManageCertifications = ["ADMIN", "CEO"].includes(user?.role)
+  const canManageCertifications = ["ADMIN", "CEO"].includes(user?.role) || isSelf
 
   const { data: employee, isLoading } = useQuery({
     queryKey: ["employee", id],
@@ -401,15 +401,6 @@ export default function EmployeeProfile() {
             </div>
           </div>
         </div>
-        {organization?.name && (
-          <span
-            className="inline-flex shrink-0 items-center rounded-full px-3.5 py-1.5 text-xs font-semibold text-white"
-            style={{ backgroundColor: organization.primaryColor || "#3B82F6" }}
-          >
-            {organization.name}
-          </span>
-        )}
-
         {/** Attendance timeline & status for today's record (visible to admins/CEO and employee) */}
         {todayRecord && (
           <div className="mb-4">
@@ -475,17 +466,25 @@ export default function EmployeeProfile() {
       {/* Employee 360 overview */}
       <section className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {(() => {
-          const attendance = employee.attendanceRecords || []
-          const present = attendance.filter(a => ["PRESENT","LATE"].includes(a.status)).length
+          const allAttendance = employee.attendanceRecords || []
+          const now = new Date()
+          const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+          const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1)
+          const attendance = allAttendance.filter((record) => {
+            const date = record.date ? new Date(record.date) : null
+            return date && date >= monthStart && date < monthEnd
+          })
+          const present = attendance.filter((a) => ["PRESENT", "LATE"].includes(a.status)).length
           const attendancePct = attendance.length ? Math.round((present / attendance.length) * 100) : 0
-          const activeProjects = (employee.projectMemberships || []).filter(m => m.project?.status === "IN_PROGRESS").length
-          const completedProjects = (employee.projectMemberships || []).filter(m => m.project?.status === "COMPLETED").length
+          const activeProjects = (employee.projectMemberships || []).filter((m) => m.project?.status === "IN_PROGRESS").length
+          const completedProjects = (employee.projectMemberships || []).filter((m) => m.project?.status === "COMPLETED").length
           const year = new Date().getFullYear()
-          const leaveDays = (employee.leaveApplications || []).filter(l => new Date(l.startDate).getFullYear() === year).reduce((sum,l) => sum + Math.max(1, Math.round((new Date(l.endDate)-new Date(l.startDate))/86400000)+1),0)
+          const leaveDays = (employee.leaveApplications || []).filter((l) => new Date(l.startDate).getFullYear() === year).reduce((sum, l) => sum + Math.max(1, Math.round((new Date(l.endDate) - new Date(l.startDate)) / 86400000) + 1), 0)
           const allowance = Number(employee.organization?.casualLeaveAllowance || 0) + Number(employee.organization?.sickLeaveAllowance || 0)
           const remaining = Math.max(0, allowance - leaveDays)
+          const monthLabel = now.toLocaleDateString(undefined, { month: "long" })
           return <>
-            <div className="card p-4"><p className="text-xs text-muted">Attendance</p><p className="mt-1 text-2xl font-semibold text-ink">{attendancePct}%</p><p className="text-[11px] text-muted">Last 90 records</p></div>
+            <div className="card p-4"><p className="text-xs text-muted">Attendance</p><p className="mt-1 text-2xl font-semibold text-ink">{attendancePct}%</p><p className="text-[11px] text-muted">{monthLabel}</p></div>
             <div className="card p-4"><p className="text-xs text-muted">Leave remaining</p><p className="mt-1 text-2xl font-semibold text-ink">{remaining}</p><p className="text-[11px] text-muted">Approved days this year: {leaveDays}</p></div>
             <div className="card p-4"><p className="text-xs text-muted">Projects</p><p className="mt-1 text-2xl font-semibold text-ink">{activeProjects}</p><p className="text-[11px] text-muted">{completedProjects} completed</p></div>
             <div className="card p-4"><p className="text-xs text-muted">Assigned assets</p><p className="mt-1 text-2xl font-semibold text-ink">{assignedAssets.length}</p><p className="text-[11px] text-muted">Current assignments</p></div>
@@ -1008,7 +1007,7 @@ export default function EmployeeProfile() {
                 <div className="flex items-center justify-between gap-2">
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-wide text-muted">Certifications</p>
-                    <p className="mt-0.5 text-[11px] text-muted-2">Add verified certificates and credentials.</p>
+                    <p className="mt-0.5 text-[11px] text-muted-2">{isSelf ? "Add your certificates and credentials." : "Add verified certificates and credentials."}</p>
                   </div>
                   <button
                     type="button"

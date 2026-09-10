@@ -24,7 +24,6 @@ import {
   X,
   Plus,
   FolderKanban,
-  AlertTriangle,
   Megaphone,
 } from "lucide-react"
 
@@ -321,27 +320,11 @@ export default function Dashboard() {
   // The executive endpoint has existed in more than one response shape.
   // Normalize it here so the dashboard never crashes when metrics is absent.
   const executiveMetrics = executive?.metrics ?? executive ?? {}
-
-  /* ==========================================================
-     ATTENDANCE ANOMALIES
-  ========================================================== */
-
-  const { data: anomalies = [] } =
-    useQuery({
-      queryKey: [
-        "dashboard-attendance-anomalies",
-      ],
-
-      queryFn: () =>
-        api
-          .get(
-            "/dashboard/attendance-anomalies"
-          )
-          .then((r) => r.data),
-
-      enabled: isManagement,
-    })
-
+  const projectSummary = executiveMetrics?.projectStatus ?? {
+    NOT_STARTED: 0,
+    IN_PROGRESS: 0,
+    COMPLETED: 0,
+  }
 
   /* ==========================================================
      ANNOUNCEMENTS
@@ -835,12 +818,6 @@ export default function Dashboard() {
                 </p>
               </div>
 
-              <Link
-                to="/projects"
-                className="shrink-0 text-xs font-semibold text-accent hover:underline"
-              >
-                View projects
-              </Link>
 
             </div>
 
@@ -884,7 +861,9 @@ export default function Dashboard() {
 
                 <div className="min-w-0">
                   <p className="text-xl font-semibold text-ink">
-                    {executiveMetrics?.presentToday ?? executiveMetrics?.present ?? "—"}
+                    {executiveMetrics
+                      ?.presentToday ??
+                      executiveMetrics?.present ?? "—"}
                   </p>
 
                   <p className="text-xs text-muted">
@@ -907,7 +886,11 @@ export default function Dashboard() {
 
                 <div className="min-w-0">
                   <p className="text-xl font-semibold text-ink">
-                    {executiveMetrics?.projects ?? "—"}
+                    {executive?.projects
+                      ?.length ??
+                      executiveMetrics
+                        ?.projects ??
+                      "—"}
                   </p>
 
                   <p className="text-xs text-muted">
@@ -976,7 +959,7 @@ export default function Dashboard() {
 
                   <div className="rounded-xl bg-surface-2 px-2 py-3 text-center">
                     <p className="text-xl font-semibold text-ink">
-                      {executive?.projectStatus?.NOT_STARTED ?? executive?.projects?.notStarted ?? "—"}
+                      {projectSummary.NOT_STARTED ?? 0}
                     </p>
 
                     <p className="mt-0.5 text-[10px] leading-4 text-muted sm:text-[11px]">
@@ -986,7 +969,7 @@ export default function Dashboard() {
 
                   <div className="rounded-xl bg-surface-2 px-2 py-3 text-center">
                     <p className="text-xl font-semibold text-ink">
-                      {executive?.projectStatus?.IN_PROGRESS ?? executive?.projects?.inProgress ?? "—"}
+                      {projectSummary.IN_PROGRESS ?? 0}
                     </p>
 
                     <p className="mt-0.5 text-[10px] leading-4 text-muted sm:text-[11px]">
@@ -996,7 +979,7 @@ export default function Dashboard() {
 
                   <div className="rounded-xl bg-surface-2 px-2 py-3 text-center">
                     <p className="text-xl font-semibold text-ink">
-                      {executive?.projectStatus?.COMPLETED ?? executive?.projects?.completed ?? "—"}
+                      {projectSummary.COMPLETED ?? 0}
                     </p>
 
                     <p className="mt-0.5 text-[10px] leading-4 text-muted sm:text-[11px]">
@@ -1013,7 +996,7 @@ export default function Dashboard() {
               <div className="rounded-2xl border border-border p-4 sm:p-5">
 
                 <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
+                  <div>
                     <p className="text-sm font-semibold text-ink">
                       Attendance watch
                     </p>
@@ -1026,9 +1009,9 @@ export default function Dashboard() {
 
                   <Link
                     to="/attendance"
-                    className="shrink-0 text-xs font-semibold text-accent hover:underline"
+                    className="shrink-0 rounded-full border border-border bg-surface-1 px-2.5 py-1 text-[10px] font-semibold text-accent transition-colors hover:bg-surface-2"
                   >
-                    Open attendance
+                    View attendance
                   </Link>
                 </div>
 
@@ -1049,6 +1032,51 @@ export default function Dashboard() {
 
                 </div>
 
+              </div>
+
+            </div>
+
+            {/* Latest announcements */}
+            <div className="border-t border-border p-4 sm:p-5 lg:p-6">
+
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-ink">
+                    Latest announcements
+                  </p>
+                  <p className="mt-0.5 text-xs leading-5 text-muted">
+                    Recent company and department updates
+                  </p>
+                </div>
+
+                <Link
+                  to="/announcements"
+                  className="shrink-0 text-xs font-semibold text-accent"
+                >
+                  View all
+                </Link>
+              </div>
+
+              <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {announcements.slice(0, 4).map((a) => (
+                  <div key={a.id} className="min-w-0 rounded-2xl bg-surface-2 p-3">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <Megaphone size={14} className="shrink-0 text-muted" />
+                      <p className="truncate text-sm font-semibold text-ink">
+                        {a.title}
+                      </p>
+                    </div>
+                    <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted">
+                      {a.body}
+                    </p>
+                  </div>
+                ))}
+
+                {announcements.length === 0 && (
+                  <p className="text-sm text-muted">
+                    No announcements yet.
+                  </p>
+                )}
               </div>
 
             </div>
@@ -1227,6 +1255,7 @@ export default function Dashboard() {
                     dataKey="assigned"
                     stroke="#F9BD22"
                     strokeWidth={2.5}
+                    strokeDasharray="6 6"
                     dot={{
                       r: 2.5,
                       strokeWidth: 0,
@@ -1240,6 +1269,7 @@ export default function Dashboard() {
                     dataKey="available"
                     stroke="#707978"
                     strokeWidth={2.5}
+                    strokeDasharray="3 5"
                     dot={{
                       r: 2.5,
                       strokeWidth: 0,
@@ -1253,6 +1283,7 @@ export default function Dashboard() {
                     dataKey="repair"
                     stroke="#0058BE"
                     strokeWidth={2.5}
+                    strokeDasharray="10 5"
                     dot={{
                       r: 2.5,
                       strokeWidth: 0,
@@ -1618,135 +1649,6 @@ export default function Dashboard() {
         </div>
 
       </section>
-
-
-      {/* ======================================================
-          ATTENDANCE ANOMALIES + ANNOUNCEMENTS
-      ======================================================= */}
-
-      {isManagement &&
-        (anomalies.length > 0 ||
-          announcements.length > 0) && (
-          <section className="grid grid-cols-1 gap-4 sm:gap-5 lg:grid-cols-2">
-
-            {/* Attendance anomalies */}
-            <div className="card min-w-0 p-4 sm:p-5 lg:p-6">
-
-              <SectionHeader
-                title="Attendance anomalies"
-                action={
-                  <Link
-                    to="/attendance"
-                    className="shrink-0 text-xs font-semibold text-accent"
-                  >
-                    Open attendance
-                  </Link>
-                }
-              />
-
-              <div className="mt-4 space-y-2">
-
-                {anomalies
-                  .slice(0, 4)
-                  .map((a) => (
-                    <div
-                      key={a.id}
-                      className="flex min-w-0 items-start gap-3 rounded-2xl bg-surface-2 p-3"
-                    >
-
-                      <IconChip
-                        icon={AlertTriangle}
-                        tone="orange"
-                        size="sm"
-                      />
-
-                      <div className="min-w-0">
-
-                        <p className="truncate text-sm font-semibold text-ink">
-                          {a.employee?.name}
-                        </p>
-
-                        <p className="mt-0.5 line-clamp-2 text-xs leading-5 text-muted">
-                          {a.reasons?.join(
-                            " · "
-                          )}
-                        </p>
-
-                      </div>
-
-                    </div>
-                  ))}
-
-                {anomalies.length === 0 && (
-                  <p className="text-sm text-muted">
-                    No attendance anomalies
-                    detected.
-                  </p>
-                )}
-
-              </div>
-
-            </div>
-
-
-            {/* Announcements */}
-            <div className="card min-w-0 p-4 sm:p-5 lg:p-6">
-
-              <SectionHeader
-                title="Latest announcements"
-                action={
-                  <Link
-                    to="/announcements"
-                    className="shrink-0 text-xs font-semibold text-accent"
-                  >
-                    View all
-                  </Link>
-                }
-              />
-
-              <div className="mt-4 space-y-2">
-
-                {announcements
-                  .slice(0, 4)
-                  .map((a) => (
-                    <div
-                      key={a.id}
-                      className="min-w-0 rounded-2xl bg-surface-2 p-3"
-                    >
-
-                      <div className="flex min-w-0 items-center gap-2">
-
-                        <Megaphone
-                          size={14}
-                          className="shrink-0 text-muted"
-                        />
-
-                        <p className="truncate text-sm font-semibold text-ink">
-                          {a.title}
-                        </p>
-
-                      </div>
-
-                      <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted">
-                        {a.body}
-                      </p>
-
-                    </div>
-                  ))}
-
-                {announcements.length ===
-                  0 && (
-                  <p className="text-sm text-muted">
-                    No announcements yet.
-                  </p>
-                )}
-
-              </div>
-
-            </div>
-
-          </section>
-        )}
 
 
       {/* ======================================================
