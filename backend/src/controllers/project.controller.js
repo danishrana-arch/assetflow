@@ -3,6 +3,7 @@ const { ProjectStatus } = require("@prisma/client")
 
 const projectInclude = {
   manager: { select: { id: true, name: true, email: true } },
+  workCategory: { select: { id: true, name: true, technologies: true } },
   members: {
     include: {
       employee: {
@@ -96,6 +97,7 @@ async function createProject(req, res, next) {
       startDate,
       deadline,
       managerId,
+      workCategoryId,
       memberIds = [],
     } = req.body
 
@@ -114,6 +116,11 @@ async function createProject(req, res, next) {
       if (count !== ids.length) return res.status(400).json({ error: "One or more employees are invalid" })
     }
 
+    const workCategory = workCategoryId
+      ? await prisma.workCategory.findFirst({ where: { id: workCategoryId, organizationId, isActive: true }, select: { id: true } })
+      : null
+    if (workCategoryId && !workCategory) return res.status(400).json({ error: "Invalid work field" })
+
     const manager = managerId
       ? await prisma.user.findFirst({ where: { id: managerId, organizationId }, select: { id: true } })
       : null
@@ -131,6 +138,7 @@ async function createProject(req, res, next) {
         startDate: cleanDate(startDate) || null,
         deadline: cleanDate(deadline) || null,
         managerId: manager?.id || null,
+        workCategoryId: workCategory?.id || null,
         completedAt: status === "COMPLETED" ? new Date() : null,
         members: { create: ids.map(employeeId => ({ employeeId })) },
       },
@@ -156,6 +164,7 @@ async function updateProject(req, res, next) {
       startDate,
       deadline,
       managerId,
+      workCategoryId,
       members,
       totalHours,
     } = req.body
@@ -190,6 +199,14 @@ async function updateProject(req, res, next) {
       data.deadline = parsed
       data.deadlineReminderSentAt = null
       data.deadlineOverdueNotifiedAt = null
+    }
+    if (workCategoryId !== undefined) {
+      if (workCategoryId === null || workCategoryId === "") data.workCategoryId = null
+      else {
+        const workCategory = await prisma.workCategory.findFirst({ where: { id: workCategoryId, organizationId, isActive: true }, select: { id: true } })
+        if (!workCategory) return res.status(400).json({ error: "Invalid work field" })
+        data.workCategoryId = workCategory.id
+      }
     }
     if (managerId !== undefined) {
       if (managerId === null || managerId === "") data.managerId = null

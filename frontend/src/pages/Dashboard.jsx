@@ -403,6 +403,18 @@ export default function Dashboard() {
         .then((r) => r.data),
   })
 
+
+  /* ==========================================================
+     SMART ALERTS
+  ========================================================== */
+
+  const { data: smartAlerts = [] } = useQuery({
+    queryKey: ["smart-alerts", user?.id, organization?.id],
+    queryFn: () => api.get("/alerts").then((r) => r.data),
+    refetchInterval: 30000,
+    staleTime: 10000,
+  })
+
   const {
     data: calendarData = { events: [], calendar: [] },
     isLoading: loadingEvents,
@@ -515,43 +527,24 @@ export default function Dashboard() {
      ALERTS
   ========================================================== */
 
-  const alerts = [
-    stats?.expiringWarranties
-      ? {
-          tone: "pink",
-          icon: ShieldAlert,
-          title: "Warranty Alert",
-          desc: `${stats.expiringWarranties} assets nearing warranty end`,
-        }
-      : null,
+  const alertIcon = {
+    critical: ShieldAlert,
+    warning: ClipboardList,
+    info: Package,
+  }
 
-    stats?.pendingRequests
-      ? {
-          tone: "yellow",
-          icon: ClipboardList,
-          title: "Pending Tickets",
-          desc: `${stats.pendingRequests} requests need review`,
-        }
-      : null,
+  const alertTone = {
+    critical: "pink",
+    warning: "yellow",
+    info: "cyan",
+  }
 
-    stats?.availableAssets
-      ? {
-          tone: "green",
-          icon: Package,
-          title: "Available Inventory",
-          desc: `${stats.availableAssets} assets ready to assign`,
-        }
-      : null,
-
-    tickets?.length
-      ? {
-          tone: "cyan",
-          icon: ClipboardList,
-          title: "Open Support",
-          desc: `${tickets.length} active tickets in queue`,
-        }
-      : null,
-  ].filter(Boolean)
+  const alerts = smartAlerts.map((item) => ({
+    ...item,
+    icon: alertIcon[item.severity] || Package,
+    tone: alertTone[item.severity] || "cyan",
+    desc: item.message,
+  }))
 
 
   const topAssets =
@@ -1611,9 +1604,10 @@ export default function Dashboard() {
             )}
 
             {alerts.map((a, i) => (
-              <li
+              <Link
                 key={i}
-                className={`flex min-w-0 items-center gap-3 rounded-2xl px-3 py-2.5 bg-chip-${a.tone}-bg/60`}
+                to={a.link || "/notifications"}
+                className={`flex min-w-0 items-center gap-3 rounded-2xl px-3 py-2.5 bg-chip-${a.tone}-bg/60 transition-colors hover:bg-chip-${a.tone}-bg`}
               >
 
                 <IconChip
@@ -1641,7 +1635,7 @@ export default function Dashboard() {
                   className="shrink-0 text-muted"
                 />
 
-              </li>
+              </Link>
             ))}
 
           </ul>

@@ -379,13 +379,16 @@ async function getCalendarEvents(req, res, next) {
     const { organizationId } = req.user
     const range = req.query.range === "month" ? "month" : "week"
     const now = new Date()
-    const year = now.getUTCFullYear()
-    const month = now.getUTCMonth()
-    const today = calendarDate(year, month, now.getUTCDate())
+    const requestedYear = Number(req.query.year)
+    const requestedMonth = Number(req.query.month)
+    const hasMonth = Number.isInteger(requestedYear) && requestedYear >= 2000 && requestedYear <= 2100 && Number.isInteger(requestedMonth) && requestedMonth >= 0 && requestedMonth <= 11
+    const year = hasMonth ? requestedYear : now.getUTCFullYear()
+    const month = hasMonth ? requestedMonth : now.getUTCMonth()
+    const today = calendarDate(year, month, hasMonth ? 1 : now.getUTCDate())
     let start = new Date(today)
     let end = new Date(today)
 
-    if (range === "week") {
+    if (range === "week" && !hasMonth) {
       const day = start.getUTCDay()
       start.setUTCDate(start.getUTCDate() - day)
       end = new Date(start)

@@ -22,28 +22,6 @@ const STATUS = {
   COMPLETED: { label: "Completed", icon: CheckCircle2, tone: "text-emerald-600", bg: "bg-emerald-500/10", border: "border-emerald-500/20" },
 }
 
-const TECHNOLOGIES = [
-  "React",
-  "Node.js",
-  "Express.js",
-  "MongoDB",
-  "MERN",
-  "Next.js",
-  "TypeScript",
-  "JavaScript",
-  "Vue.js",
-  "Angular",
-  "PostgreSQL",
-  "MySQL",
-  "Python",
-  "Django",
-  ".NET",
-  "PHP",
-  "Laravel",
-  "Flutter",
-  "React Native",
-  "Other",
-]
 
 function formatDate(value) {
   if (!value) return "No deadline"
@@ -150,6 +128,8 @@ function ProjectDetails({ project, onClose, onRefresh, canEdit = true }) {
   const [status, setStatus] = useState(project.status)
   const [projectUrl, setProjectUrl] = useState(project.projectUrl || "")
   const [technologies, setTechnologies] = useState(project.technologies || [])
+  const [workCategoryId, setWorkCategoryId] = useState(project.workCategoryId || project.workCategory?.id || "")
+  const categoriesQuery = useQuery({ queryKey: ["project-work-categories"], queryFn: () => api.get("/projects/work-categories").then(r => r.data) })
 
   useEffect(() => {
     setHours(Object.fromEntries((project.members || []).map(m => [m.id, Number(m.hoursSpent || 0)])))
@@ -157,6 +137,7 @@ function ProjectDetails({ project, onClose, onRefresh, canEdit = true }) {
     setStatus(project.status)
     setProjectUrl(project.projectUrl || "")
     setTechnologies(project.technologies || [])
+    setWorkCategoryId(project.workCategoryId || project.workCategory?.id || "")
   }, [project])
 
   const update = useMutation({
@@ -164,7 +145,8 @@ function ProjectDetails({ project, onClose, onRefresh, canEdit = true }) {
     onSuccess: () => onRefresh(),
   })
 
-  const saveProject = () => update.mutate({ status, deadline: newDeadline || null, projectUrl: projectUrl.trim() || null, technologies })
+  const selectedCategory = (categoriesQuery.data || []).find(c => c.id === workCategoryId)
+  const saveProject = () => update.mutate({ status, deadline: newDeadline || null, projectUrl: projectUrl.trim() || null, technologies, workCategoryId: workCategoryId || null })
   const saveHours = memberId => api.patch(`/projects/${project.id}/members/${memberId}`, { hoursSpent: hours[memberId] }).then(onRefresh)
   const completedNeedsLink = status === "COMPLETED" && !projectUrl.trim()
 
@@ -194,11 +176,13 @@ function ProjectDetails({ project, onClose, onRefresh, canEdit = true }) {
             </div>
 
             <div className="mt-4">
-              <p className="text-xs font-medium text-muted">Technologies</p>
+              <p className="text-xs font-medium text-muted">Work field</p>
+              <select disabled={!canEdit} value={workCategoryId} onChange={e => { setWorkCategoryId(e.target.value); setTechnologies([]) }} className="field mt-2 w-full text-xs"><option value="">Select work field</option>{(categoriesQuery.data || []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
+              <p className="mt-4 text-xs font-medium text-muted">Technologies / tools</p>
               <div className="mt-2 flex flex-wrap gap-2">
-                {TECHNOLOGIES.map(tech => {
+                {(selectedCategory?.technologies || []).map(tech => {
                   const active = technologies.includes(tech)
-                  return <button type="button" key={tech} onClick={() => setTechnologies(prev => active ? prev.filter(item => item !== tech) : [...prev, tech])} className={`rounded-full px-3 py-1.5 text-[10px] font-semibold ${active ? "bg-accent text-white" : "bg-surface-2 text-muted hover:text-ink"}`}>{tech}</button>
+                  return <button disabled={!canEdit} type="button" key={tech} onClick={() => setTechnologies(prev => active ? prev.filter(item => item !== tech) : [...prev, tech])} className={`rounded-full px-3 py-1.5 text-[10px] font-semibold ${active ? "bg-accent text-white" : "bg-surface-2 text-muted hover:text-ink"}`}>{tech}</button>
                 })}
               </div>
             </div>
@@ -256,9 +240,10 @@ function DeadlineModal({ project, onClose, onCompleted, onExtended }) {
 }
 
 function CreateProjectModal({ onClose, onCreated }) {
-  const [form, setForm] = useState({ name: "", clientName: "", projectUrl: "", deadline: "", status: "NOT_STARTED", memberIds: [], technologies: [] })
+  const [form, setForm] = useState({ name: "", clientName: "", projectUrl: "", deadline: "", status: "NOT_STARTED", memberIds: [], technologies: [], workCategoryId: "" })
   const [employeeSearch, setEmployeeSearch] = useState("")
   const [selectedEmployees, setSelectedEmployees] = useState([])
+  const categoriesQuery = useQuery({ queryKey: ["project-work-categories"], queryFn: () => api.get("/projects/work-categories").then(r => r.data) })
 
   const employeesQuery = useQuery({
     queryKey: ["project-employee-search", employeeSearch],
@@ -294,7 +279,7 @@ function CreateProjectModal({ onClose, onCreated }) {
           <label className="sm:col-span-2"><span className="text-xs font-medium text-muted">Status</span><select value={form.status} onChange={e => setForm({ ...form, status: e.target.value })} className="field mt-1 w-full">{Object.entries(STATUS).map(([value, meta]) => <option key={value} value={value}>{meta.label}</option>)}</select></label>
         </div>
 
-        <div className="mt-5"><p className="text-xs font-semibold text-ink">Technologies</p><div className="mt-2 flex flex-wrap gap-2">{TECHNOLOGIES.map(tech => <button type="button" key={tech} onClick={() => toggleTechnology(tech)} className={`rounded-full px-3 py-1.5 text-[10px] font-semibold ${form.technologies.includes(tech) ? "bg-accent text-white" : "bg-surface-2 text-muted hover:text-ink"}`}>{tech}</button>)}</div></div>
+        <div className="mt-5"><p className="text-xs font-semibold text-ink">Work field</p><select value={form.workCategoryId} onChange={e => setForm(prev => ({ ...prev, workCategoryId: e.target.value, technologies: [] }))} className="field mt-2 w-full"><option value="">Select the type of work</option>{(categoriesQuery.data || []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select><p className="mt-4 text-xs font-semibold text-ink">Technologies / tools</p><p className="mt-1 text-[10px] text-muted">Options change according to the selected field of work.</p><div className="mt-2 flex flex-wrap gap-2">{((categoriesQuery.data || []).find(c => c.id === form.workCategoryId)?.technologies || []).map(tech => <button type="button" key={tech} onClick={() => toggleTechnology(tech)} className={`rounded-full px-3 py-1.5 text-[10px] font-semibold ${form.technologies.includes(tech) ? "bg-accent text-white" : "bg-surface-2 text-muted hover:text-ink"}`}>{tech}</button>)}</div></div>
 
         <div className="mt-6">
           <div className="flex items-center justify-between"><p className="text-xs font-semibold text-ink">Assign employees</p><p className="text-[11px] text-muted">{selectedEmployees.length} selected</p></div>
@@ -323,6 +308,14 @@ function CreateProjectModal({ onClose, onCreated }) {
   )
 }
 
+function WorkFieldManager({ onClose }) {
+  const qc = useQueryClient(); const [name,setName]=useState(""); const [techs,setTechs]=useState("")
+  const q=useQuery({queryKey:["project-work-categories"],queryFn:()=>api.get("/projects/work-categories").then(r=>r.data)})
+  const create=useMutation({mutationFn:()=>api.post("/projects/work-categories",{name,technologies:techs.split(",").map(x=>x.trim()).filter(Boolean)}),onSuccess:()=>{setName("");setTechs("");qc.invalidateQueries({queryKey:["project-work-categories"]})}})
+  const remove=useMutation({mutationFn:id=>api.delete(`/projects/work-categories/${id}`),onSuccess:()=>qc.invalidateQueries({queryKey:["project-work-categories"]})})
+  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"><div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-3xl bg-surface p-6 shadow-2xl"><div className="flex justify-between"><div><h3 className="text-lg font-semibold text-ink">Work fields & tools</h3><p className="mt-1 text-xs text-muted">Customize the fields of work and technology/tool options for this organization.</p></div><button onClick={onClose}><X size={18}/></button></div><div className="mt-5 space-y-3"><input className="field w-full" placeholder="Work field e.g. Quantity Takeoff" value={name} onChange={e=>setName(e.target.value)}/><input className="field w-full" placeholder="Tools, comma separated e.g. Bluebeam, PlanSwift" value={techs} onChange={e=>setTechs(e.target.value)}/><button disabled={!name.trim()||create.isPending} onClick={()=>create.mutate()} className="pill-accent w-full px-4 py-2.5 text-xs">{create.isPending?"Adding…":"Add work field"}</button></div><div className="mt-5 space-y-2">{(q.data||[]).map(c=><div key={c.id} className="flex items-center justify-between rounded-2xl bg-surface-2 p-3"><div><p className="text-xs font-semibold text-ink">{c.name}</p><p className="mt-1 text-[10px] text-muted">{c.technologies?.join(" · ")||"No tools configured"}</p></div>{!c.isDefault&&<button onClick={()=>remove.mutate(c.id)} className="text-[10px] font-semibold text-danger">Remove</button>}</div>)}</div></div></div>
+}
+
 export default function Projects() {
   const { user } = useAuth()
   const queryClient = useQueryClient()
@@ -332,6 +325,7 @@ export default function Projects() {
   const [selected, setSelected] = useState(null)
   const [expired, setExpired] = useState(null)
   const [createOpen, setCreateOpen] = useState(false)
+  const [workFieldsOpen, setWorkFieldsOpen] = useState(false)
   const isManagement = ["ADMIN", "CEO", "SALES_HEAD", "HR", "MANAGEMENT", "DEPARTMENT_HEAD"].includes(user?.role)
 
   const { data: projects = [], isLoading } = useQuery({
@@ -377,7 +371,7 @@ export default function Projects() {
 
   return (
     <div>
-      <PageHeader title="Projects" subtitle="Track company projects, deadlines, teams, technology, and time spent." backTo="/" actions={isManagement ? <button onClick={() => setCreateOpen(true)} className="pill-accent inline-flex items-center gap-2 px-4 py-2.5 text-xs"><Plus size={15} /> New Project</button> : null} />
+      <PageHeader title="Projects" subtitle="Track company projects, deadlines, teams, technology, and time spent." backTo="/" actions={isManagement ? <div className="flex gap-2"><button onClick={() => setWorkFieldsOpen(true)} className="rounded-2xl bg-surface-2 px-4 py-2.5 text-xs font-semibold text-ink">Work fields</button><button onClick={() => setCreateOpen(true)} className="pill-accent inline-flex items-center gap-2 px-4 py-2.5 text-xs"><Plus size={15} /> New Project</button></div> : null} />
 
       {isManagement && <div className="grid gap-4 md:grid-cols-3">{["NOT_STARTED", "IN_PROGRESS", "COMPLETED"].map(status => <StatusCard key={status} status={status} count={countsQuery.data?.[status] ?? 0} active={activeStatus === status} onClick={() => setActiveStatus(activeStatus === status ? null : status)} />)}</div>}
 
@@ -387,6 +381,7 @@ export default function Projects() {
 
       {createOpen && isManagement && <CreateProjectModal onClose={() => setCreateOpen(false)} onCreated={async project => { setCreateOpen(false); await refresh(); setSelected(project) }} />}
       {selected && <ProjectDetails project={selected} onClose={() => setSelected(null)} onRefresh={() => refresh(selected.id)} canEdit={isManagement} />}
+      {workFieldsOpen && isManagement && <WorkFieldManager onClose={() => setWorkFieldsOpen(false)} />}
       {expired && <DeadlineModal project={expired} onClose={() => setExpired(null)} onCompleted={() => { setExpired(null); refresh() }} onExtended={() => { setExpired(null); refresh() }} />}
     </div>
   )

@@ -5,6 +5,7 @@ const {
   listCompanyOrganizations,
   createSubOrganization,
   archiveSubOrganization,
+  getOrganizationComparison,
 } = require("../controllers/organization.controller")
 const { requireAuth, requireRole } = require("../middleware/auth.middleware")
 
@@ -14,6 +15,7 @@ router.use(requireAuth)
 
 router.get("/", getOrganization)
 router.get("/company", listCompanyOrganizations)
+router.get("/comparison", requireRole("ADMIN", "CEO"), getOrganizationComparison)
 router.post("/suborganizations", requireRole("ADMIN", "CEO"), createSubOrganization)
 router.delete("/suborganizations/:id", requireRole("ADMIN", "CEO"), archiveSubOrganization)
 router.patch("/", requireRole("ADMIN", "CEO"), updateOrganization)

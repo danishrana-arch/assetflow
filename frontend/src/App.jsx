@@ -16,10 +16,12 @@ const AssetProfile = lazy(() => import("./pages/AssetProfile"))
 const Assignments = lazy(() => import("./pages/Assignments"))
 const AssetRequests = lazy(() => import("./pages/AssetRequests"))
 const Departments = lazy(() => import("./pages/Departments"))
+const AdvancedCalendar = lazy(() => import("./pages/AdvancedCalendar"))
+const OrganizationComparison = lazy(() => import("./pages/OrganizationComparison"))
+const Employee360 = lazy(() => import("./pages/Employee360"))
 const Attendance = lazy(() => import("./pages/Attendance"))
 const MyAttendance = lazy(() => import("./pages/MyAttendance"))
 const LeaveRequests = lazy(() => import("./pages/LeaveRequests"))
-const LeaveCalendar = lazy(() => import("./pages/LeaveCalendar"))
 const Holidays = lazy(() => import("./pages/Holidays"))
 const AuditLog = lazy(() => import("./pages/AuditLog"))
 const Tickets = lazy(() => import("./pages/Tickets"))
@@ -110,16 +112,19 @@ function ProtectedShell() {
           <Route path="/dashboard" element={isManager || isIT ? <Dashboard /> : <Navigate to={`/employees/${user.id}`} replace />} />
           <Route path="/employees" element={<RequireEmployeeDirectory><Employees /></RequireEmployeeDirectory>} />
           <Route path="/employees/:id" element={<EmployeeProfile />} />
+          <Route path="/employee-360/:id" element={<Employee360 />} />
           <Route path="/inventory" element={<RequireInventoryAccess><Inventory /></RequireInventoryAccess>} />
           <Route path="/inventory/:id" element={<RequireInventoryAccess><AssetProfile /></RequireInventoryAccess>} />
           <Route path="/assignments" element={<RequireInventoryAccess><Assignments /></RequireInventoryAccess>} />
           <Route path="/projects" element={isIT ? <Navigate to="/inventory" replace /> : <Projects />} />
           <Route path="/asset-requests" element={<RequireInventoryAccess><AssetRequests /></RequireInventoryAccess>} />
           <Route path="/departments" element={<RequireManagement><Departments /></RequireManagement>} />
+          <Route path="/calendar" element={<AdvancedCalendar />} />
+          <Route path="/organization-comparison" element={<RequireOwner><OrganizationComparison /></RequireOwner>} />
           <Route path="/attendance" element={<RequireManagement><Attendance /></RequireManagement>} />
           <Route path="/attendance/me" element={<MyAttendance />} />
           <Route path="/leave-requests" element={<RequireManagement><LeaveRequests /></RequireManagement>} />
-          <Route path="/leave-calendar" element={<RequireManagement><LeaveCalendar /></RequireManagement>} />
+          <Route path="/leave-calendar" element={<Navigate to="/calendar" replace />} />
           <Route path="/holidays" element={<RequireManagement><Holidays /></RequireManagement>} />
           <Route path="/audit-log" element={<RequireManagement><AuditLog /></RequireManagement>} />
           <Route path="/payroll" element={<RequirePayrollAccess><Payroll /></RequirePayrollAccess>} />

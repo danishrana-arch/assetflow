@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Plus, X, Building2, Users, Boxes } from "lucide-react"
+import { Plus, X, Building2, Users, Boxes, UserRound } from "lucide-react"
 import api from "../api/client"
 import PageHeader from "../components/ui/PageHeader"
 import IconChip from "../components/ui/IconChip"
@@ -8,97 +8,15 @@ import { TextField } from "../components/ui/Field"
 import EmptyState from "../components/ui/EmptyState"
 
 const TONES = ["blue", "purple", "cyan", "orange", "green", "pink", "yellow"]
-
 export default function Departments() {
-  const [showForm, setShowForm] = useState(false)
-  const [name, setName] = useState("")
-  const [error, setError] = useState("")
-  const queryClient = useQueryClient()
-
-  const { data: departments, isLoading } = useQuery({
-    queryKey: ["departments"],
-    queryFn: () => api.get("/departments").then((r) => r.data),
-  })
-
-  const createDepartment = useMutation({
-    mutationFn: () => api.post("/departments", { name }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["departments"] })
-      setShowForm(false); setName(""); setError("")
-    },
-    onError: (err) => setError(err.response?.data?.error || "Could not create department"),
-  })
-
-  return (
-    <div>
-      <PageHeader
-        backTo="/"
-        title="Departments"
-        subtitle="Group people and assets by team."
-        actions={
-          <button
-            onClick={() => setShowForm((v) => !v)}
-            className="pill-accent flex items-center gap-1.5 px-4 py-2.5 text-sm"
-          >
-            {showForm ? <X size={15} /> : <Plus size={15} />}
-            {showForm ? "Cancel" : "Add Department"}
-          </button>
-        }
-      />
-
-      {showForm && (
-        <form
-          onSubmit={(e) => { e.preventDefault(); if (name.trim()) createDepartment.mutate() }}
-          className="card mb-5 flex flex-wrap items-end gap-3 p-5"
-        >
-          <TextField
-            label="Department name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="e.g. Marketing"
-            required
-            className="min-w-[240px] flex-1"
-          />
-          <button type="submit" disabled={createDepartment.isPending} className="pill-accent px-5 py-2.5 text-sm">
-            Create
-          </button>
-          {error && <p className="w-full text-sm text-danger">{error}</p>}
-        </form>
-      )}
-
-      {isLoading && <p className="text-sm text-muted">Loading...</p>}
-
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {(departments || []).map((dept, i) => {
-          const tone = TONES[i % TONES.length]
-          return (
-            <div key={dept.id} className="card p-5">
-              <div className="flex items-start justify-between">
-                <IconChip icon={Building2} tone={tone} size="md" />
-                <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-2">
-                  Team
-                </span>
-              </div>
-              <p className="mt-4 text-lg font-semibold text-ink" style={{ letterSpacing: "-0.02em" }}>
-                {dept.name}
-              </p>
-              <div className="mt-4 flex items-center gap-4 text-xs text-muted">
-                <span className="inline-flex items-center gap-1.5">
-                  <Users size={12} /> {dept._count?.employees || 0} employees
-                </span>
-                <span className="inline-flex items-center gap-1.5">
-                  <Boxes size={12} /> {dept._count?.assets || 0} assets
-                </span>
-              </div>
-            </div>
-          )
-        })}
-        {departments?.length === 0 && !isLoading && (
-          <div className="sm:col-span-2 lg:col-span-3">
-            <EmptyState icon={Building2} title="No departments yet" description="Create departments to organize employees and assets." />
-          </div>
-        )}
-      </div>
-    </div>
-  )
+  const [showForm,setShowForm]=useState(false); const [name,setName]=useState(""); const [managerId,setManagerId]=useState(""); const [error,setError]=useState(""); const qc=useQueryClient()
+  const {data:departments=[],isLoading}=useQuery({queryKey:["departments"],queryFn:()=>api.get("/departments").then(r=>r.data)})
+  const {data:employees=[]}=useQuery({queryKey:["employees","department-managers"],queryFn:()=>api.get("/employees",{params:{page:1,pageSize:100}}).then(r=>r.data?.data||[]),enabled:showForm})
+  const create=useMutation({mutationFn:()=>api.post("/departments",{name,managerId:managerId||null}),onSuccess:()=>{qc.invalidateQueries({queryKey:["departments"]});setShowForm(false);setName("");setManagerId("");setError("")},onError:e=>setError(e.response?.data?.error||"Could not create department")})
+  const remove=useMutation({mutationFn:id=>api.delete(`/departments/${id}`),onSuccess:()=>qc.invalidateQueries({queryKey:["departments"]}),onError:e=>setError(e.response?.data?.error||"Could not delete department")})
+  const assignManager=useMutation({mutationFn:({id,managerId})=>api.patch(`/departments/${id}`,{managerId:managerId||null}),onSuccess:()=>qc.invalidateQueries({queryKey:["departments"]}),onError:e=>setError(e.response?.data?.error||"Could not update manager")})
+  return <div><PageHeader backTo="/" title="Departments" subtitle="Organize people, assets and ownership by team." actions={<button onClick={()=>setShowForm(v=>!v)} className="pill-accent flex items-center gap-1.5 px-4 py-2.5 text-sm">{showForm?<X size={15}/>:<Plus size={15}/>} {showForm?"Cancel":"Add Department"}</button>}/>
+  {showForm&&<form onSubmit={e=>{e.preventDefault();if(name.trim())create.mutate()}} className="card mb-5 grid gap-3 p-5 sm:grid-cols-2"><TextField label="Department name" value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Engineering" required/><label><span className="text-xs font-medium text-muted">Department manager</span><select className="field mt-1 w-full" value={managerId} onChange={e=>setManagerId(e.target.value)}><option value="">No manager assigned</option>{employees.filter(e=>e.status!=="LEFT_COMPANY").map(e=><option key={e.id} value={e.id}>{e.name} · {e.role}</option>)}</select></label><div className="sm:col-span-2 flex justify-end"><button type="submit" disabled={create.isPending} className="pill-accent px-5 py-2.5 text-sm">{create.isPending?"Creating…":"Create"}</button></div>{error&&<p className="sm:col-span-2 text-sm text-danger">{error}</p>}</form>}
+  {isLoading?<p className="text-sm text-muted">Loading…</p>:<div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{departments.map((dept,i)=><div key={dept.id} className="card p-5"><div className="flex items-start justify-between"><IconChip icon={Building2} tone={TONES[i%TONES.length]} size="md"/><button onClick={()=>{if(window.confirm(`Delete ${dept.name}?`))remove.mutate(dept.id)}} className="rounded-full p-2 text-muted hover:bg-red-50 hover:text-danger"><X size={14}/></button></div><p className="mt-4 text-lg font-semibold text-ink">{dept.name}</p><div className="mt-4 flex items-center gap-4 text-xs text-muted"><span className="inline-flex items-center gap-1.5"><Users size={12}/> {dept._count?.employees||0} employees</span><span className="inline-flex items-center gap-1.5"><Boxes size={12}/> {dept._count?.assets||0} assets</span></div><div className="mt-4 border-t border-border pt-4"><div className="flex items-center gap-2"><UserRound size={14} className="text-muted"/><span className="text-[10px] font-semibold uppercase tracking-wide text-muted">Manager</span></div><select value={dept.manager?.id||""} onChange={e=>assignManager.mutate({id:dept.id,managerId:e.target.value})} className="field mt-2 w-full py-2 text-xs"><option value="">No manager</option>{employees.filter(e=>e.status!=="LEFT_COMPANY").map(e=><option key={e.id} value={e.id}>{e.name}</option>)}</select>{dept.manager&&<p className="mt-2 text-xs text-muted">{dept.manager.name}</p>}</div></div>)}{departments.length===0&&<div className="sm:col-span-2 lg:col-span-3"><EmptyState icon={Building2} title="No departments yet" description="Create departments to organize employees and assets."/></div>}</div>}
+  </div>
 }

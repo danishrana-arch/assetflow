@@ -2,6 +2,9 @@ import { NavLink } from "react-router-dom"
 import {
   LayoutDashboard,
   FolderKanban,
+  ListTodo,
+  Clock3,
+  Award,
   Users,
   Boxes,
   ClipboardCheck,
@@ -14,6 +17,9 @@ import {
   CalendarDays,
   UserCheck,
   Bell,
+  BellRing,
+  Landmark,
+  BadgeCheck,
   Settings,
   Wallet,
   ClipboardList,
@@ -75,6 +81,9 @@ export default function MobileNav({ open, onClose }) {
               <Row to="/employees" icon={Users} label="Employees" onClick={onClose} />
               <Row to="/assignments" icon={ClipboardCheck} label="Asset Assignment" onClick={onClose} />
               <Row to="/projects" icon={FolderKanban} label="Projects" onClick={onClose} />
+              <Row to="/tasks" icon={ListTodo} label="Tasks" onClick={onClose} />
+              <Row to="/timesheets" icon={Clock3} label="Timesheets" onClick={onClose} />
+              <Row to="/performance" icon={Award} label="Performance" onClick={onClose} />
               <Row to="/asset-requests" icon={PackageSearch} label="Asset Requests" onClick={onClose} />
               <Row to="/departments" icon={Building2} label="Departments" onClick={onClose} />
               <Row to="/tickets" icon={Ticket} label="Requests / Tickets" onClick={onClose} />
@@ -83,13 +92,13 @@ export default function MobileNav({ open, onClose }) {
               )}
               <Row to="/attendance/me" icon={UserCheck} label="My Attendance" onClick={onClose} />
               <Row to="/leave-requests" icon={ClipboardList} label="Leave Requests" onClick={onClose} />
-              <Row to="/leave-calendar" icon={CalendarDays} label="Leave Calendar" onClick={onClose} />
+              <Row to="/calendar" icon={CalendarDays} label="Company Calendar" onClick={onClose} />
               <Row to="/reports" icon={BarChart3} label="Reports" onClick={onClose} />
               <Row to="/export" icon={Download} label="Export" onClick={onClose} />
               <Row to="/audit-log" icon={ShieldCheck} label="Audit Log" onClick={onClose} />
               {canAccessPayroll(user?.role) && <Row to="/payroll" icon={Wallet} label="Payroll" onClick={onClose} />}
               <div className="my-2 divider" />
-              <Row to="/notifications" icon={Bell} label="Notifications" onClick={onClose} />
+              <Row to="/notifications" icon={BellRing} label="Notifications" onClick={onClose} />
               {isOwner && <Row to="/employee-forms" icon={FileText} label="Employee Forms" onClick={onClose} />}
               <Row to="/settings" icon={Settings} label="Settings" onClick={onClose} />
               <Row to="/holidays" icon={CalendarDays} label="Holidays" onClick={onClose} />
@@ -108,9 +117,13 @@ export default function MobileNav({ open, onClose }) {
             <>
               <Row to={`/employees/${user?.id}`} icon={UserCircle} label="My Profile" onClick={onClose} />
               <Row to="/projects" icon={FolderKanban} label="My Projects" onClick={onClose} />
+              <Row to="/tasks" icon={ListTodo} label="My Tasks" onClick={onClose} />
+              <Row to="/timesheets" icon={Clock3} label="My Timesheets" onClick={onClose} />
+              <Row to="/performance" icon={Award} label="My Performance" onClick={onClose} />
               <Row to="/attendance/me" icon={CalendarCheck} label="My Attendance" onClick={onClose} />
               <Row to="/payroll/me" icon={Wallet} label="My Payslips" onClick={onClose} />
               <Row to="/tickets" icon={Ticket} label="Tickets" onClick={onClose} />
+              <Row to="/calendar" icon={CalendarDays} label="Company Calendar" onClick={onClose} />
             </>
           )}
         </nav>

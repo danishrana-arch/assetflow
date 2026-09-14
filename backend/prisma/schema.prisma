@@ -9,64 +9,56 @@ datasource db {
 }
 
 model Organization {
-  id                   String    @id @default(cuid())
-  name                 String
-  slug                 String    @unique
-  logoUrl              String?
-  primaryColor         String    @default("#3E63DD")
-  accentColor          String    @default("#16A34A")
-  theme                String    @default("light")
-  planTier             PlanTier  @default(FREE)
-  createdAt            DateTime  @default(now())
-  updatedAt            DateTime  @updatedAt
-  archivedAt           DateTime?
-  casualLeaveAllowance Int       @default(6)
-  sickLeaveAllowance   Int       @default(8)
-  lateDeductionAmount  Decimal   @default(500) @db.Decimal(10, 2)
-  payrollAccountNumber String?
-  payrollBankName      String?
-  workingHoursPerDay   Decimal   @default(8) @db.Decimal(4, 2)
-  workingDaysPerWeek   Int       @default(5)
+  id                     String                   @id @default(cuid())
+  name                   String
+  slug                   String                   @unique
+  logoUrl                String?
+  primaryColor           String                   @default("#3E63DD")
+  accentColor            String                   @default("#16A34A")
+  theme                  String                   @default("light")
+  planTier               PlanTier                 @default(FREE)
+  createdAt              DateTime                 @default(now())
+  updatedAt              DateTime                 @updatedAt
+  casualLeaveAllowance   Int                      @default(6)
+  sickLeaveAllowance     Int                      @default(8)
+  lateDeductionAmount    Decimal                  @default(500) @db.Decimal(10, 2)
+  payrollAccountNumber   String?
+  payrollBankName        String?
+  workingHoursPerDay     Decimal                  @default(8) @db.Decimal(4, 2)
+  workingDaysPerWeek     Int                      @default(5)
+  companyId              String?
+  parentOrganizationId   String?
+  geofenceEnabled        Boolean                  @default(false)
+  officeLatitude         Decimal?                 @db.Decimal(10, 7)
+  officeLongitude        Decimal?                 @db.Decimal(10, 7)
+  geofenceRadiusMeters   Int                      @default(200)
+  archivedAt             DateTime?
+  shiftStartDefault      String?
+  shiftEndDefault        String?
+  lateThresholdMinutes   Int                      @default(15)
+  announcements          Announcement[]
+  assets                 Asset[]
+  auditLogs              AuditLog[]
+  biometricDevices       BiometricDevice[]
+  biometricPunches       BiometricPunch[]
+  companyEvents          CompanyEvent[]
+  departments            Department[]
+  employeeForms          EmployeeForm[]
+  EmployeeFormInvitation EmployeeFormInvitation[]
+  formSubmissions        EmployeeFormSubmission[]
+  holidays               Holiday[]
+  notifications          Notification[]
+  company                Organization?            @relation("CompanyOrganizations", fields: [companyId], references: [id])
+  organizations          Organization[]           @relation("CompanyOrganizations")
+  parentOrganization     Organization?            @relation("OrganizationHierarchy", fields: [parentOrganizationId], references: [id])
+  childOrganizations     Organization[]           @relation("OrganizationHierarchy")
+  performanceReviews     PerformanceReview[]
+  projects               Project[]
+  Task                   Task[]
+  tickets                Ticket[]
+  TimeEntry              TimeEntry[]
+  users                  User[]
 
-  // Attendance geofencing — office coordinates + allowed radius. When
-  // enabled, an OFFICE-type employee marking themselves Present outside
-  // this radius is auto-flagged and recorded as Absent until an admin
-  // reviews and overrides it (FIELD-type employees are exempt).
-  geofenceEnabled      Boolean  @default(false)
-  officeLatitude       Decimal? @db.Decimal(10, 7)
-  officeLongitude      Decimal? @db.Decimal(10, 7)
-  geofenceRadiusMeters Int      @default(200)
-  // Default shift times and lateness threshold (minutes)
-  shiftStartDefault    String?
-  shiftEndDefault      String?
-  lateThresholdMinutes Int      @default(15)
-
-  // Company hierarchy
-  // Main company: companyId = its own id, parentOrganizationId = null
-  // Subcompany: companyId = main company's id, parentOrganizationId = parent organization's id
-  companyId            String?
-  parentOrganizationId String?
-
-  // Company hierarchy relations
-  company            Organization?  @relation("CompanyOrganizations", fields: [companyId], references: [id])
-  organizations      Organization[] @relation("CompanyOrganizations")
-  parentOrganization Organization?  @relation("OrganizationHierarchy", fields: [parentOrganizationId], references: [id])
-  childOrganizations Organization[] @relation("OrganizationHierarchy")
-
-  assets           Asset[]
-  auditLogs        AuditLog[]
-  biometricDevices BiometricDevice[]
-  biometricPunches BiometricPunch[]
-  departments      Department[]
-  holidays         Holiday[]
-  projects         Project[]
-  announcements    Announcement[]
-  companyEvents     CompanyEvent[]
-  notifications     Notification[]
-  tickets          Ticket[]
-  users            User[]
-  employeeForms    EmployeeForm[]
-  formSubmissions  EmployeeFormSubmission[]
   @@index([companyId])
   @@index([parentOrganizationId])
   @@index([archivedAt])
@@ -75,7 +67,7 @@ model Organization {
 model Announcement {
   id             String       @id @default(cuid())
   organizationId String
-  createdById    String?
+  createdById    String
   title          String
   body           String
   audienceType   String       @default("ALL")
@@ -83,13 +75,12 @@ model Announcement {
   publishedAt    DateTime     @default(now())
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
+  createdBy      User         @relation("AnnouncementCreator", fields: [createdById], references: [id])
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  createdBy      User?        @relation("AnnouncementCreator", fields: [createdById], references: [id], onDelete: SetNull)
 
   @@index([organizationId, publishedAt])
   @@index([audienceType, audienceId])
 }
-
 
 model CompanyEvent {
   id             String       @id @default(cuid())
@@ -102,8 +93,8 @@ model CompanyEvent {
   isAnnual       Boolean      @default(false)
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
+  createdBy      User?        @relation("CompanyEventCreator", fields: [createdById], references: [id])
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  createdBy      User?        @relation("CompanyEventCreator", fields: [createdById], references: [id], onDelete: SetNull)
 
   @@index([organizationId, date])
   @@index([organizationId, type])
@@ -137,89 +128,96 @@ model AuditLog {
 }
 
 model User {
-  id                        String                    @id @default(cuid())
-  organizationId            String
-  name                      String
-  email                     String                    @unique
-  password                  String
-  phone                     String?
-  personalEmail             String?
-  fatherName                String?
-  education                 String?
-  currentUniversity        String?
-  linkedinUrl              String?
-  shiftStart               String?
-  shiftEnd                 String?
-  photoUrl                  String?
-  role                      UserRole                  @default(EMPLOYEE)
-  status                    EmployeeStatus            @default(ACTIVE)
-  departmentId              String?
-  managerId                 String?
-  cnic                      String?
-  dob                       DateTime?
-  address                   String?
-  skill                     String?
-  seniorityLevel            SeniorityLevel?
-  canManageAttendance       Boolean                   @default(false)
-  createdAt                 DateTime                  @default(now())
-  updatedAt                 DateTime                  @updatedAt
-  baseSalary                Decimal?                  @db.Decimal(12, 2)
-  bankAccountNumber         String?
-  bankName                  String?
-  designation               String?
-  joiningDate               DateTime?
-  workLocationType          WorkLocationType          @default(OFFICE)
-  assignedAssets            Asset[]                   @relation("AssignedAssets")
-  assetRequests             AssetRequest[]            @relation("AssetRequestedBy")
-  assetRequestsReviewed     AssetRequest[]            @relation("AssetRequestReviewer")
-  attendanceRecords         AttendanceRecord[]        @relation("AttendanceOf")
-  attendanceMarkedBy        AttendanceRecord[]        @relation("AttendanceMarkedBy")
-  auditLogs                 AuditLog[]
-  biometricMappings         BiometricDeviceEmployee[]
-  biometricPunches          BiometricPunch[]
-  leaveApplications         LeaveApplication[]        @relation("LeaveApplicant")
-  leaveApplicationsReviewed LeaveApplication[]        @relation("LeaveReviewer")
-  lifecycleEvents           LifecycleEvent[]          @relation("EventActor")
-  payrollApprovedBy         PayrollRecord[]           @relation("PayrollApprovedBy")
-  payrollRecords            PayrollRecord[]           @relation("PayrollOf")
-  payrollGeneratedBy        PayrollRecord[]           @relation("PayrollGeneratedBy")
-  managedProjects           Project[]                 @relation("ProjectManager")
-  announcementsCreated      Announcement[]            @relation("AnnouncementCreator")
-  projectMemberships        ProjectMember[]
-  certifications            Certification[]
-  companyEvents              CompanyEvent[]             @relation("CompanyEventCreator")
-  employeeFormsCreated      EmployeeForm[]            @relation("EmployeeFormCreator")
-  formSubmissionsConverted  EmployeeFormSubmission[]  @relation("FormSubmissionEmployee")
-  tickets                   Ticket[]                  @relation("TicketRaisedBy")
-  notifications              Notification[]             @relation("NotificationRecipient")
-  notificationsCreated      Notification[]             @relation("NotificationCreator")
-  department                Department?               @relation(fields: [departmentId], references: [id])
-  manager                   User?                     @relation("ManagerReports", fields: [managerId], references: [id])
-  reports                   User[]                    @relation("ManagerReports")
-  organization              Organization              @relation(fields: [organizationId], references: [id])
+  id                           String                    @id @default(cuid())
+  organizationId               String
+  name                         String
+  email                        String                    @unique
+  password                     String
+  phone                        String?
+  photoUrl                     String?
+  role                         UserRole                  @default(EMPLOYEE)
+  status                       EmployeeStatus            @default(ACTIVE)
+  departmentId                 String?
+  managerId                    String?
+  cnic                         String?
+  dob                          DateTime?
+  address                      String?
+  skill                        String?
+  seniorityLevel               SeniorityLevel?
+  canManageAttendance          Boolean                   @default(false)
+  createdAt                    DateTime                  @default(now())
+  updatedAt                    DateTime                  @updatedAt
+  baseSalary                   Decimal?                  @db.Decimal(12, 2)
+  bankAccountNumber            String?
+  bankName                     String?
+  designation                  String?
+  joiningDate                  DateTime?
+  workLocationType             WorkLocationType          @default(OFFICE)
+  personalEmail                String?
+  fatherName                   String?
+  education                    String?
+  currentUniversity            String?
+  linkedinUrl                  String?
+  shiftStart                   String?
+  shiftEnd                     String?
+  announcementsCreated         Announcement[]            @relation("AnnouncementCreator")
+  assignedAssets               Asset[]                   @relation("AssignedAssets")
+  assetRequests                AssetRequest[]            @relation("AssetRequestedBy")
+  assetRequestsReviewed        AssetRequest[]            @relation("AssetRequestReviewer")
+  attendanceRecords            AttendanceRecord[]        @relation("AttendanceOf")
+  attendanceMarkedBy           AttendanceRecord[]        @relation("AttendanceMarkedBy")
+  auditLogs                    AuditLog[]
+  biometricMappings            BiometricDeviceEmployee[]
+  biometricPunches             BiometricPunch[]
+  certifications               Certification[]
+  companyEvents                CompanyEvent[]            @relation("CompanyEventCreator")
+  managedDepartments           Department[]              @relation("DepartmentManager")
+  employeeFormsCreated         EmployeeForm[]            @relation("EmployeeFormCreator")
+  EmployeeFormInvitation       EmployeeFormInvitation[]
+  formSubmissionsConverted     EmployeeFormSubmission[]  @relation("FormSubmissionEmployee")
+  leaveApplications            LeaveApplication[]        @relation("LeaveApplicant")
+  leaveApplicationsReviewed    LeaveApplication[]        @relation("LeaveReviewer")
+  lifecycleEvents              LifecycleEvent[]          @relation("EventActor")
+  notificationsCreated         Notification[]            @relation("NotificationCreator")
+  notifications                Notification[]            @relation("NotificationRecipient")
+  payrollApprovedBy            PayrollRecord[]           @relation("PayrollApprovedBy")
+  payrollRecords               PayrollRecord[]           @relation("PayrollOf")
+  payrollGeneratedBy           PayrollRecord[]           @relation("PayrollGeneratedBy")
+  performanceReviewsReceived   PerformanceReview[]       @relation("PerformanceEmployee")
+  performanceReviewsGiven      PerformanceReview[]       @relation("PerformanceReviewer")
+  managedProjects              Project[]                 @relation("ProjectManager")
+  projectMemberships           ProjectMember[]
+  Task_Task_assignedToIdToUser Task[]                    @relation("Task_assignedToIdToUser")
+  Task_Task_createdByIdToUser  Task[]                    @relation("Task_createdByIdToUser")
+  tickets                      Ticket[]                  @relation("TicketRaisedBy")
+  TimeEntry                    TimeEntry[]
+  department                   Department?               @relation(fields: [departmentId], references: [id])
+  manager                      User?                     @relation("ManagerReports", fields: [managerId], references: [id])
+  reports                      User[]                    @relation("ManagerReports")
+  organization                 Organization              @relation(fields: [organizationId], references: [id])
 }
 
 model Notification {
-  id             String    @id @default(cuid())
+  id             String       @id @default(cuid())
   organizationId String
   recipientId    String
   createdById    String?
-  type           String    @default("INFO")
+  type           String       @default("INFO")
   title          String
   message        String?
   link           String?
-  createdAt      DateTime  @default(now())
+  createdAt      DateTime     @default(now())
   readAt         DateTime?
+  createdBy      User?        @relation("NotificationCreator", fields: [createdById], references: [id])
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  recipient      User       @relation("NotificationRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
-  createdBy      User?      @relation("NotificationCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  recipient      User         @relation("NotificationRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
 
   @@index([recipientId, readAt, createdAt])
   @@index([organizationId, createdAt])
 }
 
 model Certification {
-  id            String   @id @default(cuid())
+  id            String    @id @default(cuid())
   employeeId    String
   name          String
   institute     String
@@ -228,57 +226,63 @@ model Certification {
   issuedDate    DateTime?
   expiryDate    DateTime?
   notes         String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  employee      User     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  employee      User      @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 
   @@index([employeeId])
 }
 
 model EmployeeForm {
-  id             String                    @id @default(cuid())
+  id             String                   @id @default(cuid())
   organizationId String
   createdById    String?
   title          String
-  tokenHash      String                    @unique
+  tokenHash      String                   @unique
   tokenEncrypted String?
-  active         Boolean                   @default(true)
+  active         Boolean                  @default(true)
   expiresAt      DateTime?
-  createdAt      DateTime                  @default(now())
-  updatedAt      DateTime                  @updatedAt
-  organization   Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  createdBy      User?                     @relation("EmployeeFormCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt      DateTime                 @default(now())
+  updatedAt      DateTime                 @updatedAt
+  createdBy      User?                    @relation("EmployeeFormCreator", fields: [createdById], references: [id])
+  organization   Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   submissions    EmployeeFormSubmission[]
 
   @@index([organizationId, active])
 }
 
 model EmployeeFormSubmission {
-  id                 String                   @id @default(cuid())
-  formId             String
-  organizationId     String
-  name               String
-  fatherName         String?
-  personalEmail      String?
-  phone              String?
-  address            String?
-  cnic               String?
-  dob                DateTime?
-  education          String?
-  currentUniversity  String?
-  seniorityLevel     SeniorityLevel?
-  companyEmail       String?
-  linkedinUrl        String?
-  notes              String?
-  status             EmployeeFormSubmissionStatus @default(SUBMITTED)
-  submittedAt        DateTime                 @default(now())
-  convertedEmployeeId String?
-  form               EmployeeForm              @relation(fields: [formId], references: [id], onDelete: Cascade)
-  organization       Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  convertedEmployee  User?                     @relation("FormSubmissionEmployee", fields: [convertedEmployeeId], references: [id], onDelete: SetNull)
+  id                     String                       @id @default(cuid())
+  invitationId           String                       @unique
+  organizationId         String
+  data                   Json
+  submittedAt            DateTime                     @default(now())
+  createdAt              DateTime                     @default(now())
+  updatedAt              DateTime
+  formId                 String?
+  name                   String?
+  fatherName             String?
+  personalEmail          String?
+  phone                  String?
+  address                String?
+  cnic                   String?
+  dob                    DateTime?
+  education              String?
+  currentUniversity      String?
+  seniorityLevel         SeniorityLevel?
+  companyEmail           String?
+  linkedinUrl            String?
+  notes                  String?
+  status                 EmployeeFormSubmissionStatus @default(SUBMITTED)
+  convertedEmployeeId    String?
+  convertedEmployee      User?                        @relation("FormSubmissionEmployee", fields: [convertedEmployeeId], references: [id])
+  form                   EmployeeForm?                @relation(fields: [formId], references: [id], onDelete: Cascade)
+  EmployeeFormInvitation EmployeeFormInvitation       @relation(fields: [invitationId], references: [id], onDelete: Cascade)
+  organization           Organization                 @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   @@index([formId, submittedAt])
   @@index([organizationId, status])
+  @@index([organizationId, submittedAt])
 }
 
 model LeaveApplication {
@@ -329,11 +333,15 @@ model Department {
   organizationId String
   name           String
   createdAt      DateTime     @default(now())
+  managerId      String?
   assets         Asset[]
+  manager        User?        @relation("DepartmentManager", fields: [managerId], references: [id])
   organization   Organization @relation(fields: [organizationId], references: [id])
   employees      User[]
 
   @@unique([organizationId, name])
+  @@index([managerId])
+  @@index([organizationId])
 }
 
 model Asset {
@@ -395,6 +403,8 @@ model Project {
   manager                   User?           @relation("ProjectManager", fields: [managerId], references: [id])
   organization              Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   members                   ProjectMember[]
+  Task                      Task[]
+  TimeEntry                 TimeEntry[]
 
   @@index([organizationId, status])
   @@index([organizationId, deadline])
@@ -412,6 +422,28 @@ model ProjectMember {
 
   @@unique([projectId, employeeId])
   @@index([employeeId])
+}
+
+model PerformanceReview {
+  id             String       @id @default(cuid())
+  organizationId String
+  employeeId     String
+  reviewerId     String?
+  periodStart    DateTime     @db.Date
+  periodEnd      DateTime     @db.Date
+  rating         Int
+  goals          String?
+  achievements   String?
+  feedback       String?
+  status         String       @default("DRAFT")
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  employee       User         @relation("PerformanceEmployee", fields: [employeeId], references: [id], onDelete: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  reviewer       User?        @relation("PerformanceReviewer", fields: [reviewerId], references: [id])
+
+  @@index([organizationId, employeeId, periodEnd])
+  @@index([reviewerId, createdAt])
 }
 
 model Ticket {
@@ -552,6 +584,85 @@ model PayrollRecord {
 
   @@unique([employeeId, month, year])
   @@index([organizationId, year, month])
+}
+
+model EmployeeFormInvitation {
+  id                     String                  @id
+  organizationId         String
+  createdById            String
+  recipientName          String?
+  recipientEmail         String?
+  title                  String
+  description            String?
+  fields                 Json
+  tokenHash              String                  @unique
+  tokenEncrypted         String?
+  expiresAt              DateTime?
+  status                 String                  @default("SENT")
+  submittedAt            DateTime?
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime
+  User                   User                    @relation(fields: [createdById], references: [id])
+  Organization           Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  EmployeeFormSubmission EmployeeFormSubmission?
+
+  @@index([organizationId, createdAt])
+  @@index([organizationId, status])
+}
+
+model Task {
+  id                           String       @id
+  organizationId               String
+  projectId                    String
+  title                        String
+  description                  String?
+  status                       String       @default("TODO")
+  priority                     String       @default("MEDIUM")
+  assignedToId                 String?
+  createdById                  String?
+  dueDate                      DateTime?    @db.Date
+  estimatedHours               Decimal      @default(0) @db.Decimal(10, 2)
+  actualHours                  Decimal      @default(0) @db.Decimal(10, 2)
+  createdAt                    DateTime     @default(now())
+  updatedAt                    DateTime
+  User_Task_assignedToIdToUser User?        @relation("Task_assignedToIdToUser", fields: [assignedToId], references: [id])
+  User_Task_createdByIdToUser  User?        @relation("Task_createdByIdToUser", fields: [createdById], references: [id])
+  Organization                 Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  Project                      Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  TimeEntry                    TimeEntry[]
+
+  @@index([assignedToId, status])
+  @@index([dueDate])
+  @@index([organizationId, projectId])
+  @@index([organizationId, status])
+}
+
+model TimeEntry {
+  id             String       @id
+  organizationId String
+  employeeId     String
+  projectId      String?
+  taskId         String?
+  date           DateTime     @db.Date
+  hours          Decimal      @db.Decimal(6, 2)
+  note           String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime
+  User           User         @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  Organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  Project        Project?     @relation(fields: [projectId], references: [id])
+  Task           Task?        @relation(fields: [taskId], references: [id])
+
+  @@index([employeeId, date])
+  @@index([organizationId, date])
+  @@index([projectId, date])
+  @@index([taskId, date])
+}
+
+model playing_with_neon {
+  id    Int    @id @default(autoincrement())
+  name  String
+  value Float? @db.Real
 }
 
 enum PlanTier {

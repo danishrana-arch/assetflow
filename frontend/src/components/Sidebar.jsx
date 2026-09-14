@@ -7,6 +7,7 @@ import {
   FolderKanban,
   PackageSearch,
   Building2,
+  Landmark,
   Ticket,
   BarChart3,
   Download,
@@ -16,7 +17,9 @@ import {
   ClipboardList,
   ShieldCheck,
   Bell,
+  BellRing,
   Activity,
+  BadgeCheck,
   Settings as SettingsIcon,
   Wallet,
   Sun,
@@ -228,9 +231,12 @@ export default function Sidebar() {
             <RailItem
               to="/announcements"
               label="Announcements"
-              icon={Bell}
+              icon={BellRing}
               isDark={isDark}
             />
+
+            <RailItem to="/calendar" label="Company Calendar" icon={CalendarDays} isDark={isDark} />
+            {isOwner && <RailItem to="/organization-comparison" label="Organization Comparison" icon={Landmark} isDark={isDark} />}
 
             <RailItem
               to="/tickets"
@@ -263,13 +269,6 @@ export default function Sidebar() {
             />
 
             <RailItem
-              to="/leave-calendar"
-              label="Leave Calendar"
-              icon={CalendarDays}
-              isDark={isDark}
-            />
-
-            <RailItem
               to="/reports"
               label="Reports"
               icon={BarChart3}
@@ -294,7 +293,7 @@ export default function Sidebar() {
             <RailItem
               to="/notifications"
               label="Activity"
-              icon={Activity}
+              icon={Bell}
               isDark={isDark}
               showNotificationDot={hasUnreadNotifications}
             />
@@ -334,7 +333,8 @@ export default function Sidebar() {
             <RailItem to="/assignments" label="Asset Assignments" icon={ClipboardCheck} isDark={isDark} />
             <RailItem to="/asset-requests" label="Asset Requests" icon={PackageSearch} isDark={isDark} />
             <RailItem to="/tickets" label="Requests / Tickets" icon={Ticket} isDark={isDark} />
-            <RailItem to="/notifications" label="Notifications" icon={Activity} isDark={isDark} showNotificationDot={hasUnreadNotifications} />
+            <RailItem to="/calendar" label="Company Calendar" icon={CalendarDays} isDark={isDark} />
+            <RailItem to="/notifications" label="Notifications" icon={BellRing} isDark={isDark} showNotificationDot={hasUnreadNotifications} />
           </>
         ) : (
           <>
@@ -359,6 +359,9 @@ export default function Sidebar() {
               isDark={isDark}
             />
 
+            <RailItem to="/calendar" label="Company Calendar" icon={CalendarDays} isDark={isDark} />
+            <RailItem to={`/employee-360/${user?.id}`} label="My Employee 360°" icon={BadgeCheck} isDark={isDark} />
+
             <RailItem
               to="/payroll/me"
               label="My Payslips"
@@ -376,7 +379,7 @@ export default function Sidebar() {
             <RailItem
               to="/notifications"
               label="Notifications"
-              icon={Activity}
+              icon={BellRing}
               isDark={isDark}
               showNotificationDot={hasUnreadNotifications}
             />

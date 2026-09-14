@@ -325,16 +325,19 @@ export default function EmployeeProfile() {
         subtitle="Personal information, assigned assets and activity."
         backTo={canManageAssets || isManagement(user?.role) ? "/employees" : "/"}
         actions={
-          canRemoveEmployee && (
-            <button
-              onClick={handleRemoveEmployee}
-              disabled={removeEmployee.isPending}
-              className="pill-secondary flex items-center gap-1.5 px-4 py-2.5 text-sm text-danger disabled:opacity-60"
-            >
-              <UserX size={15} />
-              {removeEmployee.isPending ? "Removing…" : "Remove Employee"}
-            </button>
-          )
+          <div className="flex flex-wrap gap-2">
+            <Link to={`/employee-360/${id}`} className="rounded-2xl bg-surface-2 px-4 py-2.5 text-xs font-semibold text-ink">360° View</Link>
+            {canRemoveEmployee && (
+              <button
+                onClick={handleRemoveEmployee}
+                disabled={removeEmployee.isPending}
+                className="pill-secondary flex items-center gap-1.5 px-4 py-2.5 text-sm text-danger disabled:opacity-60"
+              >
+                <UserX size={15} />
+                {removeEmployee.isPending ? "Removing…" : "Remove Employee"}
+              </button>
+            )}
+          </div>
         }
       />
       {removeEmployee.isError && (
