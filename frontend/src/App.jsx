@@ -16,12 +16,16 @@ const AssetProfile = lazy(() => import("./pages/AssetProfile"))
 const Assignments = lazy(() => import("./pages/Assignments"))
 const AssetRequests = lazy(() => import("./pages/AssetRequests"))
 const Departments = lazy(() => import("./pages/Departments"))
+const Tasks = lazy(() => import("./pages/Tasks"))
+const Performance = lazy(() => import("./pages/Performance"))
 const AdvancedCalendar = lazy(() => import("./pages/AdvancedCalendar"))
 const OrganizationComparison = lazy(() => import("./pages/OrganizationComparison"))
 const Employee360 = lazy(() => import("./pages/Employee360"))
 const Attendance = lazy(() => import("./pages/Attendance"))
+const AttendanceSites = lazy(() => import("./pages/AttendanceSites"))
 const MyAttendance = lazy(() => import("./pages/MyAttendance"))
 const LeaveRequests = lazy(() => import("./pages/LeaveRequests"))
+const LeaveCalendar = lazy(() => import("./pages/LeaveCalendar"))
 const Holidays = lazy(() => import("./pages/Holidays"))
 const AuditLog = lazy(() => import("./pages/AuditLog"))
 const Tickets = lazy(() => import("./pages/Tickets"))
@@ -120,8 +124,11 @@ function ProtectedShell() {
           <Route path="/asset-requests" element={<RequireInventoryAccess><AssetRequests /></RequireInventoryAccess>} />
           <Route path="/departments" element={<RequireManagement><Departments /></RequireManagement>} />
           <Route path="/calendar" element={<AdvancedCalendar />} />
+          <Route path="/tasks" element={<Tasks />} />
+          <Route path="/performance" element={<Performance />} />
           <Route path="/organization-comparison" element={<RequireOwner><OrganizationComparison /></RequireOwner>} />
           <Route path="/attendance" element={<RequireManagement><Attendance /></RequireManagement>} />
+          <Route path="/attendance/sites" element={<RequireManagement><AttendanceSites /></RequireManagement>} />
           <Route path="/attendance/me" element={<MyAttendance />} />
           <Route path="/leave-requests" element={<RequireManagement><LeaveRequests /></RequireManagement>} />
           <Route path="/leave-calendar" element={<Navigate to="/calendar" replace />} />

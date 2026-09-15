@@ -2,9 +2,11 @@ const { verifyToken } = require("../utils/jwt")
 const prisma = require("../lib/prisma")
 const { MANAGEMENT_ROLES } = require("../utils/roles")
 
-// CEO and ADMIN can switch the active organization inside their company.
-// The frontend sends the selected organization as X-Organization-Id.
-// All other roles remain scoped to their own organization.
+// Organization switching is intentionally asymmetric:
+// - MAIN COMPANY ADMIN: may switch to any active organization in the company.
+// - CEO: keeps the existing company-wide switching behavior.
+// - SUB-ORGANIZATION ADMIN: is locked to their own organization.
+// - All other roles: are locked to their own organization.
 async function applyOrganizationScope(req) {
   const selectedOrganizationId = String(
     req.headers["x-organization-id"] || ""
@@ -12,38 +14,66 @@ async function applyOrganizationScope(req) {
 
   if (!selectedOrganizationId) return
 
-  if (!["ADMIN", "CEO"].includes(req.user.role)) return
-
-  if (selectedOrganizationId === req.user.organizationId) return
-
-  const companyId =
-    req.user.companyId ||
-    (
-      await prisma.organization.findUnique({
-        where: { id: req.user.organizationId },
-        select: { companyId: true },
-      })
-    )?.companyId
-
-  const selectedOrganization = await prisma.organization.findUnique({
-    where: { id: selectedOrganizationId },
+  const role = req.user.role
+  const current = await prisma.organization.findUnique({
+    where: { id: req.user.organizationId },
     select: {
       id: true,
       companyId: true,
+      parentOrganizationId: true,
       archivedAt: true,
     },
   })
 
-  if (
-    !companyId ||
-    !selectedOrganization ||
-    selectedOrganization.archivedAt ||
-    companyId !== selectedOrganization.companyId
-  ) {
+  if (!current) {
+    const error = new Error("Your organization could not be found")
+    error.statusCode = 403
+    throw error
+  }
+
+  const companyId = current.companyId || current.id
+  const isMainCompany =
+    !current.parentOrganizationId &&
+    (!current.companyId || current.companyId === current.id)
+
+  // Selecting the user's own organization is always safe.
+  if (selectedOrganizationId === current.id) return
+
+  // Only a MAIN COMPANY ADMIN or a CEO may switch to another organization.
+  // In particular, an ADMIN belonging to a sub-organization cannot use a
+  // forged X-Organization-Id header to read or mutate another organization.
+  const canSwitchCompanyWide =
+    role === "CEO" || (role === "ADMIN" && isMainCompany)
+
+  if (!canSwitchCompanyWide) {
+    const error = new Error(
+      "You do not have access to another organization"
+    )
+    error.statusCode = 403
+    throw error
+  }
+
+  const selectedOrganization = await prisma.organization.findFirst({
+    where: {
+      id: selectedOrganizationId,
+      archivedAt: null,
+      OR: [
+        { id: companyId },
+        { companyId },
+      ],
+    },
+    select: {
+      id: true,
+      companyId: true,
+      parentOrganizationId: true,
+      archivedAt: true,
+    },
+  })
+
+  if (!selectedOrganization) {
     const error = new Error(
       "You do not have access to this organization"
     )
-
     error.statusCode = 403
     throw error
   }
@@ -67,9 +97,6 @@ async function requireAuth(req, res, next) {
   try {
     const decoded = verifyToken(token)
 
-    // Refresh authorization-critical information from the database
-    // on every request so role/company/organization changes take effect
-    // immediately instead of waiting for the JWT to expire.
     const dbUser = await prisma.user.findUnique({
       where: { id: decoded.userId },
       select: {
@@ -80,6 +107,7 @@ async function requireAuth(req, res, next) {
         organization: {
           select: {
             companyId: true,
+            parentOrganizationId: true,
             archivedAt: true,
           },
         },
@@ -161,18 +189,6 @@ function requireManagementOrSelf(req, res, next) {
   next()
 }
 
-/*
- * Inventory access
- *
- * Inventory management is available to:
- * - ADMIN
- * - CEO
- * - HR
- * - IT_MANAGER
- *
- * This middleware is used by asset routes for creating,
- * assigning, unassigning, updating, importing and deleting assets.
- */
 function requireInventoryAccess(req, res, next) {
   const allowedRoles = [
     "ADMIN",
@@ -192,12 +208,10 @@ function requireInventoryAccess(req, res, next) {
 
 async function requireAttendanceAccess(req, res, next) {
   try {
-    // ADMIN and CEO always have attendance access.
     if (["ADMIN", "CEO"].includes(req.user?.role)) {
       return next()
     }
 
-    // HR is also allowed to manage attendance.
     if (req.user?.role === "HR") {
       return next()
     }

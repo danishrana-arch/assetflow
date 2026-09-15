@@ -22,19 +22,45 @@ function safeOrganization(organization) {
 async function listCompanyOrganizations(req, res, next) {
   try {
     const { role, organizationId } = req.user
-    if (!["ADMIN", "CEO"].includes(role)) {
-      const organization = await prisma.organization.findUnique({ where: { id: organizationId } })
+    const current = await prisma.organization.findUnique({
+      where: { id: organizationId },
+      select: {
+        id: true,
+        companyId: true,
+        parentOrganizationId: true,
+        archivedAt: true,
+      },
+    })
+
+    if (!current || current.archivedAt) {
+      return res.status(404).json({ error: "Organization not found" })
+    }
+
+    const isMainCompany =
+      !current.parentOrganizationId &&
+      (!current.companyId || current.companyId === current.id)
+
+    // A sub-organization ADMIN must only ever see their own organization.
+    // CEO and MAIN COMPANY ADMIN may see the active organizations in their company.
+    const canViewCompanyOrganizations =
+      role === "CEO" || (role === "ADMIN" && isMainCompany)
+
+    if (!canViewCompanyOrganizations) {
+      const organization = await prisma.organization.findUnique({
+        where: { id: organizationId },
+      })
       return res.json(organization ? [safeOrganization(organization)] : [])
     }
 
-    const current = await prisma.organization.findUnique({
-      where: { id: organizationId },
-      select: { companyId: true },
-    })
-    if (!current) return res.status(404).json({ error: "Organization not found" })
-
+    const companyId = current.companyId || current.id
     const organizations = await prisma.organization.findMany({
-      where: { companyId: current.companyId, archivedAt: null },
+      where: {
+        archivedAt: null,
+        OR: [
+          { id: companyId },
+          { companyId },
+        ],
+      },
       orderBy: [{ parentOrganizationId: "asc" }, { name: "asc" }],
     })
 
@@ -56,9 +82,19 @@ async function createSubOrganization(req, res, next) {
 
     const current = await prisma.organization.findUnique({
       where: { id: organizationId },
-      select: { id: true, companyId: true, timezone: true },
+      select: { id: true, companyId: true, parentOrganizationId: true, timezone: true },
     })
     if (!current) return res.status(404).json({ error: "Organization not found" })
+
+    const isMainCompany =
+      !current.parentOrganizationId &&
+      (!current.companyId || current.companyId === current.id)
+
+    if (role === "ADMIN" && !isMainCompany) {
+      return res.status(403).json({
+        error: "Only the main company ADMIN can create organizations",
+      })
+    }
 
     const base = slugify(name) || "organization"
     let slug = base
@@ -301,9 +337,19 @@ async function archiveSubOrganization(req, res, next) {
     const targetId = req.params.id
     const current = await prisma.organization.findFirst({
       where: { id: organizationId, archivedAt: null },
-      select: { companyId: true },
+      select: { id: true, companyId: true, parentOrganizationId: true },
     })
     if (!current) return res.status(404).json({ error: "Current organization not found" })
+
+    const isMainCompany =
+      !current.parentOrganizationId &&
+      (!current.companyId || current.companyId === current.id)
+
+    if (role === "ADMIN" && !isMainCompany) {
+      return res.status(403).json({
+        error: "Only the main company ADMIN can remove organizations",
+      })
+    }
 
     const target = await prisma.organization.findFirst({
       where: { id: targetId, companyId: current.companyId, archivedAt: null },
@@ -347,13 +393,25 @@ async function getOrganizationComparison(req, res, next) {
 
     const current = await prisma.organization.findUnique({
       where: { id: req.user.organizationId },
-      select: { companyId: true },
+      select: { id: true, companyId: true, parentOrganizationId: true },
     })
 
     if (!current) return res.status(404).json({ error: 'Organization not found' })
 
+    const isMainCompany =
+      !current.parentOrganizationId &&
+      (!current.companyId || current.companyId === current.id)
+
+    if (req.user.role === 'ADMIN' && !isMainCompany) {
+      return res.status(403).json({ error: 'Only the main company ADMIN can compare organizations' })
+    }
+
+    const companyId = current.companyId || current.id
     const organizations = await prisma.organization.findMany({
-      where: { companyId: current.companyId, archivedAt: null },
+      where: {
+        archivedAt: null,
+        OR: [{ id: companyId }, { companyId }],
+      },
       orderBy: { name: 'asc' },
     })
 

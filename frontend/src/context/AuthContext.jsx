@@ -50,15 +50,16 @@ export function AuthProvider({ children }) {
   const applyAuthData = useCallback((data) => {
     const nextOrganizations = normalizeOrganizations(data.user, data.organizations || [])
     const active = pickActiveOrganization(data.user, nextOrganizations)
+    const nextOrganization = data.organization || active || data.user?.organization || null
 
     setUser(data.user)
     setOrganizations(nextOrganizations)
-    setOrganization(data.organization || active)
+    setOrganization(nextOrganization)
 
-    if (active?.id) localStorage.setItem(ORG_KEY, active.id)
+    if (nextOrganization?.id) localStorage.setItem(ORG_KEY, nextOrganization.id)
     localStorage.setItem(USER_CACHE_KEY, JSON.stringify({
       user: data.user,
-      organization: data.organization || active,
+      organization: nextOrganization,
       organizations: nextOrganizations,
     }))
   }, [])
@@ -119,11 +120,24 @@ export function AuthProvider({ children }) {
 
     const previousId = organization?.id || user?.organization?.id
     localStorage.setItem(ORG_KEY, organizationId)
+
     try {
-      const res = await api.get("/organization")
-      setOrganization(res.data)
-      localStorage.setItem(USER_CACHE_KEY, JSON.stringify({ user, organization: res.data, organizations }))
-      return res.data
+      const [orgRes, meRes] = await Promise.all([
+        api.get("/organization"),
+        api.get("/auth/me"),
+      ])
+
+      const nextOrganization = orgRes.data || meRes.data.organization || allowed
+      const nextUser = meRes.data.user || user
+      const nextOrganizations = meRes.data.organizations || organizations
+
+      applyAuthData({
+        user: nextUser,
+        organization: nextOrganization,
+        organizations: nextOrganizations,
+      })
+
+      return nextOrganization
     } catch (error) {
       if (previousId) localStorage.setItem(ORG_KEY, previousId)
       throw error

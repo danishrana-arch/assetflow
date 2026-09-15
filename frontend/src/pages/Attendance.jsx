@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Save, Download, CheckCircle2, XCircle, Palmtree, MapPin, AlertTriangle } from "lucide-react"
+import { Save, Download, CheckCircle2, XCircle, Palmtree, MapPin, AlertTriangle, ShieldAlert } from "lucide-react"
 import api from "../api/client"
 import { useAuth } from "../context/AuthContext"
 import PageHeader from "../components/ui/PageHeader"
@@ -23,9 +23,9 @@ function formatMinutes(minutes) {
   return `${hours}h ${mins.toString().padStart(2, "0")}m`
 }
 
-function formatPunchTime(value, timeZone) {
+function formatPunchTime(value) {
   if (!value) return "—"
-  return new Date(value).toLocaleTimeString([], { timeZone: timeZone || undefined, hour: "2-digit", minute: "2-digit" })
+  return new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
 }
 
 
@@ -175,6 +175,18 @@ export default function Attendance() {
     )
   }
 
+  const { data: anomalies = [] } = useQuery({
+    queryKey: ["attendance-anomalies"],
+    queryFn: () => api.get("/attendance/anomalies?limit=20").then((r) => r.data),
+    enabled: hasAccess,
+    refetchInterval: 30000,
+  })
+
+  const resolveAnomaly = useMutation({
+    mutationFn: (id) => api.patch(`/attendance/anomalies/${id}/resolve`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["attendance-anomalies"] }),
+  })
+
   const presentCount = rows.filter((r) => r.status === "PRESENT").length
 
   return (
@@ -208,6 +220,29 @@ export default function Attendance() {
       />
 
       {isLoading && <p className="text-sm text-muted">Loading...</p>}
+      {anomalies.length > 0 && (
+        <div className="mb-5 card overflow-hidden">
+          <div className="flex items-center justify-between gap-3 border-b border-border px-5 py-4">
+            <div>
+              <p className="flex items-center gap-2 text-sm font-semibold text-ink"><ShieldAlert size={16} /> Attendance anomalies</p>
+              <p className="mt-1 text-xs text-muted">Location, device and attendance events requiring review.</p>
+            </div>
+            <span className="rounded-full bg-chip-pink-bg px-2.5 py-1 text-[10px] font-semibold text-chip-pink-fg">{anomalies.length} open</span>
+          </div>
+          <div className="divide-y divide-border">
+            {anomalies.slice(0, 8).map((a) => (
+              <div key={a.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3">
+                <div>
+                  <p className="text-sm font-semibold text-ink">{a.employeeName || "Employee"} · {a.type}</p>
+                  <p className="mt-0.5 text-xs text-muted">{a.message}{a.siteName ? ` · ${a.siteName}` : ""}</p>
+                </div>
+                <button onClick={() => resolveAnomaly.mutate(a.id)} className="pill-secondary px-3 py-1.5 text-xs">Resolve</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
 
       <div className="space-y-3 md:hidden">
         {rows.map((row) => (
@@ -218,10 +253,10 @@ export default function Attendance() {
                 <p className="truncate text-sm font-semibold text-ink">{row.name}</p>
                 <p className="truncate text-xs text-muted">{row.department || "—"}</p>
                 {row.time && (
-                  <p className="mt-0.5 text-xs text-muted-2">{new Date(row.time).toLocaleTimeString([], { timeZone: data?.schedule?.timezone || undefined, hour: '2-digit', minute: '2-digit' })}</p>
+                  <p className="mt-0.5 text-xs text-muted-2">{new Date(row.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
                 )}
                 <p className="mt-0.5 text-xs text-muted-2">
-                  {formatPunchTime(row.checkInAt, data?.schedule?.timezone)} → {formatPunchTime(row.checkOutAt, data?.schedule?.timezone)} · {formatMinutes(row.workingMinutes)}
+                  {formatPunchTime(row.checkInAt)} → {formatPunchTime(row.checkOutAt)} · {formatMinutes(row.workingMinutes)}
                 </p>
                 <AttendanceTimeline timeline={row.timeline} />
                 {row.markedByName && (
@@ -277,7 +312,7 @@ export default function Attendance() {
                   </div>
                 </td>
                 <td className="px-5 py-3.5 text-muted">{row.department || "—"}</td>
-                <td className="px-5 py-3.5 text-muted">{formatPunchTime(row.checkInAt, data?.schedule?.timezone)} → {formatPunchTime(row.checkOutAt, data?.schedule?.timezone)}</td>
+                <td className="px-5 py-3.5 text-muted">{formatPunchTime(row.checkInAt)} → {formatPunchTime(row.checkOutAt)}</td>
                 <td className="px-5 py-3.5 font-medium text-ink">{formatMinutes(row.workingMinutes)}</td>
                 <td className="px-5 py-3.5"><AttendanceTimeline timeline={row.timeline} /></td>
                 <td className="px-5 py-3.5">

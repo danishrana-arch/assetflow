@@ -1,14 +1,21 @@
-import { useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { CheckCircle2, XCircle, Palmtree, Send, Ban, MapPin, AlertTriangle } from "lucide-react"
+import { CheckCircle2, XCircle, Palmtree, Send, Ban, MapPin, Wifi, WifiOff, RefreshCw, AlertTriangle } from "lucide-react"
 import api from "../api/client"
 import PageHeader from "../components/ui/PageHeader"
 import SectionHeader from "../components/ui/SectionHeader"
 import StatusPill from "../components/ui/StatusPill"
 import { TextField, TextAreaField, SelectField } from "../components/ui/Field"
 import EmptyState from "../components/ui/EmptyState"
+import OfflineAttendanceVerification from "../components/OfflineAttendanceVerification"
+import {
+  getAttendanceDeviceId,
+  getOfflineAttendanceQueue,
+  queueOfflineAttendance,
+  syncOfflineAttendanceQueue,
+} from "../utils/offlineAttendance"
 
-const ATTENDANCE_TONE = { PRESENT: "green", ABSENT: "pink", LEAVE: "yellow" }
+const ATTENDANCE_TONE = { PRESENT: "green", LATE: "yellow", ABSENT: "pink", LEAVE: "yellow" }
 const LEAVE_TONE = { PENDING: "yellow", APPROVED: "green", REJECTED: "pink", CANCELLED: "slate" }
 const LEAVE_TYPE_LABELS = { SICK: "Sick", CASUAL: "Casual / Annual", UNPAID: "Unpaid" }
 
@@ -16,112 +23,158 @@ function fmt(dateStr) {
   if (!dateStr) return "—"
   return new Date(dateStr).toLocaleDateString(undefined, { timeZone: "UTC", month: "short", day: "numeric", year: "numeric" })
 }
-
-
-function AttendanceTimeline({ timeline }) {
-  if (!timeline) return null
-  const span = Math.max(1, timeline.endMinute - timeline.startMinute)
-  return (
-    <div className="mt-4 rounded-2xl bg-surface-2 p-3">
-      <div className="mb-2 flex items-center justify-between gap-3 text-[10px] font-semibold text-muted">
-        <span>{timeline.shiftStart}</span><span>{timeline.shiftEnd}</span>
-      </div>
-      <div className="relative h-3 w-full overflow-hidden rounded-full bg-chip-pink-bg">
-        {(timeline.segments || []).map((segment, index) => {
-          const left = ((segment.startMinute - timeline.startMinute) / span) * 100
-          const width = ((segment.endMinute - segment.startMinute) / span) * 100
-          const cls = segment.state === "in" ? "bg-chip-green-fg" : segment.state === "leave" ? "bg-chip-yellow-fg" : segment.state === "future" ? "bg-surface" : "bg-chip-pink-fg"
-          return <span key={`${segment.startMinute}-${segment.endMinute}-${index}`} className={`absolute inset-y-0 ${cls}`} style={{ left: `${left}%`, width: `${width}%` }} />
-        })}
-      </div>
-      <div className="mt-2 flex flex-wrap gap-3 text-[10px] text-muted-2">
-        <span><i className="mr-1 inline-block h-2 w-2 rounded-full bg-chip-green-fg" />Working / inside</span>
-        <span><i className="mr-1 inline-block h-2 w-2 rounded-full bg-chip-pink-fg" />Outside</span>
-      </div>
-      <p className="mt-2 text-[10px] text-muted-2">The red portions show time outside between biometric punches.</p>
-    </div>
-  )
-}
-
-function fmtTime(dateStr, timeZone) {
+function fmtTime(dateStr, timezone) {
   if (!dateStr) return "—"
-  return new Date(dateStr).toLocaleTimeString([], { timeZone: timeZone || undefined, hour: "2-digit", minute: "2-digit" })
+  return new Date(dateStr).toLocaleTimeString([], { timeZone: timezone || undefined, hour: "2-digit", minute: "2-digit", second: "2-digit" })
 }
 
 export default function MyAttendance() {
   const queryClient = useQueryClient()
+  const [online, setOnline] = useState(() => navigator.onLine)
+  const [pendingCount, setPendingCount] = useState(() => getOfflineAttendanceQueue().length)
+  const [offlineVerification, setOfflineVerification] = useState(null)
+  const [locating, setLocating] = useState(false)
+  const [locationError, setLocationError] = useState("")
+  const [flagNotice, setFlagNotice] = useState(null)
   const [leaveForm, setLeaveForm] = useState({ startDate: "", endDate: "", reason: "", type: "CASUAL" })
   const [leaveError, setLeaveError] = useState("")
-  const [locating, setLocating] = useState(false)
-  const [flagNotice, setFlagNotice] = useState(null)
-  const [locationError, setLocationError] = useState("")
 
   const { data: attendance, isLoading: loadingAttendance } = useQuery({
     queryKey: ["attendance-self"],
     queryFn: () => api.get("/attendance/self").then((r) => r.data),
+    retry: online ? 1 : false,
   })
-
+  const { data: sites = [] } = useQuery({
+    queryKey: ["attendance-assigned-sites"],
+    queryFn: () => api.get("/attendance-sites/assigned").then((r) => r.data),
+    staleTime: 5 * 60 * 1000,
+    retry: 1,
+  })
   const { data: leaves, isLoading: loadingLeaves } = useQuery({
     queryKey: ["leaves-self"],
     queryFn: () => api.get("/leaves").then((r) => r.data),
   })
-
   const { data: balance } = useQuery({
     queryKey: ["leave-balance"],
     queryFn: () => api.get("/leaves/balance").then((r) => r.data),
   })
 
-  const markToday = useMutation({
-    mutationFn: ({ status, latitude, longitude }) => api.post("/attendance/self/mark", { status, latitude, longitude }),
-    onSuccess: (res) => {
-      queryClient.invalidateQueries({ queryKey: ["attendance-self"] })
-      if (res.data?.autoFlagged) {
-        setFlagNotice(
-          "You were marked Absent because your location is outside the office premises. If you're working remotely or in the field today, ask your admin to review it or mark your account as a field employee."
-        )
-      } else {
-        setFlagNotice(null)
-      }
-    },
-  })
+  const primarySite = useMemo(() => sites.find((s) => s.isPrimary) || sites[0] || null, [sites])
 
-  function handleMark(status) {
-    setFlagNotice(null)
+  async function syncQueue() {
+    if (!navigator.onLine) return
+    try {
+      const result = await syncOfflineAttendanceQueue(api)
+      setPendingCount(getOfflineAttendanceQueue().length)
+      if (result.synced || result.duplicates) {
+        queryClient.invalidateQueries({ queryKey: ["attendance-self"] })
+      }
+    } catch {
+      setPendingCount(getOfflineAttendanceQueue().length)
+    }
+  }
+
+  useEffect(() => {
+    const onlineHandler = () => {
+      setOnline(true)
+      syncQueue()
+    }
+    const offlineHandler = () => setOnline(false)
+    window.addEventListener("online", onlineHandler)
+    window.addEventListener("offline", offlineHandler)
+    const timer = setInterval(syncQueue, 15000)
+    syncQueue()
+    return () => {
+      window.removeEventListener("online", onlineHandler)
+      window.removeEventListener("offline", offlineHandler)
+      clearInterval(timer)
+    }
+  }, [])
+
+  function getPosition() {
+    return new Promise((resolve, reject) => {
+      if (!navigator.geolocation) return reject(new Error("Geolocation is not supported"))
+      navigator.geolocation.getCurrentPosition(resolve, reject, {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 0,
+      })
+    })
+  }
+
+  async function handleMark(type) {
     setLocationError("")
-
-    if (status === "ABSENT") {
-      markToday.mutate({ status })
-      return
-    }
-
-    // Attendance on phones/tablets should always request location. This
-    // provides a clear permission prompt and records the check-in location.
-    const isMobile = /Android|iPhone|iPad|iPod|Windows Phone|Mobile/i.test(navigator.userAgent)
-    if (!navigator.geolocation) {
-      if (isMobile) {
-        setLocationError("Location services are required to mark attendance from a mobile or tablet. Please enable location and try again.")
-        return
-      }
-      markToday.mutate({ status })
-      return
-    }
-
+    setFlagNotice(null)
     setLocating(true)
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setLocating(false)
-        markToday.mutate({ status, latitude: pos.coords.latitude, longitude: pos.coords.longitude })
-      },
-      (error) => {
-        setLocating(false)
-        setLocationError(
-          error.code === 1
-            ? "Location permission was denied. Please allow location access in your browser settings and try again."
-            : "We couldn't get your location. Please turn on location services and try again."
-        )
-      },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-    )
+
+    let position = null
+    try {
+      position = await getPosition()
+    } catch (err) {
+      setLocating(false)
+      setLocationError(
+        err?.code === 1
+          ? "Location permission was denied. Allow location access and try again."
+          : "We could not get your location. Try again with location services enabled."
+      )
+      return
+    }
+    setLocating(false)
+
+    const now = new Date()
+    const timezone = attendance?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
+    const localDate = new Intl.DateTimeFormat("en-CA", { timeZone: timezone }).format(now)
+    const site = primarySite
+
+    const event = {
+      type,
+      localRecordedAt: now.toISOString(),
+      localDate,
+      timezone,
+      latitude: position.coords.latitude,
+      longitude: position.coords.longitude,
+      gpsAccuracy: position.coords.accuracy,
+      distanceMeters: null,
+      siteId: site?.id || null,
+      siteName: site?.name || "Unassigned / no site",
+      deviceId: getAttendanceDeviceId(),
+      networkType: navigator.connection?.effectiveType || (navigator.onLine ? "online" : "offline"),
+    }
+
+    // If online, use the existing server endpoint first. If it fails because the
+    // connection disappears, immediately queue the same event locally.
+    if (navigator.onLine) {
+      try {
+        if (type === "CHECK_IN") {
+          const response = await api.post("/attendance/self/mark", {
+            status: "PRESENT",
+            latitude: event.latitude,
+            longitude: event.longitude,
+          })
+          if (response.data?.autoFlagged) {
+            setFlagNotice("Your location was outside the configured office geofence and the server flagged the attendance for review.")
+          }
+        } else {
+          // Checkout is intentionally queued through the offline-safe endpoint.
+          // This preserves the exact recorded timestamp rather than using server receipt time.
+          await api.post("/attendance/self/offline-sync", { events: [event] })
+        }
+        queryClient.invalidateQueries({ queryKey: ["attendance-self"] })
+        return
+      } catch {
+        // Continue to local queue.
+      }
+    }
+
+    const queued = queueOfflineAttendance(event)
+    setPendingCount(getOfflineAttendanceQueue().length)
+    setOfflineVerification({
+      ...queued,
+      employeeName: "Current employee",
+      timezone,
+      siteName: site?.name || "Unassigned / no site",
+      status: type === "CHECK_IN" ? "PRESENT" : "PENDING",
+    })
   }
 
   const submitLeave = useMutation({
@@ -134,7 +187,6 @@ export default function MyAttendance() {
     },
     onError: (err) => setLeaveError(err.response?.data?.error || "Could not submit leave application"),
   })
-
   const cancelLeave = useMutation({
     mutationFn: (id) => api.delete(`/leaves/${id}`),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["leaves-self"] }),
@@ -155,43 +207,28 @@ export default function MyAttendance() {
 
   return (
     <div>
-      <PageHeader title="My Attendance" subtitle="Mark today's attendance and request time off." backTo="/" />
+      <PageHeader title="My Attendance" subtitle="Offline-first attendance for office, field and remote work." backTo="/" />
 
-      {balance && (
-        <details className="group mb-5 overflow-hidden rounded-3xl border border-border bg-surface shadow-card">
-          <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-5 py-4 [&::-webkit-details-marker]:hidden">
-            <div>
-              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted">Leave balance</p>
-              <p className="mt-1 text-sm font-semibold text-ink">
-                {balance.sick.remaining + balance.casual.remaining} paid days remaining
-              </p>
-            </div>
-            <span className="rounded-xl bg-surface-2 px-3 py-2 text-xs font-semibold text-muted transition-transform group-open:rotate-180">⌄</span>
-          </summary>
-          <div className="grid gap-3 border-t border-border p-4 sm:grid-cols-3">
-            <div className="rounded-2xl bg-surface-2 p-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted">Sick Leave</p>
-              <p className="mt-1 text-xl font-semibold text-ink">{balance.sick.remaining}<span className="text-sm font-normal text-muted-2"> / {balance.sick.total} left</span></p>
-            </div>
-            <div className="rounded-2xl bg-surface-2 p-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted">Casual Leave</p>
-              <p className="mt-1 text-xl font-semibold text-ink">{balance.casual.remaining}<span className="text-sm font-normal text-muted-2"> / {balance.casual.total} left</span></p>
-            </div>
-            <div className="rounded-2xl bg-surface-2 p-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted">Unpaid Taken</p>
-              <p className="mt-1 text-xl font-semibold text-ink">{balance.unpaid.used}<span className="text-sm font-normal text-muted-2"> days this year</span></p>
-            </div>
-          </div>
-        </details>
+      <div className="mb-5 flex flex-wrap items-center gap-2">
+        <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold ${online ? "bg-chip-green-bg text-chip-green-fg" : "bg-chip-yellow-bg text-chip-yellow-fg"}`}>
+          {online ? <Wifi size={13} /> : <WifiOff size={13} />}
+          {online ? "Online" : "Offline mode"}
+        </span>
+        {pendingCount > 0 && (
+          <button onClick={syncQueue} className="inline-flex items-center gap-1.5 rounded-full bg-chip-yellow-bg px-3 py-1.5 text-xs font-semibold text-chip-yellow-fg">
+            <RefreshCw size={13} /> {pendingCount} attendance event{pendingCount > 1 ? "s" : ""} pending sync
+          </button>
+        )}
+      </div>
+
+      {offlineVerification && (
+        <OfflineAttendanceVerification record={offlineVerification} site={primarySite} />
       )}
 
       <div className="grid gap-5 lg:grid-cols-2">
-        {/* Mark today */}
         <div className="card p-6">
           <SectionHeader title="Today" />
-          {loadingAttendance ? (
-            <p className="text-sm text-muted">Loading…</p>
-          ) : isOnLeaveToday ? (
+          {loadingAttendance ? <p className="text-sm text-muted">Loading…</p> : isOnLeaveToday ? (
             <div className="flex items-center gap-3 rounded-2xl bg-chip-yellow-bg px-4 py-3">
               <Palmtree size={18} className="text-chip-yellow-fg" />
               <p className="text-sm font-semibold text-chip-yellow-fg">You're on approved leave today.</p>
@@ -199,54 +236,47 @@ export default function MyAttendance() {
           ) : (
             <>
               <p className="mb-3 text-sm text-muted">
-                Current status:{" "}
-                {todayStatus ? (
-                  <StatusPill tone={ATTENDANCE_TONE[todayStatus]}>{todayStatus}</StatusPill>
-                ) : (
-                  <span className="font-medium text-muted-2">Not marked yet</span>
-                )}
+                Current status: {todayStatus ? <StatusPill tone={ATTENDANCE_TONE[todayStatus] || "slate"}>{todayStatus}</StatusPill> : <span className="font-medium text-muted-2">Not marked yet</span>}
               </p>
-              {attendance?.today?.updatedAt && (
-                <p className="mb-3 text-sm text-muted-2">Marked at {fmtTime(attendance.today.updatedAt, attendance?.timezone)}</p>
+              {attendance?.today?.checkInAt && (
+                <p className="mb-1 text-sm text-muted">Check in: <strong>{fmtTime(attendance.today.checkInAt, attendance?.timezone)}</strong></p>
               )}
-              <AttendanceTimeline timeline={attendance?.timeline} />
-              {attendance?.today?.autoFlagged && (
-                <div className="mb-3 flex items-start gap-2 rounded-2xl bg-chip-pink-bg px-3.5 py-2.5 text-xs text-chip-pink-fg">
-                  <AlertTriangle size={14} className="mt-0.5 shrink-0" />
-                  <span>Auto-marked Absent — your last check-in location was outside the office. Your admin can review and override this.</span>
+              {attendance?.today?.checkOutAt && (
+                <p className="mb-3 text-sm text-muted">Check out: <strong>{fmtTime(attendance.today.checkOutAt, attendance?.timezone)}</strong></p>
+              )}
+
+              {primarySite && (
+                <div className="mb-4 rounded-2xl bg-surface-2 p-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-muted">Assigned site</p>
+                  <p className="mt-1 flex items-center gap-1.5 text-sm font-semibold text-ink"><MapPin size={14} /> {primarySite.name}</p>
+                  <p className="mt-1 text-xs text-muted">{primarySite.radiusMeters}m geofence · {primarySite.geofenceMode}</p>
                 </div>
               )}
-              <div className="flex gap-2">
+
+              <div className="grid gap-2 sm:grid-cols-2">
                 <button
-                  onClick={() => handleMark("PRESENT")}
-                  disabled={markToday.isPending || locating}
-                  className="pill-accent flex flex-1 items-center justify-center gap-1.5 px-4 py-2.5 text-sm disabled:opacity-60"
+                  onClick={() => handleMark("CHECK_IN")}
+                  disabled={locating || !!attendance?.today?.checkInAt}
+                  className="pill-accent flex items-center justify-center gap-1.5 px-4 py-3 text-sm disabled:opacity-50"
                 >
-                  {locating ? <MapPin size={15} className="animate-pulse" /> : <CheckCircle2 size={15} />}
-                  {locating ? "Locating…" : "Mark Present"}
+                  <CheckCircle2 size={16} /> {locating ? "Getting location…" : "Check In"}
                 </button>
                 <button
-                  onClick={() => handleMark("ABSENT")}
-                  disabled={markToday.isPending || locating}
-                  className="pill-secondary flex flex-1 items-center justify-center gap-1.5 px-4 py-2.5 text-sm disabled:opacity-60"
+                  onClick={() => handleMark("CHECK_OUT")}
+                  disabled={locating || !attendance?.today?.checkInAt || !!attendance?.today?.checkOutAt}
+                  className="pill-secondary flex items-center justify-center gap-1.5 px-4 py-3 text-sm disabled:opacity-50"
                 >
-                  <XCircle size={15} /> Mark Absent
+                  <XCircle size={16} /> Check Out
                 </button>
               </div>
-              <p className="mt-2 flex items-center gap-1 text-[11px] text-muted-2">
-                <MapPin size={11} /> Your location is checked against the office when you mark yourself Present.
+
+              <p className="mt-3 flex items-start gap-1.5 text-[11px] text-muted-2">
+                <MapPin size={12} className="mt-0.5 shrink-0" />
+                GPS is captured even without internet. If the connection drops, the attendance event is stored on this device and synchronized automatically later.
               </p>
-              {locationError && (
-                <div className="mt-3 rounded-2xl bg-chip-pink-bg px-3.5 py-2.5 text-xs font-medium text-chip-pink-fg">
-                  {locationError}
-                </div>
-              )}
-              {flagNotice && (
-                <div className="mt-3 flex items-start gap-2 rounded-2xl bg-chip-yellow-bg px-3.5 py-2.5 text-xs text-chip-yellow-fg">
-                  <AlertTriangle size={14} className="mt-0.5 shrink-0" />
-                  <span>{flagNotice}</span>
-                </div>
-              )}
+
+              {locationError && <div className="mt-3 rounded-2xl bg-chip-pink-bg px-3 py-2.5 text-xs font-medium text-chip-pink-fg">{locationError}</div>}
+              {flagNotice && <div className="mt-3 flex items-start gap-2 rounded-2xl bg-chip-yellow-bg px-3 py-2.5 text-xs text-chip-yellow-fg"><AlertTriangle size={14} />{flagNotice}</div>}
             </>
           )}
 
@@ -256,64 +286,27 @@ export default function MyAttendance() {
               {(attendance?.history || []).map((r) => (
                 <li key={r.id} className="flex items-center justify-between text-sm">
                   <span className="text-muted">{fmt(r.date)}</span>
-                  <StatusPill tone={ATTENDANCE_TONE[r.status]}>{r.status}</StatusPill>
+                  <StatusPill tone={ATTENDANCE_TONE[r.status] || "slate"}>{r.status}</StatusPill>
                 </li>
               ))}
-              {(attendance?.history || []).length === 0 && (
-                <li className="text-sm text-muted">No attendance recorded yet.</li>
-              )}
+              {(attendance?.history || []).length === 0 && <li className="text-sm text-muted">No attendance recorded yet.</li>}
             </ul>
           </div>
         </div>
 
-        {/* Leave application */}
         <div className="card p-6">
           <SectionHeader title="Request Leave" />
           <form onSubmit={handleLeaveSubmit} className="grid gap-4 sm:grid-cols-2">
-            <SelectField
-              label="Type"
-              value={leaveForm.type}
-              onChange={(e) => setLeaveForm((f) => ({ ...f, type: e.target.value }))}
-              className="sm:col-span-2"
-            >
-              {Object.entries(LEAVE_TYPE_LABELS).map(([value, label]) => (
-                <option key={value} value={value}>{label}</option>
-              ))}
+            <SelectField label="Type" value={leaveForm.type} onChange={(e) => setLeaveForm((f) => ({ ...f, type: e.target.value }))} className="sm:col-span-2">
+              {Object.entries(LEAVE_TYPE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </SelectField>
-            <TextField
-              label="From"
-              type="date"
-              value={leaveForm.startDate}
-              onChange={(e) => setLeaveForm((f) => ({ ...f, startDate: e.target.value }))}
-              required
-            />
-            <TextField
-              label="To"
-              type="date"
-              value={leaveForm.endDate}
-              onChange={(e) => setLeaveForm((f) => ({ ...f, endDate: e.target.value }))}
-              required
-            />
-            <TextAreaField
-              label="Reason"
-              value={leaveForm.reason}
-              onChange={(e) => setLeaveForm((f) => ({ ...f, reason: e.target.value }))}
-              className="sm:col-span-2"
-              required
-            />
-            {leaveError && (
-              <div className="sm:col-span-2 rounded-2xl bg-chip-pink-bg px-3.5 py-2.5 text-sm text-chip-pink-fg">
-                {leaveError}
-              </div>
-            )}
+            <TextField label="From" type="date" value={leaveForm.startDate} onChange={(e) => setLeaveForm((f) => ({ ...f, startDate: e.target.value }))} required />
+            <TextField label="To" type="date" value={leaveForm.endDate} onChange={(e) => setLeaveForm((f) => ({ ...f, endDate: e.target.value }))} required />
+            <TextAreaField label="Reason" value={leaveForm.reason} onChange={(e) => setLeaveForm((f) => ({ ...f, reason: e.target.value }))} className="sm:col-span-2" required />
+            {leaveError && <div className="sm:col-span-2 rounded-2xl bg-chip-pink-bg px-3.5 py-2.5 text-sm text-chip-pink-fg">{leaveError}</div>}
             <div className="sm:col-span-2">
-              <button
-                type="submit"
-                disabled={submitLeave.isPending}
-                className="pill-accent flex items-center gap-1.5 px-5 py-2.5 text-sm disabled:opacity-60"
-              >
-                <Send size={14} />
-                {submitLeave.isPending ? "Submitting…" : "Submit Application"}
+              <button type="submit" disabled={submitLeave.isPending} className="pill-accent flex items-center gap-1.5 px-5 py-2.5 text-sm disabled:opacity-60">
+                <Send size={14} /> {submitLeave.isPending ? "Submitting…" : "Submit Application"}
               </button>
             </div>
           </form>
@@ -325,32 +318,18 @@ export default function MyAttendance() {
               {(leaves || []).map((leave) => (
                 <li key={leave.id} className="rounded-2xl bg-surface-2 px-3.5 py-3">
                   <div className="flex items-center justify-between gap-2">
-                    <p className="text-sm font-semibold text-ink">
-                      {fmt(leave.startDate)} — {fmt(leave.endDate)}
-                    </p>
+                    <p className="text-sm font-semibold text-ink">{fmt(leave.startDate)} — {fmt(leave.endDate)}</p>
                     <div className="flex items-center gap-1.5">
                       <StatusPill tone="slate">{LEAVE_TYPE_LABELS[leave.type] || leave.type}</StatusPill>
-                      <StatusPill tone={LEAVE_TONE[leave.status]}>{leave.status}</StatusPill>
+                      <StatusPill tone={LEAVE_TONE[leave.status] || "slate"}>{leave.status}</StatusPill>
                     </div>
                   </div>
                   <p className="mt-1 text-xs text-muted">{leave.reason}</p>
-                  {leave.status === "PENDING" && (
-                    <button
-                      onClick={() => cancelLeave.mutate(leave.id)}
-                      disabled={cancelLeave.isPending}
-                      className="mt-2 flex items-center gap-1 text-xs font-semibold text-danger hover:underline"
-                    >
-                      <Ban size={12} /> Cancel request
-                    </button>
-                  )}
-                  {leave.reviewNote && (
-                    <p className="mt-1.5 text-xs italic text-muted-2">Note: {leave.reviewNote}</p>
-                  )}
+                  {leave.status === "PENDING" && <button onClick={() => cancelLeave.mutate(leave.id)} disabled={cancelLeave.isPending} className="mt-2 flex items-center gap-1 text-xs font-semibold text-danger hover:underline"><Ban size={12} /> Cancel request</button>}
+                  {leave.reviewNote && <p className="mt-1.5 text-xs italic text-muted-2">Note: {leave.reviewNote}</p>}
                 </li>
               ))}
-              {(leaves || []).length === 0 && !loadingLeaves && (
-                <EmptyState title="No leave applications yet" description="Submit one using the form above." />
-              )}
+              {(leaves || []).length === 0 && !loadingLeaves && <EmptyState title="No leave applications yet" description="Submit one using the form above." />}
             </ul>
           </div>
         </div>

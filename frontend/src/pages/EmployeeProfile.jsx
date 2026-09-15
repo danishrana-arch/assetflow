@@ -5,6 +5,7 @@ import {
   BadgeCheck, Plus, X, Boxes, Ticket as TicketIcon, Activity, UserX, Pencil, Check,
   Mail, Phone, KeyRound, ChevronDown, ChevronUp, Laptop, PackageSearch, MapPin,
   Calendar, Users as ManagerIcon, Briefcase, Send, AlertTriangle, Save, Minus,
+  BriefcaseBusiness, UserRoundCheck, CalendarRange,
 } from "lucide-react"
 import api from "../api/client"
 import { useAuth } from "../context/AuthContext"
@@ -326,7 +327,7 @@ export default function EmployeeProfile() {
         backTo={canManageAssets || isManagement(user?.role) ? "/employees" : "/"}
         actions={
           <div className="flex flex-wrap gap-2">
-            <Link to={`/employee-360/${id}`} className="rounded-2xl bg-surface-2 px-4 py-2.5 text-xs font-semibold text-ink">360° View</Link>
+            <Link to={`/employee-360/${id}`} className="inline-flex items-center gap-2 rounded-2xl bg-surface-2 px-4 py-2.5 text-xs font-semibold text-ink"><BadgeCheck size={14} /> 360° View</Link>
             {canRemoveEmployee && (
               <button
                 onClick={handleRemoveEmployee}

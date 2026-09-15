@@ -1,3 +1,39 @@
+# Round: wiring up Tasks and Performance
+
+## What was wrong
+Two fully-built features existed in the codebase but were never connected:
+
+| Feature      | Backend route file | Mounted in index.js? | Frontend page | Routed in App.jsx? | Desktop sidebar link? | Mobile nav link? |
+|--------------|--------------------|-----------------------|----------------|----------------------|--------------------------|-------------------|
+| Tasks        | task.routes.js      | NO                    | Tasks.jsx       | NO                   | NO                       | YES |
+| Performance  | performance.routes.js | yes (already mounted) | Performance.jsx | NO                   | NO                       | YES |
+
+So on mobile, tapping these nav items bounced back to the dashboard (the route
+didn't exist, hit the catch-all redirect). On desktop there wasn't even a
+link to try. For Tasks, even if a route had existed, the API itself was
+unreachable (404) since the backend never mounted that router.
+
+## Fix
+**Backend** (`backend/src/index.js`):
+- Added `require("./routes/task.routes")`
+- Mounted it: `app.use("/api/tasks", taskRoutes)`
+(performance.routes.js was already mounted — no backend change needed for it.)
+
+**Frontend** (`frontend/src/App.jsx`):
+- Added lazy imports for `Tasks` and `Performance`
+- Added routes: `/tasks` and `/performance` — no permission wrapper,
+  since both pages already self-adapt their content based on
+  `isManagement(user?.role)` (same pattern as Attendance/MyAttendance,
+  Payroll/MyPayroll) — one route serves both views correctly.
+
+**Desktop sidebar** (`frontend/src/components/Sidebar.jsx`):
+- Management branch: added "Tasks" / "Performance" links
+  (after Projects, matching mobile nav's ordering).
+- Employee (default) branch: added "My Tasks" / "My Performance" links
+  (after "My Projects").
+- IT_MANAGER branch: deliberately left unchanged — mobile nav also excludes
+  these two for IT_MANAGER, so this wasn't a bug, just consistent scoping.
+
 # Round: biometric connector fix + incremental sync
 
 ## The error you were hitting

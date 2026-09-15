@@ -29,7 +29,6 @@ async function listTasks(req, res, next) {
         project: { select: { id: true, name: true } },
         assignedTo: { select: { id: true, name: true, photoUrl: true, department: { select: { name: true } } } },
         createdBy: { select: { id: true, name: true } },
-        _count: { select: { timeEntries: true } },
       },
       orderBy: [{ dueDate: "asc" }, { createdAt: "desc" }],
     })

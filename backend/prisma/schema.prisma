@@ -59,7 +59,6 @@ model Organization {
   projects               Project[]
   tasks                  Task[]
   tickets                Ticket[]
-  timeEntries            TimeEntry[]
   users                  User[]
   workCategories         WorkCategory[]
 
@@ -194,7 +193,6 @@ model User {
   assignedTasks             Task[]                    @relation("TaskAssignee")
   createdTasks              Task[]                    @relation("TaskCreator")
   tickets                   Ticket[]                  @relation("TicketRaisedBy")
-  timeEntries               TimeEntry[]
   department                Department?               @relation(fields: [departmentId], references: [id])
   manager                   User?                     @relation("ManagerReports", fields: [managerId], references: [id])
   reports                   User[]                    @relation("ManagerReports")
@@ -410,7 +408,6 @@ model Project {
   workCategory              WorkCategory?   @relation(fields: [workCategoryId], references: [id])
   members                   ProjectMember[]
   tasks                     Task[]
-  timeEntries               TimeEntry[]
 
   @@index([organizationId, status])
   @@index([organizationId, deadline])
@@ -449,34 +446,11 @@ model Task {
   createdBy      User?        @relation("TaskCreator", fields: [createdById], references: [id])
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   project        Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  timeEntries    TimeEntry[]
 
   @@index([organizationId, status])
   @@index([organizationId, projectId])
   @@index([assignedToId, status])
   @@index([dueDate])
-}
-
-model TimeEntry {
-  id             String       @id @default(cuid())
-  organizationId String
-  employeeId     String
-  projectId      String?
-  taskId         String?
-  date           DateTime     @db.Date
-  hours          Decimal      @db.Decimal(6, 2)
-  note           String?
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
-  employee       User         @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  project        Project?     @relation(fields: [projectId], references: [id])
-  task           Task?        @relation(fields: [taskId], references: [id])
-
-  @@index([organizationId, date])
-  @@index([employeeId, date])
-  @@index([projectId, date])
-  @@index([taskId, date])
 }
 
 model PerformanceReview {

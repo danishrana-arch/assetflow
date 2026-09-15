@@ -5,9 +5,11 @@ import {
   Boxes,
   ClipboardCheck,
   FolderKanban,
+  ListTodo,
+  Award,
+  MapPin,
   PackageSearch,
   Building2,
-  Landmark,
   Ticket,
   BarChart3,
   Download,
@@ -19,13 +21,16 @@ import {
   Bell,
   BellRing,
   Activity,
-  BadgeCheck,
   Settings as SettingsIcon,
   Wallet,
   Sun,
   Moon,
   LogOut,
   FileText,
+  CalendarRange,
+  BadgeCheck,
+  Landmark,
+  UserRound,
 } from "lucide-react"
 import { useAuth } from "../context/AuthContext"
 import { useTheme } from "../context/ThemeContext"
@@ -199,24 +204,28 @@ export default function Sidebar() {
               isDark={isDark}
             />
 
+             {canManageAttendance && (
+              <>
+                <RailItem to="/attendance" label="Attendance" icon={CalendarCheck} isDark={isDark} />
+                <RailItem to="/attendance/sites" label="Attendance Sites" icon={MapPin} isDark={isDark} />
+              </>
+            )}
+
             <RailItem
-              to="/assignments"
-              label="Assignments"
-              icon={ClipboardCheck}
+              to="/attendance/me"
+              label="My Attendance"
+              icon={UserCheck}
               isDark={isDark}
             />
+
+ <RailItem to="/calendar" label="Company Calendar" icon={CalendarRange} isDark={isDark} />
+            {isOwner && <RailItem to="/organization-comparison" label="Organization Comparison" icon={Landmark} isDark={isDark} />}
+
 
             <RailItem
               to="/projects"
               label="Projects"
               icon={FolderKanban}
-              isDark={isDark}
-            />
-
-            <RailItem
-              to="/asset-requests"
-              label="Asset Requests"
-              icon={PackageSearch}
               isDark={isDark}
             />
 
@@ -227,16 +236,30 @@ export default function Sidebar() {
               isDark={isDark}
             />
 
-            {/* Announcements */}
+            <RailItem to="/tasks" label="Tasks" icon={ListTodo} isDark={isDark} />
+            <RailItem to="/performance" label="Performance" icon={Award} isDark={isDark} />
+
             <RailItem
-              to="/announcements"
-              label="Announcements"
-              icon={BellRing}
+              to="/asset-requests"
+              label="Asset Requests"
+              icon={PackageSearch}
               isDark={isDark}
             />
 
-            <RailItem to="/calendar" label="Company Calendar" icon={CalendarDays} isDark={isDark} />
-            {isOwner && <RailItem to="/organization-comparison" label="Organization Comparison" icon={Landmark} isDark={isDark} />}
+            <RailItem
+              to="/assignments"
+              label="Assignments"
+              icon={ClipboardCheck}
+              isDark={isDark}
+            />
+
+
+            <RailItem
+              to="/announcements"
+              label="Announcements"
+              icon={Bell}
+              isDark={isDark}
+            />
 
             <RailItem
               to="/tickets"
@@ -245,21 +268,6 @@ export default function Sidebar() {
               isDark={isDark}
             />
 
-            {canManageAttendance && (
-              <RailItem
-                to="/attendance"
-                label="Attendance"
-                icon={CalendarCheck}
-                isDark={isDark}
-              />
-            )}
-
-            <RailItem
-              to="/attendance/me"
-              label="My Attendance"
-              icon={UserCheck}
-              isDark={isDark}
-            />
 
             <RailItem
               to="/leave-requests"
@@ -293,7 +301,7 @@ export default function Sidebar() {
             <RailItem
               to="/notifications"
               label="Activity"
-              icon={Bell}
+              icon={BellRing}
               isDark={isDark}
               showNotificationDot={hasUnreadNotifications}
             />
@@ -334,14 +342,14 @@ export default function Sidebar() {
             <RailItem to="/asset-requests" label="Asset Requests" icon={PackageSearch} isDark={isDark} />
             <RailItem to="/tickets" label="Requests / Tickets" icon={Ticket} isDark={isDark} />
             <RailItem to="/calendar" label="Company Calendar" icon={CalendarDays} isDark={isDark} />
-            <RailItem to="/notifications" label="Notifications" icon={BellRing} isDark={isDark} showNotificationDot={hasUnreadNotifications} />
+            <RailItem to="/notifications" label="Notifications" icon={Activity} isDark={isDark} showNotificationDot={hasUnreadNotifications} />
           </>
         ) : (
           <>
             <RailItem
               to={`/employees/${user?.id}`}
               label="My Profile"
-              icon={Users}
+              icon={UserRound}
               isDark={isDark}
             />
 
@@ -359,7 +367,7 @@ export default function Sidebar() {
               isDark={isDark}
             />
 
-            <RailItem to="/calendar" label="Company Calendar" icon={CalendarDays} isDark={isDark} />
+            <RailItem to="/calendar" label="Company Calendar" icon={CalendarRange} isDark={isDark} />
             <RailItem to={`/employee-360/${user?.id}`} label="My Employee 360°" icon={BadgeCheck} isDark={isDark} />
 
             <RailItem

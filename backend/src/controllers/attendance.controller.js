@@ -1,3 +1,4 @@
+const crypto = require("crypto")
 const prisma = require("../lib/prisma")
 const ExcelJS = require("exceljs")
 const { toDateOnly } = require("../utils/date")
@@ -318,4 +319,263 @@ module.exports = {
   exportAttendanceSheet,
   markSelfAttendance,
   getSelfAttendance,
+}
+
+
+// Phase A: receive an offline queue from the employee device.
+// The client event ID makes the operation idempotent.
+async function syncOfflineAttendance(req, res, next) {
+  try {
+    const { organizationId, userId } = req.user
+    const events = Array.isArray(req.body?.events) ? req.body.events.slice(0, 100) : []
+    if (!events.length) return res.json({ synced: 0, duplicates: 0, rejected: [] })
+
+    const org = await prisma.organization.findUnique({
+      where: { id: organizationId },
+      select: {
+        timezone: true,
+        geofenceEnabled: true,
+        officeLatitude: true,
+        officeLongitude: true,
+        geofenceRadiusMeters: true,
+        shiftStartDefault: true,
+        lateThresholdMinutes: true,
+      },
+    })
+
+    const results = { synced: 0, duplicates: 0, rejected: [] }
+
+    for (const event of events) {
+      try {
+        const clientEventId = String(event.clientEventId || "").trim()
+        const status = event.type === "CHECK_OUT" ? "CHECK_OUT" : "CHECK_IN"
+        if (!clientEventId || !event.localRecordedAt || !event.localDate) {
+          throw new Error("Invalid offline event")
+        }
+
+        const existing = await prisma.$queryRaw`
+          SELECT id FROM "AttendanceRecord"
+          WHERE "clientEventId"=${clientEventId}
+          LIMIT 1
+        `
+        if (existing.length) {
+          results.duplicates += 1
+          continue
+        }
+
+        const recordedAt = new Date(event.localRecordedAt)
+        if (Number.isNaN(recordedAt.getTime())) throw new Error("Invalid recorded timestamp")
+
+        const day = toDateOnly(String(event.localDate))
+        const hasCoords = Number.isFinite(Number(event.latitude)) && Number.isFinite(Number(event.longitude))
+        let siteId = event.siteId ? String(event.siteId) : null
+        let distance = null
+        let anomaly = null
+
+        if (siteId) {
+          const sites = await prisma.$queryRaw`
+            SELECT * FROM "AttendanceSite"
+            WHERE id=${siteId} AND "organizationId"=${organizationId} AND active=TRUE
+            LIMIT 1
+          `
+          if (!sites.length) siteId = null
+          else if (hasCoords) {
+            const site = sites[0]
+            distance = distanceMeters(
+              Number(event.latitude), Number(event.longitude),
+              Number(site.latitude), Number(site.longitude)
+            )
+            if (site.geofenceMode === "STRICT" && distance > Number(site.radiusMeters) && status === "CHECK_IN") {
+              throw new Error(`Outside assigned site geofence (${distance}m)`)
+            }
+            if (distance > Number(site.radiusMeters)) {
+              anomaly = {
+                type: "OUTSIDE_SITE",
+                severity: "HIGH",
+                message: `Attendance recorded ${distance}m from ${site.name}`,
+              }
+            }
+          }
+        }
+
+        let attendance = await prisma.attendanceRecord.findUnique({
+          where: { employeeId_date: { employeeId: userId, date: day } },
+        })
+
+        if (status === "CHECK_IN") {
+          let finalStatus = "PRESENT"
+          const shiftStartStr = (event.shiftStart || org?.shiftStartDefault || "09:00")
+          const threshold = Number(org?.lateThresholdMinutes || 15)
+          const mins = localMinutes(recordedAt, org?.timezone || "UTC")
+          const shiftMins = parseHHMM(shiftStartStr)
+          if (mins > shiftMins + threshold) finalStatus = "LATE"
+
+          const verificationHash = crypto
+            .createHash("sha256")
+            .update(JSON.stringify({
+              organizationId, userId, day: event.localDate, recordedAt: recordedAt.toISOString(),
+              latitude: hasCoords ? Number(event.latitude) : null,
+              longitude: hasCoords ? Number(event.longitude) : null,
+              siteId, clientEventId,
+            }))
+            .digest("hex")
+
+          attendance = await prisma.attendanceRecord.upsert({
+            where: { employeeId_date: { employeeId: userId, date: day } },
+            update: {
+              status: finalStatus,
+              markedById: userId,
+              checkInAt: recordedAt,
+              latitude: hasCoords ? Number(event.latitude) : null,
+              longitude: hasCoords ? Number(event.longitude) : null,
+              distanceMeters: distance,
+            },
+            create: {
+              organizationId, employeeId: userId, date: day,
+              status: finalStatus, markedById: userId, checkInAt: recordedAt,
+              latitude: hasCoords ? Number(event.latitude) : null,
+              longitude: hasCoords ? Number(event.longitude) : null,
+              distanceMeters: distance,
+            },
+          })
+
+          await prisma.$executeRaw`
+            UPDATE "AttendanceRecord"
+            SET "siteId"=${siteId},
+                "offlineRecorded"=TRUE,
+                "localRecordedAt"=${recordedAt},
+                "syncedAt"=CURRENT_TIMESTAMP,
+                "clientEventId"=${clientEventId},
+                "gpsAccuracy"=${event.gpsAccuracy != null ? Number(event.gpsAccuracy) : null},
+                "networkType"=${event.networkType || "offline"},
+                "attendanceDeviceId"=${event.deviceId || null},
+                "verificationHash"=${verificationHash}
+            WHERE id=${attendance.id}
+          `
+        } else {
+          if (!attendance) {
+            throw new Error("Cannot check out offline before a check-in exists")
+          }
+          await prisma.$executeRaw`
+            UPDATE "AttendanceRecord"
+            SET "checkOutAt"=${recordedAt},
+                "offlineRecorded"=TRUE,
+                "localRecordedAt"=COALESCE("localRecordedAt", ${recordedAt}),
+                "syncedAt"=CURRENT_TIMESTAMP,
+                "clientEventId"=${clientEventId},
+                "gpsAccuracy"=${event.gpsAccuracy != null ? Number(event.gpsAccuracy) : null},
+                "networkType"=${event.networkType || "offline"},
+                "attendanceDeviceId"=${event.deviceId || null}
+            WHERE id=${attendance.id}
+          `
+        }
+
+        if (anomaly) {
+          await prisma.$executeRaw`
+            INSERT INTO "AttendanceAnomaly"
+              ("id","organizationId","employeeId","attendanceId","siteId","type","severity","message","metadata")
+            VALUES
+              (${`an_${Date.now().toString(36)}_${crypto.randomBytes(4).toString("hex")}`},
+               ${organizationId},${userId},${attendance.id},${siteId},${anomaly.type},${anomaly.severity},
+               ${anomaly.message},${JSON.stringify({ distanceMeters: distance })}::jsonb)
+          `
+        }
+
+        results.synced += 1
+      } catch (eventError) {
+        results.rejected.push({ clientEventId: event?.clientEventId || null, error: eventError.message })
+      }
+    }
+
+    res.json(results)
+  } catch (err) {
+    next(err)
+  }
+}
+
+async function getAttendanceAnomalies(req, res, next) {
+  try {
+    const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 50))
+    const rows = await prisma.$queryRaw`
+      SELECT a.*, u.name AS "employeeName", s.name AS "siteName"
+      FROM "AttendanceAnomaly" a
+      LEFT JOIN "User" u ON u.id=a."employeeId"
+      LEFT JOIN "AttendanceSite" s ON s.id=a."siteId"
+      WHERE a."organizationId"=${req.user.organizationId}
+        AND a."resolvedAt" IS NULL
+      ORDER BY
+        CASE a.severity WHEN 'HIGH' THEN 1 WHEN 'MEDIUM' THEN 2 ELSE 3 END,
+        a."createdAt" DESC
+      LIMIT ${limit}
+    `
+    res.json(rows)
+  } catch (err) {
+    next(err)
+  }
+}
+
+async function resolveAttendanceAnomaly(req, res, next) {
+  try {
+    const { id } = req.params
+    const rows = await prisma.$queryRaw`
+      SELECT id FROM "AttendanceAnomaly"
+      WHERE id=${id} AND "organizationId"=${req.user.organizationId}
+    `
+    if (!rows.length) return res.status(404).json({ error: "Anomaly not found" })
+    await prisma.$executeRaw`
+      UPDATE "AttendanceAnomaly"
+      SET "resolvedAt"=CURRENT_TIMESTAMP, "resolvedById"=${req.user.userId}
+      WHERE id=${id}
+    `
+    res.json({ ok: true })
+  } catch (err) {
+    next(err)
+  }
+}
+
+async function createAttendanceCorrection(req, res, next) {
+  try {
+    const { userId, organizationId } = req.user
+    const { requestedCheckInAt, requestedCheckOutAt, reason, attendanceId } = req.body
+    if (!String(reason || "").trim()) return res.status(400).json({ error: "A reason is required" })
+    const correctionId = `cor_${Date.now().toString(36)}_${crypto.randomBytes(4).toString("hex")}`
+    await prisma.$executeRaw`
+      INSERT INTO "AttendanceCorrection"
+        ("id","organizationId","employeeId","attendanceId","requestedCheckInAt","requestedCheckOutAt","reason")
+      VALUES
+        (${correctionId},${organizationId},${userId},${attendanceId || null},
+         ${requestedCheckInAt ? new Date(requestedCheckInAt) : null},
+         ${requestedCheckOutAt ? new Date(requestedCheckOutAt) : null},
+         ${String(reason).trim()})
+    `
+    res.status(201).json({ id: correctionId, status: "PENDING" })
+  } catch (err) {
+    next(err)
+  }
+}
+
+async function listAttendanceCorrections(req, res, next) {
+  try {
+    const rows = await prisma.$queryRaw`
+      SELECT c.*, u.name AS "employeeName", r.date
+      FROM "AttendanceCorrection" c
+      JOIN "User" u ON u.id=c."employeeId"
+      LEFT JOIN "AttendanceRecord" r ON r.id=c."attendanceId"
+      WHERE c."organizationId"=${req.user.organizationId}
+      ORDER BY c."createdAt" DESC
+      LIMIT 100
+    `
+    res.json(rows)
+  } catch (err) {
+    next(err)
+  }
+}
+
+module.exports = {
+  ...module.exports,
+  syncOfflineAttendance,
+  getAttendanceAnomalies,
+  resolveAttendanceAnomaly,
+  createAttendanceCorrection,
+  listAttendanceCorrections,
 }
