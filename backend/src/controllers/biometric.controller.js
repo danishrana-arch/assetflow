@@ -1,6 +1,7 @@
 const crypto = require("crypto")
 const prisma = require("../lib/prisma")
 const { encryptField, decryptField } = require("../utils/crypto")
+const { dateKeyInTimeZone, isWithinBreak, localDateKeyToUtc } = require("../utils/timezone")
 
 const VENDORS = ["ZKTECO", "HIKVISION", "SUPREMA", "ANVIZ", "ESSL", "HTTP", "CUSTOM"]
 const MODES = ["PULL", "PUSH", "HTTP"]
@@ -14,63 +15,57 @@ function makeToken() {
 }
 
 
-async function syncAttendanceFromPunches({ organizationId, employeeId, deviceId, occurredAt }) {
-  const date = new Date(Date.UTC(
-    occurredAt.getUTCFullYear(),
-    occurredAt.getUTCMonth(),
-    occurredAt.getUTCDate()
-  ))
-  const nextDate = new Date(date)
-  nextDate.setUTCDate(nextDate.getUTCDate() + 1)
+function punchFingerprint({ deviceId, externalUserId, occurredAt }) {
+  const time = new Date(occurredAt).getTime()
+  return crypto.createHash("sha256").update(`${deviceId}|${String(externalUserId)}|${time}`).digest("hex")
+}
 
+async function syncAttendanceFromPunches({ organizationId, employeeId, deviceId, occurredAt }) {
+  const organization = await prisma.organization.findUnique({
+    where: { id: organizationId },
+    select: { timezone: true, breakStart: true, breakEnd: true },
+  })
+  const timeZone = organization?.timezone || "UTC"
+  const dateKey = dateKeyInTimeZone(occurredAt, timeZone)
+  const date = new Date(`${dateKey}T00:00:00.000Z`)
+  const punchRangeStart = localDateKeyToUtc(dateKey, timeZone)
+  const nextLocalDay = new Date(`${dateKey}T00:00:00.000Z`)
+  nextLocalDay.setUTCDate(nextLocalDay.getUTCDate() + 1)
+  const nextDateKey = nextLocalDay.toISOString().slice(0, 10)
+  const punchRangeEnd = localDateKeyToUtc(nextDateKey, timeZone)
+
+
+  // Punches made during the configured break are ignored for IN/OUT
+  // purposes. The break is treated as office time, so an accidental
+  // checkout during lunch cannot become the day's checkout.
   const punches = await prisma.biometricPunch.findMany({
     where: {
       organizationId,
       employeeId,
-      occurredAt: { gte: date, lt: nextDate },
+      occurredAt: { gte: punchRangeStart, lt: punchRangeEnd },
     },
     orderBy: { occurredAt: "asc" },
     select: { occurredAt: true },
   })
+  const effectivePunches = punches.filter((p) => !isWithinBreak(p.occurredAt, timeZone, organization?.breakStart, organization?.breakEnd))
+  if (!effectivePunches.length) return
 
-  if (!punches.length) return
+  const checkInAt = effectivePunches[0].occurredAt
+  const checkOutAt = effectivePunches.length > 1 ? effectivePunches[effectivePunches.length - 1].occurredAt : null
 
-  const checkInAt = punches[0].occurredAt
-  const checkOutAt = punches.length > 1 ? punches[punches.length - 1].occurredAt : null
-
-  // Biometric punches alternate IN / OUT. Calculate actual working time
-  // from the IN→OUT pairs so time spent outside between punches is not
-  // counted as working time.
   let workingMinutes = null
-  if (punches.length >= 2) {
+  if (effectivePunches.length >= 2) {
     let total = 0
-    for (let i = 0; i + 1 < punches.length; i += 2) {
-      total += Math.max(0, Math.round((punches[i + 1].occurredAt.getTime() - punches[i].occurredAt.getTime()) / 60000))
+    for (let i = 0; i + 1 < effectivePunches.length; i += 2) {
+      total += Math.max(0, Math.round((effectivePunches[i + 1].occurredAt.getTime() - effectivePunches[i].occurredAt.getTime()) / 60000))
     }
     workingMinutes = total
   }
 
   await prisma.attendanceRecord.upsert({
     where: { employeeId_date: { employeeId, date } },
-    update: {
-      status: "PRESENT",
-      source: "BIOMETRIC",
-      biometricDeviceId: deviceId,
-      checkInAt,
-      checkOutAt,
-      workingMinutes,
-    },
-    create: {
-      organizationId,
-      employeeId,
-      date,
-      status: "PRESENT",
-      source: "BIOMETRIC",
-      biometricDeviceId: deviceId,
-      checkInAt,
-      checkOutAt,
-      workingMinutes,
-    },
+    update: { status: "PRESENT", source: "BIOMETRIC", biometricDeviceId: deviceId, checkInAt, checkOutAt, workingMinutes },
+    create: { organizationId, employeeId, date, status: "PRESENT", source: "BIOMETRIC", biometricDeviceId: deviceId, checkInAt, checkOutAt, workingMinutes },
   })
 }
 
@@ -181,26 +176,69 @@ async function ingestPunches(req, res, next) {
     const device = req.biometricDevice
     const punches = Array.isArray(req.body.punches) ? req.body.punches : [req.body]
     let accepted = 0, duplicates = 0, unmatched = 0
+    const batchFingerprints = new Set()
+
     for (const p of punches) {
       if (!p.externalUserId || !p.occurredAt) continue
-      const externalId = p.externalId || `${p.externalUserId}:${new Date(p.occurredAt).toISOString()}`
-      const existing = await prisma.biometricPunch.findFirst({ where: { deviceId: device.id, externalId } })
-      if (existing) { duplicates++; continue }
-      const mapping = await prisma.biometricDeviceEmployee.findFirst({ where: { deviceId: device.id, externalUserId: String(p.externalUserId) } })
       const occurredAt = new Date(p.occurredAt)
-      const punch = await prisma.biometricPunch.create({ data: { organizationId: device.organizationId, deviceId: device.id, employeeId: mapping?.employeeId || null, externalUserId: String(p.externalUserId), occurredAt, verification: p.verification || null, externalId, rawPayload: p.rawPayload || p } })
-      accepted++
-      if (!mapping) { unmatched++; continue }
-      await syncAttendanceFromPunches({
-        organizationId: device.organizationId,
-        employeeId: mapping.employeeId,
-        deviceId: device.id,
-        occurredAt,
-      })
-      if (device.doorEnabled) {
-        // The connector performs the physical unlock locally. The cloud event tells it to unlock after a valid mapped punch.
+      if (Number.isNaN(occurredAt.getTime())) continue
+
+      const fingerprint = punchFingerprint({ deviceId: device.id, externalUserId: p.externalUserId, occurredAt })
+      if (batchFingerprints.has(fingerprint)) {
+        duplicates++
+        continue
       }
+      batchFingerprints.add(fingerprint)
+
+      const externalId = p.externalId ? String(p.externalId) : null
+      const existing = await prisma.biometricPunch.findFirst({
+        where: {
+          OR: [
+            { fingerprint },
+            ...(externalId ? [{ deviceId: device.id, externalId }] : []),
+          ],
+        },
+        select: { id: true },
+      })
+      if (existing) {
+        duplicates++
+        continue
+      }
+
+      const mapping = await prisma.biometricDeviceEmployee.findFirst({ where: { deviceId: device.id, externalUserId: String(p.externalUserId) } })
+
+      try {
+        await prisma.biometricPunch.create({
+          data: {
+            organizationId: device.organizationId,
+            deviceId: device.id,
+            employeeId: mapping?.employeeId || null,
+            externalUserId: String(p.externalUserId),
+            occurredAt,
+            verification: p.verification || null,
+            externalId,
+            fingerprint,
+            rawPayload: p.rawPayload || p,
+          },
+        })
+      } catch (error) {
+        // A concurrent connector retry may race this request. The unique
+        // fingerprint makes the second insert harmless.
+        if (error?.code === "P2002") {
+          duplicates++
+          continue
+        }
+        throw error
+      }
+
+      accepted++
+      if (!mapping) {
+        unmatched++
+        continue
+      }
+      await syncAttendanceFromPunches({ organizationId: device.organizationId, employeeId: mapping.employeeId, deviceId: device.id, occurredAt })
     }
+
     await prisma.biometricDevice.update({ where: { id: device.id }, data: { lastSeenAt: new Date(), lastSyncAt: new Date(), lastError: null } })
     res.json({ accepted, duplicates, unmatched })
   } catch (e) { next(e) }

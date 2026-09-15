@@ -22,6 +22,7 @@ const PRESETS = [
 export default function Settings() {
   const { user, organizations, refreshUser, switchOrganization } = useAuth()
   const isCeo = user?.role === "CEO"
+  const canEditSchedule = user?.role === "ADMIN" || user?.role === "CEO"
   const queryClient = useQueryClient()
   const { applyAccent } = useTheme()
   const [name, setName] = useState("")
@@ -35,6 +36,10 @@ export default function Settings() {
   const [workingDaysPerWeek, setWorkingDaysPerWeek] = useState(5)
   const [shiftStartDefault, setShiftStartDefault] = useState("09:00")
   const [lateThresholdMinutes, setLateThresholdMinutes] = useState(15)
+  const [shiftEndDefault, setShiftEndDefault] = useState("18:00")
+  const [timezone, setTimezone] = useState("Asia/Karachi")
+  const [breakStart, setBreakStart] = useState("")
+  const [breakEnd, setBreakEnd] = useState("")
   const [subOrganizationName, setSubOrganizationName] = useState("")
   const [organizationError, setOrganizationError] = useState("")
   const [geofenceEnabled, setGeofenceEnabled] = useState(false)
@@ -60,7 +65,11 @@ export default function Settings() {
       setWorkingHoursPerDay(organization.workingHoursPerDay ?? 8)
       setWorkingDaysPerWeek(organization.workingDaysPerWeek ?? 5)
       setShiftStartDefault(organization.shiftStartDefault || "09:00")
+      setShiftEndDefault(organization.shiftEndDefault || "18:00")
       setLateThresholdMinutes(organization.lateThresholdMinutes ?? 15)
+      setTimezone(organization.timezone || "Asia/Karachi")
+      setBreakStart(organization.breakStart || "")
+      setBreakEnd(organization.breakEnd || "")
       setGeofenceEnabled(!!organization.geofenceEnabled)
       setOfficeLatitude(organization.officeLatitude ?? "")
       setOfficeLongitude(organization.officeLongitude ?? "")
@@ -82,7 +91,7 @@ export default function Settings() {
   })
 
   const saveWorkSchedule = useMutation({
-    mutationFn: () => api.patch("/organization", { workingHoursPerDay, workingDaysPerWeek, shiftStartDefault, lateThresholdMinutes }),
+    mutationFn: () => api.patch("/organization", { workingHoursPerDay, workingDaysPerWeek, shiftStartDefault, shiftEndDefault, lateThresholdMinutes, timezone, breakStart: breakStart || null, breakEnd: breakEnd || null }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["organization"] }),
   })
 
@@ -323,9 +332,9 @@ export default function Settings() {
           )}
         </div>
 
-        {isCeo && (
+        {canEditSchedule && (
           <div className="card p-6">
-            <SectionHeader title="Work Schedule" />
+            <SectionHeader title="Work Schedule & Time Zone" />
             <p className="mb-4 text-xs text-muted">
               These values drive automatic attendance calculations. The standard 5-day week is Monday through Friday.
             </p>
@@ -364,6 +373,30 @@ export default function Settings() {
                 value={lateThresholdMinutes}
                 onChange={(e) => setLateThresholdMinutes(e.target.value)}
               />
+            </div>
+            <div className="grid grid-cols-2 gap-4 mt-4">
+              <TextField
+                label="Default shift end (HH:mm)"
+                type="time"
+                value={shiftEndDefault}
+                onChange={(e) => setShiftEndDefault(e.target.value)}
+              />
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-muted">Organization time zone</label>
+                <select value={timezone} onChange={(e) => setTimezone(e.target.value)} className="field w-full">
+                  {(typeof Intl !== "undefined" && typeof Intl.supportedValuesOf === "function" ? Intl.supportedValuesOf("timeZone") : ["Asia/Karachi", "Asia/Dubai", "Asia/Kolkata", "Europe/London", "America/New_York", "America/Los_Angeles", "UTC"]).map((zone) => (
+                    <option key={zone} value={zone}>{zone}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="mt-4 rounded-2xl bg-surface-2 p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted">Office break</p>
+              <p className="mt-1 text-xs text-muted">Punches during this period are ignored for check-in/check-out purposes. The break remains part of office time, so a checkout during the break cannot become the employee's timeout.</p>
+              <div className="mt-3 grid grid-cols-2 gap-4">
+                <TextField label="Break start" type="time" value={breakStart} onChange={(e) => setBreakStart(e.target.value)} />
+                <TextField label="Break end" type="time" value={breakEnd} onChange={(e) => setBreakEnd(e.target.value)} />
+              </div>
             </div>
             <p className="mt-2 text-xs text-muted-2">
               Expected weekly time: {(Number(workingHoursPerDay || 0) * Number(workingDaysPerWeek || 0)).toFixed(1)} hours.

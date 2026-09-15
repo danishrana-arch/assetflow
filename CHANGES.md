@@ -1,3 +1,67 @@
+# Round: biometric connector fix + incremental sync
+
+## The error you were hitting
+`backend/src/controllers/biometric.controller.js` reads/writes a `fingerprint`
+field on every `BiometricPunch` row (used to dedupe retried punches) — but
+`prisma/schema.prisma` never defined that field. The very first punch your
+connector sent would throw a Prisma error like:
+
+    Unknown argument `fingerprint`. Available options are marked with ?.
+
+**Fix:** added `fingerprint String? @unique` to the `BiometricPunch` model in
+`backend/prisma/schema.prisma`. This matches what the controller already
+assumed (it even catches `P2002` — the unique-constraint error code — on
+insert, so a unique `fingerprint` column was clearly the intended design).
+
+Run this once before the connector will work:
+
+    cd backend
+    npx prisma migrate dev --name add_biometric_punch_fingerprint
+
+## Biometric connector — now a real 30-minute incremental sync
+`connector/` was a single-file script that pulled a device's ENTIRE log on
+every cycle. It's now split into modules and behaves like a proper on-prem
+sync agent:
+
+- `POLL_INTERVAL_MS` now defaults to **30 minutes** (was 30 seconds).
+- A local watermark file (`connector/.sync-state.json`, path configurable via
+  `STATE_FILE`) remembers the timestamp of the newest punch already sent.
+  Every cycle pulls from the device, keeps only punches newer than that
+  watermark, sends only those, then advances the watermark — old data is
+  never re-fetched or re-uploaded, only genuinely new punches merge in on
+  top of what's already synced. Survives restarts (state is on disk, not in
+  memory).
+- Retry with exponential backoff (`RETRY_BASE_MS`/`RETRY_MAX_MS`/
+  `RETRY_MAX_ATTEMPTS`) around config load, sync, and any network call — a
+  flaky LAN link or a brief backend outage no longer crashes the process.
+- Structured, timestamped logging (`src/logger.js`), `LOG_LEVEL=debug` for
+  verbose output.
+- Graceful shutdown on SIGINT/SIGTERM (closes the push server cleanly).
+- A separate, faster heartbeat interval (default = 1/3 of the sync interval)
+  still marks the device "online" in the Attendance Devices page without
+  waiting a full 30 minutes.
+- The local PUSH receiver (`/device/punches`) is unchanged in behavior — a
+  device/relay that pushes to the connector directly still works instantly,
+  independent of the 30-minute pull cadence.
+
+New/changed connector files: `src/config.js`, `src/logger.js`, `src/state.js`,
+`src/sync.js` (all new), `src/index.js` (rewritten), `src/vendor.js` (adapter
+signature extended to accept the watermark), `.env` (new tunables, poll
+interval default changed to 1800000).
+
+Verified end-to-end against a mock device + mock backend: first cycle pulled
+and sent all punches once, second cycle correctly found 0 new punches
+(nothing re-sent), and the watermark persisted to disk in between.
+
+## Frontend connection — already there
+You already have this: **Settings → Attendance Devices**
+(`frontend/src/pages/AttendanceDevices.jsx` + `backend/src/routes|controllers/biometric.*`).
+From that page you can add a device (vendor, IP/port, door-relay settings),
+get a one-time connector token, and map each device's internal user IDs to
+AssetFlow employees — no code changes needed to connect a new physical
+device. Nothing added here since it was already fully built; I just confirmed
+it round-trips correctly with the connector now that the schema bug is fixed.
+
 # AssetFlow — Change Log (this round: attendance geofencing + profile redesign)
 
 Delivered as **changed files only** — copy these over the matching paths in your existing

@@ -3,18 +3,17 @@ const ExcelJS = require("exceljs")
 const { toDateOnly } = require("../utils/date")
 const { workingMinutesPerDay, expectedWeeklyMinutes, isScheduledWorkday } = require("../utils/work-schedule")
 const { distanceMeters } = require("../utils/geo")
+const { dateKeyInTimeZone, localMinutes, parseHHMM } = require("../utils/timezone")
 
-function startOfDay(dateStr) {
-  return toDateOnly(dateStr || new Date())
+function startOfDay(dateStr, timeZone) {
+  if (dateStr) return toDateOnly(dateStr)
+  return toDateOnly(dateKeyInTimeZone(new Date(), timeZone || "UTC"))
 }
 
 async function getDailyAttendance(req, res, next) {
   try {
     const { organizationId } = req.user
-    const date = startOfDay(req.query.date)
-
-    const [organization, employees, records, punches] = await Promise.all([
-      prisma.organization.findUnique({
+    const organization = await prisma.organization.findUnique({
         where: { id: organizationId },
         select: {
           workingHoursPerDay: true,
@@ -23,8 +22,14 @@ async function getDailyAttendance(req, res, next) {
           officeLatitude: true,
           officeLongitude: true,
           geofenceRadiusMeters: true,
+          timezone: true,
+          breakStart: true,
+          breakEnd: true,
         },
-      }),
+      })
+    const date = startOfDay(req.query.date, organization?.timezone)
+
+    const [employees, records] = await Promise.all([
       prisma.user.findMany({
         where: { organizationId, status: "ACTIVE" },
         include: { department: true },
@@ -75,6 +80,9 @@ async function getDailyAttendance(req, res, next) {
         workingDaysPerWeek: Number(organization?.workingDaysPerWeek ?? 5),
         expectedWeeklyMinutes: expectedWeeklyMinutes(organization),
         isScheduledWorkday: isScheduledWorkday(date, organization),
+        timezone: organization?.timezone || "UTC",
+        breakStart: organization?.breakStart || null,
+        breakEnd: organization?.breakEnd || null,
       },
       rows,
     })
@@ -96,7 +104,7 @@ async function markAttendance(req, res, next) {
     const employee = await prisma.user.findFirst({ where: { id: employeeId, organizationId } })
     if (!employee) return res.status(404).json({ error: "Employee not found" })
 
-    const day = startOfDay(date)
+    const day = startOfDay(date, (await prisma.organization.findUnique({ where: { id: organizationId }, select: { timezone: true } }))?.timezone)
 
     // An admin setting the status directly is an explicit override — any
     // prior "auto-flagged as absent due to location" marker no longer
@@ -128,7 +136,8 @@ async function saveDayAttendance(req, res, next) {
       }
     }
 
-    const day = startOfDay(date)
+    const org = await prisma.organization.findUnique({ where: { id: organizationId }, select: { timezone: true } })
+    const day = startOfDay(date, org?.timezone)
 
     const results = await prisma.$transaction(
       records.map((r) =>
@@ -149,10 +158,10 @@ async function saveDayAttendance(req, res, next) {
 async function exportAttendanceSheet(req, res, next) {
   try {
     const { organizationId } = req.user
-    const date = startOfDay(req.query.date)
+    const organization = await prisma.organization.findUnique({ where: { id: organizationId }, select: { workingHoursPerDay: true, workingDaysPerWeek: true, timezone: true } })
+    const date = startOfDay(req.query.date, organization?.timezone)
 
-    const [organization, employees, records] = await Promise.all([
-      prisma.organization.findUnique({ where: { id: organizationId }, select: { workingHoursPerDay: true, workingDaysPerWeek: true } }),
+    const [employees, records] = await Promise.all([
       prisma.user.findMany({
         where: { organizationId, status: "ACTIVE" },
         include: { department: true },
@@ -209,22 +218,17 @@ async function markSelfAttendance(req, res, next) {
       return res.status(400).json({ error: `status must be one of: ${validStatuses.join(", ")}` })
     }
 
-    const today = startOfDay()
-
-    const existing = await prisma.attendanceRecord.findUnique({
-      where: { employeeId_date: { employeeId: userId, date: today } },
-    })
-    if (existing?.status === "LEAVE") {
-      return res.status(400).json({ error: "Today is already recorded as leave" })
-    }
-
     const [organization, employee] = await Promise.all([
       prisma.organization.findUnique({
         where: { id: organizationId },
-        select: { geofenceEnabled: true, officeLatitude: true, officeLongitude: true, geofenceRadiusMeters: true, shiftStartDefault: true, lateThresholdMinutes: true },
+        select: { geofenceEnabled: true, officeLatitude: true, officeLongitude: true, geofenceRadiusMeters: true, shiftStartDefault: true, lateThresholdMinutes: true, timezone: true, breakStart: true, breakEnd: true },
       }),
       prisma.user.findUnique({ where: { id: userId }, select: { workLocationType: true, shiftStart: true } }),
     ])
+
+    const today = startOfDay(null, organization?.timezone)
+    const existing = await prisma.attendanceRecord.findUnique({ where: { employeeId_date: { employeeId: userId, date: today } } })
+    if (existing?.status === "LEAVE") return res.status(400).json({ error: "Today is already recorded as leave" })
 
     const hasCoords = typeof latitude === "number" && typeof longitude === "number"
     const isMobileDevice = /Android|iPhone|iPad|iPod|Windows Phone|Mobile/i.test(String(req.headers["user-agent"] || ""))
@@ -266,11 +270,7 @@ async function markSelfAttendance(req, res, next) {
     const now = new Date()
     const shiftStartStr = (employee?.shiftStart && employee.shiftStart.trim()) || organization?.shiftStartDefault || "09:00"
     const lateThreshold = Number.isFinite(Number(organization?.lateThresholdMinutes)) ? Number(organization.lateThresholdMinutes) : 15
-    const parseHHMM = (s) => {
-      const [hh, mm] = String(s || "09:00").split(":" ).map((v) => Number(v || 0))
-      return (Number.isFinite(hh) ? hh : 9) * 60 + (Number.isFinite(mm) ? mm : 0)
-    }
-    const checkInMinutes = now.getHours() * 60 + now.getMinutes()
+    const checkInMinutes = localMinutes(now, organization?.timezone || "UTC")
     const shiftStartMinutes = parseHHMM(shiftStartStr)
     if (status === "PRESENT") {
       if (checkInMinutes > shiftStartMinutes + lateThreshold) {
@@ -293,20 +293,19 @@ async function markSelfAttendance(req, res, next) {
 // Employee self-service: their own recent attendance history.
 async function getSelfAttendance(req, res, next) {
   try {
-    const { userId } = req.user
-    const since = new Date()
-    since.setDate(since.getDate() - 30)
-    since.setHours(0, 0, 0, 0)
+    const { userId, organizationId } = req.user
+    const organization = await prisma.organization.findUnique({ where: { id: organizationId }, select: { timezone: true } })
+    const today = startOfDay(null, organization?.timezone)
+    const since = new Date(today)
+    since.setUTCDate(since.getUTCDate() - 30)
 
     const records = await prisma.attendanceRecord.findMany({
       where: { employeeId: userId, date: { gte: since } },
       orderBy: { date: "desc" },
     })
 
-    const today = startOfDay()
     const todayRecord = records.find((r) => r.date.getTime() === today.getTime())
-
-    res.json({ today: todayRecord || null, history: records })
+    res.json({ today: todayRecord || null, history: records, timezone: organization?.timezone || "UTC" })
   } catch (err) {
     next(err)
   }

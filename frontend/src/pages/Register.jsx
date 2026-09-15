@@ -31,7 +31,8 @@ export default function Register() {
 
     setLoading(true)
     try {
-      const res = await api.post("/auth/register", { organizationName, name, email, password })
+      const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Karachi"
+      const res = await api.post("/auth/register", { organizationName, name, email, password, timezone })
 
       if (res.data?.token) {
         localStorage.setItem("assetflow_token", res.data.token)

@@ -1,6 +1,7 @@
 const prisma = require("../lib/prisma")
 const { logAudit } = require("../utils/audit")
 const { encryptField, decryptField } = require("../utils/crypto")
+const { isValidTimeZone } = require("../utils/timezone")
 
 function slugify(name) {
   return name
@@ -55,7 +56,7 @@ async function createSubOrganization(req, res, next) {
 
     const current = await prisma.organization.findUnique({
       where: { id: organizationId },
-      select: { id: true, companyId: true },
+      select: { id: true, companyId: true, timezone: true },
     })
     if (!current) return res.status(404).json({ error: "Organization not found" })
 
@@ -73,6 +74,7 @@ async function createSubOrganization(req, res, next) {
         slug,
         companyId: current.companyId,
         parentOrganizationId: current.companyId,
+        timezone: current.timezone || "Asia/Karachi",
       },
     })
 
@@ -129,6 +131,7 @@ async function updateOrganization(req, res, next) {
       payrollBankName, payrollAccountNumber, lateDeductionAmount,
       workingHoursPerDay, workingDaysPerWeek,
       shiftStartDefault, shiftEndDefault, lateThresholdMinutes,
+      timezone, breakStart, breakEnd,
       geofenceEnabled, officeLatitude, officeLongitude, geofenceRadiusMeters,
     } = req.body
 
@@ -182,6 +185,19 @@ async function updateOrganization(req, res, next) {
       if (shiftEndDefault !== null && !/^([01]\d|2[0-3]):[0-5]\d$/.test(String(shiftEndDefault))) {
         return res.status(400).json({ error: "shiftEndDefault must use HH:mm format" })
       }
+    }
+
+    if (timezone !== undefined && !isValidTimeZone(String(timezone))) {
+      return res.status(400).json({ error: "timezone must be a valid IANA time zone" })
+    }
+
+    for (const [label, value] of [["breakStart", breakStart], ["breakEnd", breakEnd]]) {
+      if (value !== undefined && value !== null && !/^([01]\d|2[0-3]):[0-5]\d$/.test(String(value))) {
+        return res.status(400).json({ error: `${label} must use HH:mm format` })
+      }
+    }
+    if (breakStart !== undefined && breakEnd !== undefined && breakStart && breakEnd && breakStart === breakEnd) {
+      return res.status(400).json({ error: "Break start and break end cannot be the same" })
     }
 
     if (lateThresholdMinutes !== undefined) {
@@ -250,6 +266,9 @@ async function updateOrganization(req, res, next) {
         ...(shiftStartDefault !== undefined ? { shiftStartDefault } : {}),
         ...(shiftEndDefault !== undefined ? { shiftEndDefault } : {}),
         ...(lateThresholdMinutes !== undefined ? { lateThresholdMinutes: Number(lateThresholdMinutes) } : {}),
+        ...(timezone !== undefined ? { timezone: String(timezone) } : {}),
+        ...(breakStart !== undefined ? { breakStart: breakStart || null } : {}),
+        ...(breakEnd !== undefined ? { breakEnd: breakEnd || null } : {}),
         ...(geofenceEnabled !== undefined ? { geofenceEnabled: !!geofenceEnabled } : {}),
         ...(officeLatUpdate !== undefined ? { officeLatitude: officeLatUpdate } : {}),
         ...(officeLngUpdate !== undefined ? { officeLongitude: officeLngUpdate } : {}),
@@ -322,28 +341,105 @@ async function archiveSubOrganization(req, res, next) {
 
 async function getOrganizationComparison(req, res, next) {
   try {
-    if (!["ADMIN", "CEO"].includes(req.user.role)) return res.status(403).json({ error: "Only ADMIN or CEO can compare organizations" })
-    const current = await prisma.organization.findUnique({ where: { id: req.user.organizationId }, select: { companyId: true } })
-    if (!current) return res.status(404).json({ error: "Organization not found" })
-    const organizations = await prisma.organization.findMany({ where: { companyId: current.companyId, archivedAt: null }, orderBy: { name: "asc" } })
-    const todayStart = new Date(); todayStart.setHours(0,0,0,0)
-    const todayEnd = new Date(); todayEnd.setHours(23,59,59,999)
+    if (!['ADMIN', 'CEO'].includes(req.user.role)) {
+      return res.status(403).json({ error: 'Only ADMIN or CEO can compare organizations' })
+    }
+
+    const current = await prisma.organization.findUnique({
+      where: { id: req.user.organizationId },
+      select: { companyId: true },
+    })
+
+    if (!current) return res.status(404).json({ error: 'Organization not found' })
+
+    const organizations = await prisma.organization.findMany({
+      where: { companyId: current.companyId, archivedAt: null },
+      orderBy: { name: 'asc' },
+    })
+
+    const now = new Date()
+    const todayStart = new Date(now)
+    todayStart.setHours(0, 0, 0, 0)
+    const todayEnd = new Date(now)
+    todayEnd.setHours(23, 59, 59, 999)
+    const monthStart = new Date(now)
+    monthStart.setDate(monthStart.getDate() - 30)
+
     const rows = await Promise.all(organizations.map(async (org) => {
-      const [employees, presentToday, assets, assignedAssets, activeProjects, completedProjects, monthAttendance, departments] = await Promise.all([
-        prisma.user.count({ where: { organizationId: org.id, status: "ACTIVE" } }),
-        prisma.attendanceRecord.count({ where: { organizationId: org.id, date: { gte: todayStart, lte: todayEnd }, status: "PRESENT" } }),
-        prisma.asset.count({ where: { organizationId: org.id } }),
-        prisma.asset.count({ where: { organizationId: org.id, status: "ASSIGNED" } }),
-        prisma.project.count({ where: { organizationId: org.id, status: "IN_PROGRESS" } }),
-        prisma.project.count({ where: { organizationId: org.id, status: "COMPLETED" } }),
-        prisma.attendanceRecord.findMany({ where: { organizationId: org.id, date: { gte: new Date(Date.now()-30*86400000) } }, select: { status: true } }),
-        prisma.department.count({ where: { organizationId: org.id } }),
+      const [
+        employees,
+        presentToday,
+        assets,
+        assignedAssets,
+        activeProjects,
+        completedProjects,
+        monthAttendance,
+        departments,
+      ] = await Promise.all([
+        prisma.user.count({
+          where: { organizationId: org.id, status: 'ACTIVE' },
+        }),
+        prisma.attendanceRecord.count({
+          where: {
+            organizationId: org.id,
+            date: { gte: todayStart, lte: todayEnd },
+            status: 'PRESENT',
+          },
+        }),
+        prisma.asset.count({
+          where: { organizationId: org.id },
+        }),
+        prisma.asset.count({
+          where: { organizationId: org.id, status: 'ASSIGNED' },
+        }),
+        prisma.project.count({
+          where: { organizationId: org.id, status: 'IN_PROGRESS' },
+        }),
+        prisma.project.count({
+          where: { organizationId: org.id, status: 'COMPLETED' },
+        }),
+        prisma.attendanceRecord.findMany({
+          where: {
+            organizationId: org.id,
+            date: { gte: monthStart },
+          },
+          select: { status: true },
+        }),
+        prisma.department.count({
+          where: { organizationId: org.id },
+        }),
       ])
-      const attendanceRate = monthAttendance.length ? Math.round(monthAttendance.filter(x => x.status === "PRESENT").length / monthAttendance.length * 100) : 0
-      return { id: org.id, name: org.name, isMain: org.id === org.companyId, employees, presentToday, assets, assignedAssets, utilizationRate: assets ? Math.round(assignedAssets / assets * 100) : 0, activeProjects, completedProjects, departments, attendanceRate }
+
+      const attendanceRate = monthAttendance.length
+        ? Math.round(
+            (monthAttendance.filter((item) => item.status === 'PRESENT').length /
+              monthAttendance.length) *
+              100
+          )
+        : 0
+
+      return {
+        id: org.id,
+        name: org.name,
+        isMain: org.id === org.companyId,
+        employees,
+        presentToday,
+        assets,
+        assignedAssets,
+        utilizationRate: assets
+          ? Math.round((assignedAssets / assets) * 100)
+          : 0,
+        activeProjects,
+        completedProjects,
+        departments,
+        attendanceRate,
+      }
     }))
-    res.json(rows)
-  } catch (err) { next(err) }
+
+    return res.json(rows)
+  } catch (err) {
+    next(err)
+  }
 }
 
 module.exports = { getOrganization, updateOrganization, listCompanyOrganizations, createSubOrganization, archiveSubOrganization, getOrganizationComparison }

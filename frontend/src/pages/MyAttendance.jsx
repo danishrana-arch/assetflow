@@ -43,9 +43,9 @@ function AttendanceTimeline({ timeline }) {
   )
 }
 
-function fmtTime(dateStr) {
+function fmtTime(dateStr, timeZone) {
   if (!dateStr) return "—"
-  return new Date(dateStr).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+  return new Date(dateStr).toLocaleTimeString([], { timeZone: timeZone || undefined, hour: "2-digit", minute: "2-digit" })
 }
 
 export default function MyAttendance() {
@@ -207,7 +207,7 @@ export default function MyAttendance() {
                 )}
               </p>
               {attendance?.today?.updatedAt && (
-                <p className="mb-3 text-sm text-muted-2">Marked at {fmtTime(attendance.today.updatedAt)}</p>
+                <p className="mb-3 text-sm text-muted-2">Marked at {fmtTime(attendance.today.updatedAt, attendance?.timezone)}</p>
               )}
               <AttendanceTimeline timeline={attendance?.timeline} />
               {attendance?.today?.autoFlagged && (

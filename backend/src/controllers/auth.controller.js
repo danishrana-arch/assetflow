@@ -5,6 +5,7 @@ const { signToken } = require("../utils/jwt")
 const { ASSIGNABLE_ROLES, MAX_CEO_COUNT } = require("../utils/roles")
 const { encryptField } = require("../utils/crypto")
 const { logAudit } = require("../utils/audit")
+const { isValidTimeZone } = require("../utils/timezone")
 
 
 function organizationSummary(organization) {
@@ -19,6 +20,7 @@ function organizationSummary(organization) {
     accentColor: organization.accentColor,
     theme: organization.theme,
     planTier: organization.planTier,
+    timezone: organization.timezone || "Asia/Karachi",
   }
 }
 
@@ -35,6 +37,7 @@ async function getCompanyOrganizations(companyId) {
       accentColor: true,
       theme: true,
       planTier: true,
+      timezone: true,
     },
     orderBy: [{ parentOrganizationId: "asc" }, { name: "asc" }],
   })
@@ -44,10 +47,12 @@ async function getCompanyOrganizations(companyId) {
 // Creates a brand-new organization plus its first admin user.
 async function registerOrganization(req, res, next) {
   try {
-    const { organizationName, name, email, password } = req.body
+    const { organizationName, name, email, password, timezone } = req.body
     if (!organizationName || !name || !email || !password) {
       return res.status(400).json({ error: "organizationName, name, email, and password are required" })
     }
+
+    const selectedTimeZone = timezone && isValidTimeZone(String(timezone)) ? String(timezone) : "Asia/Karachi"
 
     const slug = organizationName
       .toLowerCase()
@@ -64,6 +69,7 @@ async function registerOrganization(req, res, next) {
         name: organizationName,
         slug: `${slug}-${Math.random().toString(36).slice(2, 6)}`,
         companyId: rootId,
+        timezone: selectedTimeZone,
         users: {
           create: {
             name,
