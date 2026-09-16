@@ -191,10 +191,16 @@ async function inviteEmployee(req, res, next) {
 
     if (managerId) {
       const manager = await prisma.user.findFirst({
-        where: { id: managerId, organizationId },
+        where: {
+          id: managerId,
+          OR: [
+            { organizationId },
+            { organizationId: companyId, role: "CEO" },
+          ],
+        },
         select: { id: true },
       })
-      if (!manager) return res.status(400).json({ error: "Reporting Manager must belong to the current organization" })
+      if (!manager) return res.status(400).json({ error: "Reporting Manager must belong to the current organization or be the company CEO" })
     }
 
     const tempPassword = Math.random().toString(36).slice(2, 10)

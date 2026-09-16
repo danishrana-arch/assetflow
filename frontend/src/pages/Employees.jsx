@@ -79,7 +79,7 @@ export default function Employees() {
   const employees = data?.data || []
   const { data: managerCandidates = [] } = useQuery({
     queryKey: ["employees", "manager-candidates"],
-    queryFn: () => api.get("/employees").then((r) => r.data),
+    queryFn: () => api.get("/employees", { params: { includeCompanyManagers: true, page: 1, pageSize: 200 } }).then((r) => r.data?.data || r.data || []),
     enabled: canManageEmployees && showForm,
   })
   const { data: departments } = useQuery({

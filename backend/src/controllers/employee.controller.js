@@ -18,22 +18,40 @@ function stripForIT(user) {
 
 async function listEmployees(req, res, next) {
   try {
-    const { organizationId, role: requesterRole } = req.user
-    const { search, department, status, page, pageSize } = req.query
+    const { organizationId, companyId, role: requesterRole } = req.user
+    const { search, department, status, page, pageSize, includeCompanyManagers } = req.query
 
-    const where = {
-      organizationId,
-      ...(department ? { departmentId: department } : {}),
-      ...(status ? { status } : {}),
-      ...(search
-        ? {
-            OR: [
-              { name: { contains: search, mode: "insensitive" } },
-              { email: { contains: search, mode: "insensitive" } },
-            ],
-          }
-        : {}),
-    }
+    const useCompanyManagerPool = includeCompanyManagers === "true" || includeCompanyManagers === "1"
+    const where = useCompanyManagerPool
+      ? {
+          OR: [
+            { organizationId },
+            { organizationId: companyId || organizationId, role: "CEO" },
+          ],
+          ...(department ? { departmentId: department } : {}),
+          ...(status ? { status } : {}),
+          ...(search
+            ? {
+                OR: [
+                  { name: { contains: search, mode: "insensitive" } },
+                  { email: { contains: search, mode: "insensitive" } },
+                ],
+              }
+            : {}),
+        }
+      : {
+          organizationId,
+          ...(department ? { departmentId: department } : {}),
+          ...(status ? { status } : {}),
+          ...(search
+            ? {
+                OR: [
+                  { name: { contains: search, mode: "insensitive" } },
+                  { email: { contains: search, mode: "insensitive" } },
+                ],
+              }
+            : {}),
+        }
 
     if (page) {
       const pageNum = Math.max(1, parseInt(page, 10) || 1)
@@ -206,7 +224,7 @@ const SELF_EDITABLE_FIELDS = ["phone", "email"]
 
 async function updateEmployee(req, res, next) {
   try {
-    const { organizationId, userId, role: requesterRole } = req.user
+    const { organizationId, companyId, userId, role: requesterRole } = req.user
     const { id } = req.params
     const isManagementRequester = MANAGEMENT_ROLES.includes(requesterRole)
     const isSelf = userId === id
@@ -303,8 +321,17 @@ async function updateEmployee(req, res, next) {
 
     if (data.managerId) {
       if (data.managerId === id) return res.status(400).json({ error: "An employee cannot report to themselves" })
-      const manager = await prisma.user.findFirst({ where: { id: data.managerId, organizationId }, select: { id: true } })
-      if (!manager) return res.status(400).json({ error: "Reporting Manager must belong to the current organization" })
+      const manager = await prisma.user.findFirst({
+        where: {
+          id: data.managerId,
+          OR: [
+            { organizationId },
+            { organizationId: companyId || organizationId, role: "CEO" },
+          ],
+        },
+        select: { id: true, organizationId: true, role: true },
+      })
+      if (!manager) return res.status(400).json({ error: "Reporting Manager must belong to the current organization or be the company CEO" })
     }
 
     const updated = await prisma.user.update({ where: { id }, data })

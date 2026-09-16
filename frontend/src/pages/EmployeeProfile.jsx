@@ -121,7 +121,7 @@ export default function EmployeeProfile() {
 
   const { data: managerOptions } = useQuery({
     queryKey: ["employee-manager-options"],
-    queryFn: () => api.get("/employees", { params: { page: 1, pageSize: 100 } }).then((r) => r.data?.data || []),
+    queryFn: () => api.get("/employees", { params: { page: 1, pageSize: 200, includeCompanyManagers: true } }).then((r) => r.data?.data || r.data || []),
     enabled: canEditFully,
   })
 
