@@ -1,12 +1,7 @@
 import { useRef, useState } from "react"
 import { Link, Navigate } from "react-router-dom"
 import { motion, useAnimationControls } from "framer-motion"
-import {
-  ArrowRight,
-  Lightbulb,
-  MousePointer2,
-  Sparkles,
-} from "lucide-react"
+import { ArrowRight, Lock } from "lucide-react"
 import { useAuth } from "../context/AuthContext"
 import logoFull from "../assets/logo1.png"
 
@@ -382,106 +377,6 @@ function Lamp({ isOn, onToggle }) {
 
 
 /* ============================================================
-   CODE PREVIEW
-   ============================================================ */
-
-function CodePreview({ isOn }) {
-  return (
-    <div className="w-full overflow-hidden rounded-2xl border border-white/10 bg-[#0d1117] text-left shadow-[0_20px_70px_rgba(0,0,0,.4)]">
-
-      <div className="flex h-10 items-center justify-between border-b border-white/10 px-3 sm:h-11 sm:px-4">
-
-        <div className="flex min-w-0 items-center gap-1.5">
-
-          <span className="h-2 w-2 shrink-0 rounded-full bg-white/15 sm:h-2.5 sm:w-2.5" />
-          <span className="h-2 w-2 shrink-0 rounded-full bg-white/15 sm:h-2.5 sm:w-2.5" />
-          <span className="h-2 w-2 shrink-0 rounded-full bg-white/15 sm:h-2.5 sm:w-2.5" />
-
-          <span className="ml-1 truncate font-mono text-[8px] text-white/30 sm:ml-2 sm:text-[10px]">
-            assetflow / welcome.jsx
-          </span>
-
-        </div>
-
-        <span className="ml-2 shrink-0 font-mono text-[8px] text-white/20 sm:text-[9px]">
-          React
-        </span>
-
-      </div>
-
-
-      <div className="overflow-x-auto p-3 sm:p-5">
-
-        <div className="min-w-[360px] font-mono text-[9px] leading-5 sm:min-w-0 sm:text-[11px]">
-
-          <div>
-            <span className="text-violet-300">
-              const
-            </span>{" "}
-            workspace ={" "}
-            <span className="text-sky-300">
-              AssetFlow
-            </span>
-            ()
-          </div>
-
-          <div>
-            <span className="text-violet-300">
-              const
-            </span>{" "}
-            light ={" "}
-            <span
-              className={
-                isOn
-                  ? "text-amber-200"
-                  : "text-white/40"
-              }
-            >
-              "{isOn ? "ON" : "OFF"}"
-            </span>
-          </div>
-
-          <div className="text-white/25">
-            // pull the string to toggle the workspace
-          </div>
-
-          <div>
-            <span className="text-violet-300">
-              return
-            </span>{" "}
-            workspace.
-            <span className="text-sky-300">
-              ready
-            </span>
-            (light)
-          </div>
-
-          <div className="text-white/25">
-            // secure • simple • connected
-          </div>
-
-          <div
-            className={
-              isOn
-                ? "mt-1 text-emerald-300"
-                : "mt-1 text-white/30"
-            }
-          >
-            {isOn
-              ? "✓ Workspace ready."
-              : "○ Waiting for the light..."}
-          </div>
-
-        </div>
-
-      </div>
-
-    </div>
-  )
-}
-
-
-/* ============================================================
    WELCOME PAGE
    ============================================================ */
 
@@ -527,438 +422,111 @@ export default function Welcome() {
 
 
   return (
-    <main className="relative min-h-screen overflow-x-hidden bg-[#080c0f] text-white">
+    <main className="relative flex min-h-screen flex-col overflow-x-hidden bg-[#0a0a0a] text-white">
 
       {/* ======================================================
           BACKGROUND
           ====================================================== */}
 
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
-
-        <div className="absolute left-1/2 top-[5%] h-[350px] w-[350px] -translate-x-1/2 rounded-full bg-slate-500/[0.06] blur-[100px] sm:h-[500px] sm:w-[500px] sm:blur-[120px] lg:h-[650px] lg:w-[650px]" />
-
-        <div className="absolute bottom-0 left-1/2 h-[280px] w-[400px] -translate-x-1/2 rounded-full bg-amber-500/[0.035] blur-[100px] sm:h-[350px] sm:w-[500px] sm:blur-[120px]" />
-
+        <div className="absolute left-[15%] top-1/3 h-[400px] w-[400px] -translate-y-1/2 rounded-full bg-amber-500/[0.05] blur-[130px] sm:h-[550px] sm:w-[550px]" />
       </div>
 
-
       {/* ======================================================
-          HEADER
+          HEADER — logo only, unchanged
           ====================================================== */}
 
-      <header className="relative z-50 mx-auto flex w-full max-w-7xl items-center justify-between px-4 py-4 sm:px-6 sm:py-5 lg:px-10">
-
-        {/* Logo */}
-
+      <header className="relative z-50 mx-auto flex w-full max-w-7xl items-center px-4 py-4 sm:px-6 sm:py-5 lg:px-10">
         <Link
           to="/"
           className="flex min-w-0 items-center gap-2.5"
         >
-
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.05] p-1.5 sm:h-10 sm:w-10">
-
             <img
               src={logoFull}
               alt="AssetFlow"
               className="h-full w-full object-contain"
             />
-
           </div>
-
           <span className="truncate text-sm font-semibold tracking-wide text-white/90 sm:text-base">
             AssetFlow
           </span>
-
         </Link>
-
-
-        {/* Header actions */}
-
-        <nav className="flex shrink-0 items-center gap-1.5 sm:gap-3">
-
-          {isOn ? (
-            <Link
-              to="/login"
-              className="rounded-full border border-white/10 bg-white/[0.035] px-3 py-2 text-[10px] font-semibold text-white/70 transition hover:border-white/20 hover:bg-white/[0.08] hover:text-white sm:px-5 sm:text-sm"
-            >
-              Log in
-            </Link>
-          ) : (
-            <button
-              type="button"
-              disabled
-              className="cursor-not-allowed rounded-full border border-white/5 bg-white/[0.02] px-3 py-2 text-[10px] font-semibold text-white/20 sm:px-5 sm:text-sm"
-            >
-              Log in
-            </button>
-          )}
-
-
-          {isOn ? (
-            <Link
-              to="/register"
-              className="rounded-full bg-white px-3 py-2 text-[10px] font-semibold text-[#101417] shadow-lg shadow-black/20 transition hover:-translate-y-0.5 hover:bg-white/90 sm:px-5 sm:text-sm"
-            >
-              Sign up
-            </Link>
-          ) : (
-            <button
-              type="button"
-              disabled
-              className="cursor-not-allowed rounded-full bg-white/10 px-3 py-2 text-[10px] font-semibold text-white/20 sm:px-5 sm:text-sm"
-            >
-              Sign up
-            </button>
-          )}
-
-        </nav>
-
       </header>
-
 
       {/* ======================================================
           CONTENT
           ====================================================== */}
 
-      <section className="relative z-10 mx-auto w-full max-w-7xl px-4 pb-10 pt-5 sm:px-6 sm:pb-12 sm:pt-7 lg:px-10 lg:pt-8">
+      <section className="relative z-10 mx-auto flex w-full max-w-7xl flex-1 flex-col items-center justify-center gap-10 px-4 py-10 sm:px-6 lg:flex-row lg:gap-16 lg:px-10">
 
-        {/* ====================================================
-            INTRO
-            ==================================================== */}
+        {/* ==================================================
+            LEFT — LAMP
+            ================================================== */}
 
-        <div className="mx-auto max-w-3xl text-center">
+        <div className="flex w-full justify-center lg:w-1/2">
+          <Lamp
+            isOn={isOn}
+            onToggle={() => setIsOn((value) => !value)}
+          />
+        </div>
 
-          <div className="mb-3 inline-flex max-w-full items-center gap-2 rounded-full border border-white/10 bg-white/[0.035] px-3 py-1.5 text-[9px] text-white/45 backdrop-blur sm:mb-4 sm:text-[11px]">
+        {/* ==================================================
+            RIGHT — HEADLINE + SINGLE CTA
+            ================================================== */}
 
-            <Sparkles
-              size={11}
-              className="shrink-0 text-amber-300"
-            />
+        <div className="flex w-full max-w-xl flex-col items-center text-center lg:w-1/2 lg:items-start lg:text-left">
 
-            <span>
-              A smarter way to manage your workplace
-            </span>
-
-          </div>
-
-
-          <h1 className="text-[36px] font-semibold leading-[0.98] tracking-[-0.05em] sm:text-5xl md:text-6xl lg:text-7xl">
-
-            Welcome to{" "}
-
-            <span className="text-amber-300">
-              AssetFlow
-            </span>
-
+          <h1 className="text-[40px] font-bold leading-[1.05] tracking-tight sm:text-5xl lg:text-6xl">
+            Welcome to
+            <br />
+            <span className="text-amber-300">AssetFlow</span>
           </h1>
 
-
-          <p className="mx-auto mt-4 max-w-2xl px-2 text-[11px] leading-5 text-white/45 sm:text-sm sm:leading-6 md:text-base">
-
-            Pull the string, light the workspace, and
-            explore AssetFlow. Your inventory, people,
-            attendance and payroll connected in one place.
-
+          <p className="mt-4 max-w-md text-sm leading-6 text-white/45 sm:text-base">
+            Pull the lamp string to turn on the light and unlock your workspace.
           </p>
 
-        </div>
-
-
-        {/* ====================================================
-            MAIN RESPONSIVE LAYOUT
-            ==================================================== */}
-
-        <div className="mx-auto mt-7 grid w-full max-w-6xl grid-cols-1 items-center gap-7 sm:mt-9 sm:gap-9 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.9fr)] lg:gap-12 xl:gap-20">
-
-
-          {/* ==================================================
-              LEFT — LAMP
-              ================================================== */}
-
-          <div className="flex min-h-0 w-full items-center justify-center py-1 sm:py-3 lg:min-h-[500px]">
-
-            <div className="flex w-full flex-col items-center">
-
-              <div className="mb-0.5 flex items-center gap-2 text-[9px] text-white/30 sm:mb-1 sm:text-xs">
-
-                <MousePointer2
-                  size={12}
-                />
-
-                <span>
-                  Pull the chain or tap it
-                </span>
-
-              </div>
-
-
-              <Lamp
-                isOn={isOn}
-                onToggle={() =>
-                  setIsOn((value) => !value)
-                }
-              />
-
-            </div>
-
-          </div>
-
-
-          {/* ==================================================
-              RIGHT — WORKSPACE ACCESS
-              ================================================== */}
-
-          <div className="flex w-full min-w-0 flex-col justify-center">
-
-            <div className="mb-4 sm:mb-5">
-
-              <div className="mb-2 text-[9px] font-medium uppercase tracking-[0.2em] text-amber-300/70 sm:text-[10px]">
-
-                Your workspace
-
-              </div>
-
-
-              <motion.h2
-                key={isOn ? "on" : "off"}
-                initial={{
-                  opacity: 0,
-                  y: 8,
-                }}
-                animate={{
-                  opacity: 1,
-                  y: 0,
-                }}
-                className="text-2xl font-semibold tracking-tight text-white sm:text-3xl"
+          <div className="mt-8 flex flex-col items-center gap-3 lg:items-start">
+            {isOn ? (
+              <Link
+                to="/login"
+                className="group inline-flex items-center gap-2 rounded-full border border-amber-300/50 bg-amber-400/[0.06] px-6 py-3.5 text-sm font-semibold text-amber-200 shadow-[0_0_30px_rgba(245,158,11,.3)] transition duration-200 hover:-translate-y-0.5 hover:bg-amber-400/10"
               >
-
-                {isOn
-                  ? "Welcome to your workspace."
-                  : "Turn on your workspace."}
-
-              </motion.h2>
-
-
-              <motion.p
-                key={`description-${isOn}`}
-                initial={{
-                  opacity: 0,
-                }}
-                animate={{
-                  opacity: 1,
-                }}
-                className="mt-2 max-w-md text-[11px] leading-5 text-white/40 sm:text-sm"
+                <Lock size={15} />
+                Login to Your Workplace
+                <ArrowRight size={15} className="transition-transform duration-200 group-hover:translate-x-1" />
+              </Link>
+            ) : (
+              <button
+                type="button"
+                disabled
+                className="inline-flex cursor-not-allowed items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-6 py-3.5 text-sm font-semibold text-white/25"
               >
+                <Lock size={15} />
+                Login to Your Workplace
+              </button>
+            )}
 
-                {isOn
-                  ? "The light is on. Create your account or sign in to continue."
-                  : "Pull the lamp string to turn on the light and unlock your workspace."}
-
-              </motion.p>
-
-            </div>
-
-
-            {/* ==================================================
-                AUTH BUTTONS
-                ================================================== */}
-
-            <motion.div
-              className="grid w-full grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2"
-              animate={{
-                opacity: isOn ? 1 : 0.45,
-              }}
-              transition={{
-                duration: 0.3,
-              }}
+            <Link
+              to="/register"
+              className="text-xs font-medium text-white/30 transition hover:text-white/60 hover:underline"
             >
-
-              {/* Register */}
-
-              {isOn ? (
-                <Link
-                  to="/register"
-                  className="group flex min-h-[46px] items-center justify-center gap-2 rounded-full bg-white px-5 py-3 text-xs font-semibold text-[#101417] shadow-xl shadow-black/20 transition duration-200 hover:-translate-y-0.5 hover:bg-white/90 sm:text-sm"
-                >
-
-                  Create your workspace
-
-                  <ArrowRight
-                    size={15}
-                    className="transition-transform duration-200 group-hover:translate-x-1"
-                  />
-
-                </Link>
-              ) : (
-                <button
-                  type="button"
-                  disabled
-                  className="flex min-h-[46px] cursor-not-allowed items-center justify-center gap-2 rounded-full bg-white/10 px-5 py-3 text-xs font-semibold text-white/25 sm:text-sm"
-                >
-
-                  <Lightbulb
-                    size={14}
-                  />
-
-                  Turn on the lamp first
-
-                </button>
-              )}
-
-
-              {/* Login */}
-
-              {isOn ? (
-                <Link
-                  to="/login"
-                  className="flex min-h-[46px] items-center justify-center rounded-full border border-white/10 bg-white/[0.035] px-5 py-3 text-xs font-semibold text-white/65 transition duration-200 hover:border-white/20 hover:bg-white/[0.07] hover:text-white sm:text-sm"
-                >
-
-                  I already have an account
-
-                </Link>
-              ) : (
-                <button
-                  type="button"
-                  disabled
-                  className="flex min-h-[46px] cursor-not-allowed items-center justify-center rounded-full border border-white/5 bg-white/[0.02] px-5 py-3 text-xs font-semibold text-white/20 sm:text-sm"
-                >
-
-                  Login locked
-
-                </button>
-              )}
-
-            </motion.div>
-
-
-            {/* ==================================================
-                STATUS
-                ================================================== */}
-
-            <motion.div
-              className="mt-3 flex items-center gap-3 rounded-2xl border px-3.5 py-3 sm:mt-4 sm:px-4"
-              animate={{
-                borderColor: isOn
-                  ? "rgba(253,230,138,.22)"
-                  : "rgba(255,255,255,.08)",
-
-                backgroundColor: isOn
-                  ? "rgba(245,158,11,.055)"
-                  : "rgba(255,255,255,.025)",
-              }}
-              transition={{
-                duration: 0.3,
-              }}
-            >
-
-              <div
-                className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
-                  isOn
-                    ? "bg-amber-300/10"
-                    : "bg-white/[0.04]"
-                }`}
-              >
-
-                <Lightbulb
-                  size={14}
-                  className={
-                    isOn
-                      ? "text-amber-300"
-                      : "text-white/30"
-                  }
-                />
-
-              </div>
-
-
-              <div className="min-w-0">
-
-                <div
-                  className={`text-[10px] font-medium sm:text-[11px] ${
-                    isOn
-                      ? "text-amber-100/90"
-                      : "text-white/60"
-                  }`}
-                >
-
-                  {isOn
-                    ? "Workspace activated"
-                    : "Workspace is sleeping"}
-
-                </div>
-
-
-                <div className="mt-0.5 text-[8px] leading-4 text-white/25 sm:text-[10px]">
-
-                  {isOn
-                    ? "The light is on login and registration are unlocked."
-                    : "Pull the string to turn the light on."}
-
-                </div>
-
-              </div>
-
-            </motion.div>
-
-
-            {/* ==================================================
-                CODE PREVIEW
-                ================================================== */}
-
-            <div className="mt-4 sm:mt-5">
-
-              <CodePreview
-                isOn={isOn}
-              />
-
-            </div>
-
-
-            {/* Access state */}
-
-            <div className="mt-3 flex flex-wrap items-center justify-center gap-2 text-center text-[8px] text-white/20 sm:mt-4 sm:text-[9px]">
-
-              <span
-                className={`h-1 w-1 rounded-full ${
-                  isOn
-                    ? "bg-emerald-400/70"
-                    : "bg-white/20"
-                }`}
-              />
-
-              <span>
-                {isOn
-                  ? "Workspace access unlocked"
-                  : "Workspace access locked"}
-              </span>
-
-              <span className="text-white/10">
-                •
-              </span>
-
-              <span>
-                AssetFlow
-              </span>
-
-            </div>
-
+              New here? Create a workspace
+            </Link>
           </div>
 
         </div>
-
-
-        {/* ====================================================
-            FOOTER
-            ==================================================== */}
-
-        <p className="mt-8 text-center text-[8px] text-white/20 sm:mt-10 sm:text-[10px]">
-
-          © {new Date().getFullYear()} AssetFlow. All rights reserved.
-
-        </p>
 
       </section>
+
+      {/* ====================================================
+          FOOTER
+          ==================================================== */}
+
+      <p className="relative z-10 pb-6 text-center text-[10px] text-white/20">
+        © {new Date().getFullYear()} AssetFlow. All rights reserved.
+      </p>
 
     </main>
   )
