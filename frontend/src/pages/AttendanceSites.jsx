@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Building2, Clock3, MapPin, Plus, Save, Trash2, Users } from "lucide-react"
 import api from "../api/client"
@@ -6,19 +6,9 @@ import { useAuth } from "../context/AuthContext"
 import PageHeader from "../components/ui/PageHeader"
 import EmptyState from "../components/ui/EmptyState"
 import AttendanceSiteMap from "../components/AttendanceSiteMap"
+import { TIMEZONE_GROUPS, timezoneLabel } from "../utils/timezones"
 
 const DEFAULT_TZ = "Asia/Karachi"
-
-function getTimeZones() {
-  if (typeof Intl !== "undefined" && typeof Intl.supportedValuesOf === "function") {
-    return Intl.supportedValuesOf("timeZone")
-  }
-  return [
-    "UTC", "Asia/Karachi", "Asia/Dubai", "Asia/Riyadh", "Asia/Kolkata",
-    "Europe/London", "Europe/Paris", "America/New_York", "America/Chicago",
-    "America/Denver", "America/Los_Angeles", "Australia/Sydney",
-  ]
-}
 
 function initialForm(organizationId, organizationTimezone) {
   return {
@@ -29,7 +19,7 @@ function initialForm(organizationId, organizationTimezone) {
     radiusMeters: 250,
     outsideGraceMinutes: 60,
     geofenceMode: "STRICT",
-    geofenceType: "POLYGON",
+    geofenceType: "RADIUS",
     boundary: [],
     areaSqMeters: 0,
     perimeterMeters: 0,
@@ -49,7 +39,6 @@ export default function AttendanceSites() {
   )
   const [form, setForm] = useState(() => initialForm(organization?.id, organization?.timezone))
   const [error, setError] = useState("")
-  const timeZones = useMemo(() => getTimeZones(), [])
 
   const { data: projects = [] } = useQuery({
     queryKey: ["attendance-site-projects", form.organizationId],
@@ -123,7 +112,11 @@ export default function AttendanceSites() {
             <label className="block">
               <span className="mb-1 flex items-center gap-1 text-xs font-semibold text-muted"><Clock3 size={12} /> Site time zone</span>
               <select value={form.timezone} onChange={(e) => setForm((f) => ({ ...f, timezone: e.target.value }))} className="field w-full">
-                {timeZones.map((tz) => <option key={tz} value={tz}>{tz.replace(/_/g, " ").replace(/\//g, " / ")}</option>)}
+                {TIMEZONE_GROUPS.map(([region, zones]) => (
+                  <optgroup key={region} label={region}>
+                    {zones.map((tz) => <option key={tz} value={tz}>{timezoneLabel(tz)}</option>)}
+                  </optgroup>
+                ))}
               </select>
               <span className="mt-1 block text-[10px] text-muted-2">Attendance, breaks, late time and end-of-day calculations use this site's time zone.</span>
             </label>
@@ -134,10 +127,11 @@ export default function AttendanceSites() {
                 latitude={form.latitude}
                 longitude={form.longitude}
                 boundary={form.boundary}
+                radiusMeters={form.radiusMeters}
                 type={form.geofenceType}
                 onChange={(next) => setForm((f) => ({ ...f, ...next, geofenceType: next.type }))}
               />
-              {form.geofenceType === "POLYGON" && form.boundary.length < 3 && <p className="mt-1 text-[10px] text-chip-yellow-fg">Draw at least 3 points around the actual construction property.</p>}
+              {form.geofenceType === "POLYGON" && form.boundary.length < 4 && <p className="mt-1 text-[10px] text-chip-yellow-fg">Draw at least 4 points around the actual construction property.</p>}
             </div>
 
             <div className="grid grid-cols-2 gap-3">
@@ -148,7 +142,7 @@ export default function AttendanceSites() {
             <label className="block"><span className="mb-1 block text-xs font-semibold text-muted">Geofence mode</span><select value={form.geofenceMode} onChange={(e) => setForm((f) => ({ ...f, geofenceMode: e.target.value }))} className="field w-full"><option value="STRICT">Strict — block outside check-in</option><option value="WARNING">Warning — record anomaly</option><option value="DISABLED">Disabled</option></select></label>
 
             {error && <div className="rounded-2xl bg-chip-pink-bg px-3 py-2 text-xs text-chip-pink-fg">{error}</div>}
-            <button onClick={() => create.mutate()} disabled={create.isPending || !form.name.trim() || !form.latitude || !form.longitude || (form.geofenceType === "POLYGON" && form.boundary.length < 3)} className="pill-accent flex w-full items-center justify-center gap-1.5 px-4 py-2.5 text-sm disabled:opacity-50"><Save size={14} /> {create.isPending ? "Creating…" : "Create site"}</button>
+            <button onClick={() => create.mutate()} disabled={create.isPending || !form.name.trim() || !form.latitude || !form.longitude || (form.geofenceType === "POLYGON" && form.boundary.length < 4)} className="pill-accent flex w-full items-center justify-center gap-1.5 px-4 py-2.5 text-sm disabled:opacity-50"><Save size={14} /> {create.isPending ? "Creating…" : "Create site"}</button>
           </div>
         </div>
 

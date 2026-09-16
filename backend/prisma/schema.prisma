@@ -620,6 +620,10 @@ model AttendanceRecord {
   networkType             String?
   attendanceDeviceId      String?
   verificationHash        String?
+  // Per-day mode chosen at check-in (distinct from the employee's fixed
+  // User.workLocationType classification). WFH skips the geofence check
+  // entirely at mark time.
+  locationMode            AttendanceLocationMode   @default(OFFICE)
   AttendanceAnomaly       AttendanceAnomaly[]
   AttendanceCorrection    AttendanceCorrection[]
   AttendancePresenceEvent AttendancePresenceEvent[]
@@ -987,4 +991,10 @@ enum AssetRequestStatus {
 enum WorkLocationType {
   OFFICE
   FIELD
+}
+
+enum AttendanceLocationMode {
+  OFFICE
+  FIELD
+  WFH
 }

@@ -45,7 +45,17 @@ const app = express()
 app.disable("x-powered-by")
 app.set("trust proxy", 1)
 
-app.use(helmet())
+app.use(
+  helmet({
+    // Explicit HSTS: force HTTPS on every return visit for a full year,
+    // including subdomains, and allow browser preload-list submission.
+    hsts: {
+      maxAge: 31536000,
+      includeSubDomains: true,
+      preload: true,
+    },
+  })
+)
 const configuredOrigins = String(process.env.CLIENT_ORIGIN || "")
   .split(",")
   .map((origin) => origin.trim())

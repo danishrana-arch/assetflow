@@ -10,6 +10,7 @@ const {
 } = require("../controllers/employee.controller")
 const { resetPassword } = require("../controllers/auth.controller")
 const { requireAuth, requireManagement, requireManagementOrSelf, requireRole } = require("../middleware/auth.middleware")
+const { noStore } = require("../middleware/cache.middleware")
 
 const router = express.Router()
 
@@ -29,7 +30,7 @@ router.get("/import/template", requireManagement, importTemplate)
 router.post("/import", requireManagement, upload.single("file"), importEmployees)
 
 router.get("/", requireManagement, listEmployees)
-router.get("/:id", getEmployee)
+router.get("/:id", noStore, getEmployee)
 // Management can edit anyone; a non-management user can edit their own
 // phone/email only (enforced field-by-field in the controller).
 router.patch("/:id", requireManagementOrSelf, updateEmployee)

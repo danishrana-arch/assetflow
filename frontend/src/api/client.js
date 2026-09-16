@@ -20,7 +20,12 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (res) => res,
   (err) => {
-    if (err.response?.status === 401) {
+    // Only the session-check call (GET /auth/me, also used by
+    // AuthContext's refreshUser()) should ever wipe the session on a 401.
+    // A 401 from any other endpoint (e.g. a permission check on one
+    // resource) must not log the user out from under them — just reject.
+    const isSessionCheck = err.config?.method === "get" && /\/auth\/me$/.test(err.config?.url || "")
+    if (err.response?.status === 401 && isSessionCheck) {
       localStorage.removeItem("assetflow_token")
       localStorage.removeItem("assetflow_user_cache")
       localStorage.removeItem("assetflow_active_organization")

@@ -295,7 +295,7 @@ export default function Employees() {
             {canManageEmployees ? (
               <SelectField label="Role" value={form.role} onChange={(e) => updateField("role", e.target.value)}>
                 {Object.entries(ROLE_LABELS)
-                  .filter(([value]) => value !== "CEO" || (data?.ceoCount || 0) < 2)
+                  .filter(([value]) => value !== "CEO" || (data?.ceoCount || 0) < 3)
                   .map(([value, label]) => (
                     <option key={value} value={value}>{label}</option>
                   ))}

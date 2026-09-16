@@ -7,6 +7,7 @@ import PageHeader from "../components/ui/PageHeader"
 import Avatar from "../components/ui/Avatar"
 import StatusPill from "../components/ui/StatusPill"
 import EmptyState from "../components/ui/EmptyState"
+import WorkingTimeProgress from "../components/ui/WorkingTimeProgress"
 
 const STATUS_CONFIG = {
   PRESENT: { label: "Present", tone: "green", icon: CheckCircle2 },
@@ -14,51 +15,11 @@ const STATUS_CONFIG = {
   LEAVE: { label: "Leave", tone: "yellow", icon: Palmtree },
 }
 
-
-function formatMinutes(minutes) {
-  if (minutes === null || minutes === undefined) return "—"
-  const value = Math.max(0, Number(minutes) || 0)
-  const hours = Math.floor(value / 60)
-  const mins = value % 60
-  return `${hours}h ${mins.toString().padStart(2, "0")}m`
-}
-
 function formatPunchTime(value) {
   if (!value) return "—"
   return new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
 }
 
-
-function AttendanceTimeline({ timeline }) {
-  if (!timeline) return null
-  const span = Math.max(1, timeline.endMinute - timeline.startMinute)
-  const label = (value) => {
-    const total = Math.round(value)
-    const h = Math.floor(total / 60) % 24
-    const m = total % 60
-    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`
-  }
-  return (
-    <div className="mt-2 min-w-[210px] w-full max-w-[340px]">
-      <div className="mb-1 flex items-center justify-between text-[9px] font-medium text-muted-2">
-        <span>{timeline.shiftStart || label(timeline.startMinute)}</span>
-        <span>{timeline.shiftEnd || label(timeline.endMinute)}</span>
-      </div>
-      <div className="relative h-2.5 w-full overflow-hidden rounded-full bg-chip-pink-bg" title="Green = inside/working · Red = outside · Gray = remaining time">
-        {(timeline.segments || []).map((segment, index) => {
-          const left = ((segment.startMinute - timeline.startMinute) / span) * 100
-          const width = ((segment.endMinute - segment.startMinute) / span) * 100
-          const cls = segment.state === "in" ? "bg-chip-green-fg" : segment.state === "leave" ? "bg-chip-yellow-fg" : segment.state === "future" ? "bg-surface-2" : "bg-chip-pink-fg"
-          return <span key={`${segment.startMinute}-${segment.endMinute}-${index}`} className={`absolute inset-y-0 ${cls}`} style={{ left: `${left}%`, width: `${width}%` }} />
-        })}
-      </div>
-      <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-[9px] text-muted-2">
-        <span><i className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-chip-green-fg" />Working</span>
-        <span><i className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-chip-pink-fg" />Outside</span>
-      </div>
-    </div>
-  )
-}
 
 function statusPill(status) {
   const cfg = STATUS_CONFIG[status] || { label: status, tone: "slate" }
@@ -77,6 +38,13 @@ function LocationFlag({ row }) {
   const hasLocation = row.latitude != null && row.longitude != null
 
   if (!hasLocation) {
+    if (row.locationMode === "WFH") {
+      return (
+        <span className="mt-1 inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-2">
+          <MapPin size={10} /> Working from home
+        </span>
+      )
+    }
     if (row.workLocationType === "FIELD") {
       return (
         <span className="mt-1 inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-2">
@@ -121,6 +89,10 @@ export default function Attendance() {
   const hasAccess = ["ADMIN", "CEO"].includes(user?.role) || !!user?.canManageAttendance
   const queryClient = useQueryClient()
   const [date] = useState(() => new Date().toISOString().slice(0, 10))
+  const [exportRange, setExportRange] = useState(() => {
+    const today = new Date().toISOString().slice(0, 10)
+    return { startDate: today, endDate: today }
+  })
   const [rows, setRows] = useState([])
   const [dirty, setDirty] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -157,11 +129,13 @@ export default function Attendance() {
   })
 
   async function exportSheet() {
-    const res = await api.get("/attendance/export", { params: { date }, responseType: "blob" })
+    const { startDate, endDate } = exportRange
+    const res = await api.get("/attendance/export", { params: { startDate, endDate }, responseType: "blob" })
     const url = window.URL.createObjectURL(new Blob([res.data]))
     const link = document.createElement("a")
     link.href = url
-    link.setAttribute("download", `Attendance_${date}.xlsx`)
+    const rangeLabel = startDate === endDate ? startDate : `${startDate}_to_${endDate}`
+    link.setAttribute("download", `Attendance_${rangeLabel}.xlsx`)
     document.body.appendChild(link); link.click(); link.remove()
     setTimeout(() => window.URL.revokeObjectURL(url), 1000)
   }
@@ -204,6 +178,25 @@ export default function Attendance() {
         }
         actions={
           <>
+            <div className="flex items-center gap-1.5">
+              <input
+                type="date"
+                value={exportRange.startDate}
+                max={exportRange.endDate}
+                onChange={(e) => setExportRange((r) => ({ ...r, startDate: e.target.value }))}
+                className="field px-2 py-2 text-xs"
+                aria-label="Export start date"
+              />
+              <span className="text-xs text-muted">to</span>
+              <input
+                type="date"
+                value={exportRange.endDate}
+                min={exportRange.startDate}
+                onChange={(e) => setExportRange((r) => ({ ...r, endDate: e.target.value }))}
+                className="field px-2 py-2 text-xs"
+                aria-label="Export end date"
+              />
+            </div>
             <button onClick={exportSheet} className="pill-secondary flex items-center gap-1.5 px-4 py-2.5 text-sm">
               <Download size={15} /> Export
             </button>
@@ -256,9 +249,16 @@ export default function Attendance() {
                   <p className="mt-0.5 text-xs text-muted-2">{new Date(row.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
                 )}
                 <p className="mt-0.5 text-xs text-muted-2">
-                  {formatPunchTime(row.checkInAt)} → {formatPunchTime(row.checkOutAt)} · {formatMinutes(row.workingMinutes)}
+                  {formatPunchTime(row.checkInAt)} → {formatPunchTime(row.checkOutAt)}
                 </p>
-                <AttendanceTimeline timeline={row.timeline} />
+                <WorkingTimeProgress
+                  workingMinutes={row.workingMinutes}
+                  checkInAt={row.checkInAt}
+                  checkOutAt={row.checkOutAt}
+                  expectedMinutes={row.expectedWorkingMinutes}
+                  date={data?.date || date}
+                  className="mt-1.5"
+                />
                 {row.markedByName && (
                   <p className="mt-0.5 text-xs text-muted-2">Marked by {row.markedByName}</p>
                 )}
@@ -296,7 +296,6 @@ export default function Attendance() {
               <th className="px-5 py-3.5">Department</th>
               <th className="px-5 py-3.5">Check in / out</th>
               <th className="px-5 py-3.5">Working time</th>
-              <th className="px-5 py-3.5 min-w-[260px]">Work timeline</th>
               <th className="px-5 py-3.5">Location</th>
               <th className="px-5 py-3.5">Status</th>
               <th className="px-5 py-3.5">Mark</th>
@@ -313,8 +312,15 @@ export default function Attendance() {
                 </td>
                 <td className="px-5 py-3.5 text-muted">{row.department || "—"}</td>
                 <td className="px-5 py-3.5 text-muted">{formatPunchTime(row.checkInAt)} → {formatPunchTime(row.checkOutAt)}</td>
-                <td className="px-5 py-3.5 font-medium text-ink">{formatMinutes(row.workingMinutes)}</td>
-                <td className="px-5 py-3.5"><AttendanceTimeline timeline={row.timeline} /></td>
+                <td className="px-5 py-3.5">
+                  <WorkingTimeProgress
+                    workingMinutes={row.workingMinutes}
+                    checkInAt={row.checkInAt}
+                    checkOutAt={row.checkOutAt}
+                    expectedMinutes={row.expectedWorkingMinutes}
+                    date={data?.date || date}
+                  />
+                </td>
                 <td className="px-5 py-3.5">
                   <LocationFlag row={row} />
                 </td>
@@ -342,7 +348,7 @@ export default function Attendance() {
               </tr>
             ))}
             {rows.length === 0 && !isLoading && (
-              <tr><td colSpan={8} className="px-5 py-10 text-center text-muted">No active employees.</td></tr>
+              <tr><td colSpan={7} className="px-5 py-10 text-center text-muted">No active employees.</td></tr>
             )}
           </tbody>
         </table>

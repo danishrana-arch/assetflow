@@ -46,7 +46,11 @@ export default function MyAttendance() {
   const [flagNotice, setFlagNotice] = useState(null)
   const [leaveForm, setLeaveForm] = useState({ startDate: "", endDate: "", reason: "", type: "CASUAL" })
   const [leaveError, setLeaveError] = useState("")
-  const [presence, setPresence] = useState({ inside: null, site: null, outsideSince: null, breakActive: false })
+  const [locationMode, setLocationMode] = useState("OFFICE")
+  // Check-in progress fill: animates toward 90% while the geofence check +
+  // API call run, snaps to 100% on response, resets on error.
+  const [checkInFill, setCheckInFill] = useState(0)
+  const [checkInFillDuration, setCheckInFillDuration] = useState(4)
 
   const { data: attendance, isLoading: loadingAttendance } = useQuery({
     queryKey: ["attendance-self"],
@@ -77,11 +81,14 @@ export default function MyAttendance() {
   })
 
   const primarySite = useMemo(() => sites.find((s) => s.isPrimary) || sites[0] || null, [sites])
-  const activeSite = useMemo(() => presence.site || primarySite, [presence.site, primarySite])
+  const activeSite = primarySite
   const effectiveCheckInAt = attendance?.today?.checkInAt || offlineToday.checkInAt
   const effectiveCheckOutAt = attendance?.today?.checkOutAt || offlineToday.checkOutAt
   const todayStatus = attendance?.today?.status || offlineToday.status
   const isOnLeaveToday = todayStatus === "LEAVE"
+  // Once today's attendance is on record, the day's mode is whatever was
+  // used at check-in — the selector below only matters before that.
+  const effectiveLocationMode = attendance?.today?.locationMode || locationMode
 
   function nearestSite(latitude, longitude) {
     return nearestAssignedSite(sites, latitude, longitude)
@@ -139,39 +146,6 @@ export default function MyAttendance() {
     }
   }, [])
 
-  useEffect(() => {
-    if (!effectiveCheckInAt || effectiveCheckOutAt || isOnLeaveToday) return undefined
-    let cancelled = false
-    async function samplePresence() {
-      try {
-        const position = await getPosition()
-        if (cancelled) return
-        const nearest = nearestSite(position.coords.latitude, position.coords.longitude)
-        const now = new Date()
-        const timezone = attendance?.timezone || organization?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
-        const localDate = new Intl.DateTimeFormat("en-CA", { timeZone: timezone }).format(now)
-        const event = {
-          type: "GEOFENCE",
-          localRecordedAt: now.toISOString(), localDate, timezone,
-          latitude: position.coords.latitude, longitude: position.coords.longitude,
-          gpsAccuracy: position.coords.accuracy, siteId: nearest?.site?.id || null,
-          siteName: nearest?.site?.name || null, deviceId: getAttendanceDeviceId(),
-          networkType: navigator.connection?.effectiveType || (navigator.onLine ? "online" : "offline"),
-          clientEventId: `geo-${globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : `${Date.now()}-${Math.random()}`}`,
-        }
-        setPresence((old) => ({ ...old, inside: nearest?.inside ?? false, site: nearest?.site || null, outsideSince: nearest?.inside ? null : (old.outsideSince || now.toISOString()) }))
-        if (navigator.onLine) {
-          await api.post("/attendance-presence/event", event).catch(async () => { await queueOfflineAttendance(event) })
-        } else {
-          await queueOfflineAttendance(event)
-        }
-      } catch {}
-    }
-    samplePresence()
-    const timer = setInterval(samplePresence, 60 * 1000)
-    return () => { cancelled = true; clearInterval(timer) }
-  }, [effectiveCheckInAt, effectiveCheckOutAt, isOnLeaveToday, sites, attendance?.timezone, organization?.timezone])
-
   function getPosition() {
     return new Promise((resolve, reject) => {
       if (!navigator.geolocation) return reject(new Error("Geolocation is not supported"))
@@ -183,36 +157,61 @@ export default function MyAttendance() {
     })
   }
 
+  function startCheckInFill() {
+    setCheckInFillDuration(4)
+    setCheckInFill(0)
+    // Two rAFs so the browser commits 0% before animating to 90% — a plain
+    // synchronous 0 -> 90 wouldn't transition, it'd just render at 90%.
+    requestAnimationFrame(() => requestAnimationFrame(() => setCheckInFill(90)))
+  }
+  function finishCheckInFill() {
+    setCheckInFillDuration(0.25)
+    setCheckInFill(100)
+  }
+  function resetCheckInFill() {
+    setCheckInFillDuration(0.25)
+    setCheckInFill(0)
+  }
+
   async function handleMark(type) {
     setLocationError("")
     setFlagNotice(null)
-    setLocating(true)
-
-    let position = null
-    try {
-      position = await getPosition()
-    } catch (err) {
-      setLocating(false)
-      setLocationError(
-        err?.code === 1
-          ? "Location permission was denied. Allow location access and try again."
-          : "We could not get your location. Try again with location services enabled."
-      )
-      return
-    }
-    setLocating(false)
+    const isWfh = type === "CHECK_IN" && effectiveLocationMode === "WFH"
+    if (type === "CHECK_IN") startCheckInFill()
 
     const now = new Date()
     const timezone = attendance?.timezone || organization?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
     const localDate = new Intl.DateTimeFormat("en-CA", { timeZone: timezone }).format(now)
-    const nearest = nearestSite(position.coords.latitude, position.coords.longitude)
-    const site = nearest?.site || primarySite
-    const inside = nearest?.inside ?? false
-    if (site && site.geofenceMode === "STRICT" && !inside) {
-      setLocationError(site?.boundary?.length >= 3
-        ? `You are outside the assigned site boundary. Move inside the marked project area and try again.`
-        : `You are outside your assigned site geofence. ${Math.round(nearest?.distance || 0)}m from the site center; allowed radius is ${site.radiusMeters}m.`)
-      return
+
+    let position = null
+    let nearest = null
+    let site = null
+    if (!isWfh) {
+      setLocating(true)
+      try {
+        position = await getPosition()
+      } catch (err) {
+        setLocating(false)
+        resetCheckInFill()
+        setLocationError(
+          err?.code === 1
+            ? "Location permission was denied. Allow location access and try again."
+            : "We could not get your location. Try again with location services enabled."
+        )
+        return
+      }
+      setLocating(false)
+
+      nearest = nearestSite(position.coords.latitude, position.coords.longitude)
+      site = nearest?.site || primarySite
+      const inside = nearest?.inside ?? false
+      if (site && site.geofenceMode === "STRICT" && !inside) {
+        resetCheckInFill()
+        setLocationError(site?.boundary?.length >= 3
+          ? `You are outside the assigned site boundary. Move inside the marked project area and try again.`
+          : `You are outside your assigned site geofence. ${Math.round(nearest?.distance || 0)}m from the site center; allowed radius is ${site.radiusMeters}m.`)
+        return
+      }
     }
 
     const event = {
@@ -220,12 +219,13 @@ export default function MyAttendance() {
       localRecordedAt: now.toISOString(),
       localDate,
       timezone,
-      latitude: position.coords.latitude,
-      longitude: position.coords.longitude,
-      gpsAccuracy: position.coords.accuracy,
+      locationMode: effectiveLocationMode,
+      latitude: position?.coords.latitude ?? null,
+      longitude: position?.coords.longitude ?? null,
+      gpsAccuracy: position?.coords.accuracy ?? null,
       distanceMeters: nearest?.distance != null ? Math.round(nearest.distance) : null,
       siteId: site?.id || null,
-      siteName: site?.name || "Unassigned / no site",
+      siteName: isWfh ? "Work from home" : (site?.name || "Unassigned / no site"),
       deviceId: getAttendanceDeviceId(),
       networkType: navigator.connection?.effectiveType || (navigator.onLine ? "online" : "offline"),
       clientEventId: `att-${globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : `${Date.now()}-${Math.random()}`}`,
@@ -242,11 +242,13 @@ export default function MyAttendance() {
             longitude: event.longitude,
             gpsAccuracy: event.gpsAccuracy,
             siteId: event.siteId,
+            locationMode: event.locationMode,
             clientEventId: event.clientEventId,
           })
           if (response.data?.autoFlagged) {
             setFlagNotice("Your location was outside the configured office geofence and the server flagged the attendance for review.")
           }
+          finishCheckInFill()
         } else {
           // Checkout is intentionally queued through the offline-safe endpoint.
           // This preserves the exact recorded timestamp rather than using server receipt time.
@@ -255,8 +257,12 @@ export default function MyAttendance() {
         queryClient.invalidateQueries({ queryKey: ["attendance-self"] })
         return
       } catch {
-        // Continue to local queue.
+        // Network/API failure — reset the fill rather than leave it stuck;
+        // the event still gets queued locally below.
+        if (type === "CHECK_IN") resetCheckInFill()
       }
+    } else if (type === "CHECK_IN") {
+      resetCheckInFill()
     }
 
     const queued = await queueOfflineAttendance(event)
@@ -265,7 +271,7 @@ export default function MyAttendance() {
       ...queued,
       employeeName: user?.name || "Current employee",
       timezone,
-      siteName: site?.name || "Unassigned / no site",
+      siteName: event.siteName,
       status: type === "CHECK_IN" ? "PRESENT" : "PENDING",
     })
   }
@@ -316,13 +322,6 @@ export default function MyAttendance() {
         <OfflineAttendanceVerification record={offlineVerification} site={activeSite} />
       )}
 
-      {effectiveCheckInAt && !effectiveCheckOutAt && presence.inside !== null && (
-        <div className={`mb-4 rounded-2xl px-4 py-3 text-sm ${presence.inside ? "bg-chip-green-bg text-chip-green-fg" : "bg-chip-yellow-bg text-chip-yellow-fg"}`}>
-          <div className="flex items-center gap-2 font-semibold"><MapPin size={15} /> {presence.inside ? `Inside ${activeSite?.name || "authorized site"}` : `Outside ${activeSite?.name || "authorized site"}`}</div>
-          {!presence.inside && <p className="mt-1 text-xs">The outside-site timer is running. Returning to an authorized site cancels the timer and restores Present status.</p>}
-        </div>
-      )}
-
       <div className="grid gap-5 lg:grid-cols-2">
         <div className="card p-6">
           <SectionHeader title="Today" />
@@ -343,7 +342,7 @@ export default function MyAttendance() {
                 <p className="mb-3 text-sm text-muted">Check out: <strong>{fmtTime(effectiveCheckOutAt, attendance?.timezone)}</strong>{!attendance?.today?.checkOutAt && <span className="ml-2 text-[10px] text-chip-yellow-fg">offline</span>}</p>
               )}
 
-              {activeSite && (
+              {activeSite && effectiveLocationMode !== "WFH" && (
                 <div className="mb-4 rounded-2xl bg-surface-2 p-3">
                   <p className="text-[10px] font-semibold uppercase tracking-wide text-muted">Assigned site</p>
                   <p className="mt-1 flex items-center gap-1.5 text-sm font-semibold text-ink"><MapPin size={14} /> {activeSite.name}</p>
@@ -351,13 +350,43 @@ export default function MyAttendance() {
                 </div>
               )}
 
+              {!effectiveCheckInAt && (
+                <div className="mb-4">
+                  <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted">Today's mode</p>
+                  <div className="flex gap-1.5">
+                    {[
+                      { value: "OFFICE", label: "Office / Site" },
+                      { value: "WFH", label: "Work from home" },
+                    ].map((opt) => (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        onClick={() => setLocationMode(opt.value)}
+                        className={`rounded-full px-3 py-1.5 text-xs font-semibold transition-colors ${
+                          locationMode === opt.value ? "bg-accent text-white" : "bg-surface-2 text-muted hover:text-ink"
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                  {locationMode === "WFH" && <p className="mt-1.5 text-[11px] text-muted-2">No location will be requested for a work-from-home check-in.</p>}
+                </div>
+              )}
+
               <div className="grid gap-2 sm:grid-cols-2">
                 <button
                   onClick={() => handleMark("CHECK_IN")}
                   disabled={locating || !!effectiveCheckInAt}
-                  className="pill-accent flex items-center justify-center gap-1.5 px-4 py-3 text-sm disabled:opacity-50"
+                  className="pill-accent relative flex items-center justify-center gap-1.5 overflow-hidden px-4 py-3 text-sm disabled:opacity-50"
                 >
-                  <CheckCircle2 size={16} /> {locating ? "Getting location…" : "Check In"}
+                  <span
+                    className="absolute inset-y-0 left-0 bg-white/25"
+                    style={{ width: `${checkInFill}%`, transition: `width ${checkInFillDuration}s ${checkInFill >= 100 ? "ease-out" : "linear"}` }}
+                  />
+                  <span className="relative flex items-center gap-1.5">
+                    <CheckCircle2 size={16} /> {locating ? "Getting location…" : "Check In"}
+                  </span>
                 </button>
                 <button
                   onClick={() => handleMark("CHECK_OUT")}
@@ -370,7 +399,9 @@ export default function MyAttendance() {
 
               <p className="mt-3 flex items-start gap-1.5 text-[11px] text-muted-2">
                 <MapPin size={12} className="mt-0.5 shrink-0" />
-                GPS is captured even without internet. If the connection drops, the attendance event is stored on this device and synchronized automatically later.
+                {effectiveLocationMode === "WFH"
+                  ? "Work-from-home check-ins don't require location."
+                  : "GPS is captured even without internet. If the connection drops, the attendance event is stored on this device and synchronized automatically later."}
               </p>
 
               {locationError && <div className="mt-3 rounded-2xl bg-chip-pink-bg px-3 py-2.5 text-xs font-medium text-chip-pink-fg">{locationError}</div>}

@@ -12,15 +12,16 @@ const {
   deleteAllForMonth,
 } = require("../controllers/payroll.controller")
 const { requireAuth, requireManagement, requireRole } = require("../middleware/auth.middleware")
+const { noStore } = require("../middleware/cache.middleware")
 
 const router = express.Router()
 
 router.use(requireAuth)
 
 // Self-service — any authenticated employee sees only their own payslips.
-router.get("/me", myPayroll)
+router.get("/me", noStore, myPayroll)
 
-router.get("/", requireManagement, listPayroll)
+router.get("/", requireManagement, noStore, listPayroll)
 router.post("/generate", requireRole("ADMIN"), generatePayroll)
 // An admin/owner's final step: send a generated month to the CEO.
 router.post("/submit", requireRole("ADMIN"), submitForApproval)

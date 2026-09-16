@@ -19,6 +19,7 @@ import IconChip from "../components/ui/IconChip"
 import SectionHeader from "../components/ui/SectionHeader"
 import { FieldValue, TextField, SelectField } from "../components/ui/Field"
 import EmptyState from "../components/ui/EmptyState"
+import WorkingTimeProgress from "../components/ui/WorkingTimeProgress"
 
 const LEVEL_LABEL = { INTERN: "Intern", JUNIOR: "Junior", SENIOR: "Senior", LEAD: "Lead" }
 const REQUEST_TONE = { PENDING: "yellow", APPROVED: "blue", REJECTED: "pink", FULFILLED: "green" }
@@ -461,6 +462,15 @@ export default function EmployeeProfile() {
                 )
               })()}
             </div>
+
+            <WorkingTimeProgress
+              workingMinutes={todayRecord.workingMinutes}
+              checkInAt={todayRecord.checkInAt}
+              checkOutAt={todayRecord.checkOutAt}
+              expectedMinutes={Number(organization?.workingHoursPerDay || 8) * 60}
+              date={todayRecord.date}
+              className="mt-2 max-w-none"
+            />
           </div>
         )}
       </div>
@@ -935,7 +945,7 @@ export default function EmployeeProfile() {
                   <SelectField label="Role" value={editForm.role} onChange={(e) => setEditForm((f) => ({ ...f, role: e.target.value }))}>
                     {Object.entries(ROLE_LABELS)
                       .filter(([value]) => ["ADMIN", "CEO", "SALES_HEAD", "HR", "MANAGEMENT", "DEPARTMENT_HEAD", "IT_MANAGER", "EMPLOYEE"].includes(value))
-                      .filter(([value]) => value !== "CEO" || employee.role === "CEO" || (managerOptions || []).filter((m) => m.role === "CEO").length < 2)
+                      .filter(([value]) => value !== "CEO" || employee.role === "CEO" || (managerOptions || []).filter((m) => m.role === "CEO").length < 3)
                       .map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                   </SelectField>
                   <SelectField label="Reporting Manager" value={editForm.managerId} onChange={(e) => setEditForm((f) => ({ ...f, managerId: e.target.value }))}>

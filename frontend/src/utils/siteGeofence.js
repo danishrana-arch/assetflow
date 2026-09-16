@@ -29,3 +29,35 @@ export function nearestAssignedSite(sites, latitude, longitude) {
   }
   return best
 }
+
+// Equirectangular-projected shoelace formula — accurate enough for the
+// scale of a single site boundary (no need to pull in a full geodesic lib).
+export function polygonAreaMeters(boundary) {
+  if (!Array.isArray(boundary) || boundary.length < 3) return 0
+  const R = 6371000
+  const originLat = (Number(boundary[0].lat) * Math.PI) / 180
+  const originLng = (Number(boundary[0].lng) * Math.PI) / 180
+  const points = boundary.map((p) => {
+    const lat = (Number(p.lat) * Math.PI) / 180
+    const lng = (Number(p.lng) * Math.PI) / 180
+    return { x: R * (lng - originLng) * Math.cos(originLat), y: R * (lat - originLat) }
+  })
+  let area = 0
+  for (let i = 0; i < points.length; i += 1) {
+    const a = points[i]
+    const b = points[(i + 1) % points.length]
+    area += a.x * b.y - b.x * a.y
+  }
+  return Math.abs(area) / 2
+}
+
+export function polygonPerimeterMeters(boundary) {
+  if (!Array.isArray(boundary) || boundary.length < 2) return 0
+  let total = 0
+  for (let i = 0; i < boundary.length; i += 1) {
+    const a = boundary[i]
+    const b = boundary[(i + 1) % boundary.length]
+    total += distanceMeters(Number(a.lat), Number(a.lng), Number(b.lat), Number(b.lng))
+  }
+  return total
+}

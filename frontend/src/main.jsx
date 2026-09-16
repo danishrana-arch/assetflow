@@ -5,6 +5,7 @@ import App from "./App"
 import { AuthProvider } from "./context/AuthContext"
 import ErrorBoundary from "./components/ErrorBoundary"
 import "./styles/index.css"
+import "leaflet/dist/leaflet.css"
 import { registerServiceWorker } from "./utils/registerServiceWorker"
 
 const queryClient = new QueryClient({

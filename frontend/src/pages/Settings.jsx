@@ -8,22 +8,7 @@ import { useTheme } from "../context/ThemeContext"
 import PageHeader from "../components/ui/PageHeader"
 import SectionHeader from "../components/ui/SectionHeader"
 import { TextField } from "../components/ui/Field"
-
-// IANA timezone IDs don't include a literal "Gulf" entry — Gulf Standard
-// Time (UTC+4) and nearby Arabia Standard Time (UTC+3) zones are listed per
-// city, so they're easy to miss when scanning the dropdown. These labels
-// surface the common name without changing the underlying IANA value that
-// gets saved.
-const TIMEZONE_FRIENDLY_LABELS = {
-  "Asia/Dubai": "Gulf Standard Time — Dubai / Abu Dhabi (UTC+4)",
-  "Asia/Muscat": "Gulf Standard Time — Muscat (UTC+4)",
-  "Asia/Qatar": "Arabia Standard Time — Doha (UTC+3)",
-  "Asia/Bahrain": "Arabia Standard Time — Manama (UTC+3)",
-  "Asia/Kuwait": "Arabia Standard Time — Kuwait City (UTC+3)",
-  "Asia/Riyadh": "Arabia Standard Time — Riyadh (UTC+3)",
-  "Asia/Karachi": "Pakistan Standard Time — Karachi (UTC+5)",
-  "Asia/Kolkata": "India Standard Time — Kolkata (UTC+5:30)",
-}
+import { TIMEZONE_GROUPS, timezoneLabel } from "../utils/timezones"
 
 const PRESETS = [
   { label: "Blue", value: "#3B82F6" },
@@ -400,8 +385,12 @@ export default function Settings() {
               <div>
                 <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-muted">Organization time zone</label>
                 <select value={timezone} onChange={(e) => setTimezone(e.target.value)} className="field w-full">
-                  {(typeof Intl !== "undefined" && typeof Intl.supportedValuesOf === "function" ? Intl.supportedValuesOf("timeZone") : ["Asia/Karachi", "Asia/Dubai", "Asia/Kolkata", "Europe/London", "America/New_York", "America/Los_Angeles", "UTC"]).map((zone) => (
-                    <option key={zone} value={zone}>{TIMEZONE_FRIENDLY_LABELS[zone] || zone}</option>
+                  {TIMEZONE_GROUPS.map(([region, zones]) => (
+                    <optgroup key={region} label={region}>
+                      {zones.map((zone) => (
+                        <option key={zone} value={zone}>{timezoneLabel(zone)}</option>
+                      ))}
+                    </optgroup>
                   ))}
                 </select>
               </div>

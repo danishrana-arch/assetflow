@@ -29,8 +29,8 @@ const EMPLOYEE_DIRECTORY_ROLES = [
   "IT_MANAGER",
 ]
 
-// The CEO is capped at two per organization.
-const MAX_CEO_COUNT = 2
+// The CEO is capped at three per organization.
+const MAX_CEO_COUNT = 3
 
 function isManagement(role) {
   return MANAGEMENT_ROLES.includes(role)

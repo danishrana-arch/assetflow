@@ -63,6 +63,7 @@ async function getDailyAttendance(req, res, next) {
         source: record?.source || "MANUAL",
         markedByName: record?.markedBy?.name || null,
         workLocationType: emp.workLocationType || "OFFICE",
+        locationMode: record?.locationMode || "OFFICE",
         // Geofence info: only meaningful when the record was self-marked
         // with a location and the employee is OFFICE-type. autoFlagged
         // means the system overrode a "Present" attempt to "Absent"
@@ -157,81 +158,12 @@ async function saveDayAttendance(req, res, next) {
   }
 }
 
-async function computeFinalAttendance(orgId, employeeId, date, record) {
-  if (!record) return { status: "ABSENT", outsideMinutes: 0, lastPresence: null, reason: "No valid check-in" }
-  if (record.status === "LEAVE") return { status: "LEAVE", outsideMinutes: 0, lastPresence: null, reason: "Approved leave" }
-
-  const events = await prisma.$queryRaw`
-    SELECT e."eventType", e."recordedAt", e.inside, e."siteId", s.name AS "siteName", e."distanceMeters", e.metadata
-    FROM "AttendancePresenceEvent" e
-    LEFT JOIN "AttendanceSite" s ON s.id=e."siteId"
-    WHERE "organizationId"=${orgId} AND "employeeId"=${employeeId}
-      AND "recordedAt" >= ${date} AND "recordedAt" < (${date} + INTERVAL '1 day')
-    ORDER BY "recordedAt" ASC
-  `
-  let inside = true
-  let outsideStart = null
-  let outsideMinutes = 0
-  let lastPresence = null
-  for (const e of events) {
-    const eventTime = new Date(e.recordedAt)
-    if (e.inside) {
-      if (outsideStart) outsideMinutes += Math.max(0, (eventTime - outsideStart) / 60000)
-      outsideStart = null
-      inside = true
-    } else {
-      if (!outsideStart) outsideStart = eventTime
-      inside = false
-    }
-    lastPresence = { inside: !!e.inside, recordedAt: eventTime.toISOString(), siteId: e.siteId || null, siteName: e.siteName || null, distanceMeters: e.distanceMeters == null ? null : Number(e.distanceMeters) }
-  }
-  const end = record.checkOutAt ? new Date(record.checkOutAt) : new Date()
-  if (!inside && outsideStart) outsideMinutes += Math.max(0, (end - outsideStart) / 60000)
-
-  // Exclude only the portion of an outside interval that overlaps the configured break.
-  if (org.breakStart && org.breakEnd) {
-    const a=parseHHMM(org.breakStart), b=parseHHMM(org.breakEnd)
-    if (a != null && b != null && a !== b) {
-      let breakOverlap = 0
-      const intervals=[]
-      let currentOutside=null
-      for (const e of events) {
-        const t=new Date(e.recordedAt)
-        if (!e.inside) { if (!currentOutside) currentOutside=t }
-        else if (currentOutside) { intervals.push([currentOutside,t]); currentOutside=null }
-      }
-      if (currentOutside) intervals.push([currentOutside,end])
-      for (const [startAt,endAt] of intervals) {
-        const startMin=localMinutes(startAt,org.timezone||'UTC'), endMin=localMinutes(endAt,org.timezone||'UTC')
-        // Attendance days are bounded to one local date, so a normal break is a single interval.
-        if (b > a) {
-          const overlapStart=Math.max(startMin,a), overlapEnd=Math.min(endMin,b)
-          if (overlapEnd>overlapStart) breakOverlap += overlapEnd-overlapStart
-        } else {
-          if (startMin>=a) breakOverlap += Math.max(0,Math.min(endMin,1440)-startMin)
-          if (endMin<=b) breakOverlap += Math.max(0,endMin-Math.max(startMin,0))
-        }
-      }
-      outsideMinutes=Math.max(0,outsideMinutes-breakOverlap)
-    }
-  }
-
-  const graceCandidates = await prisma.$queryRaw`
-    SELECT COALESCE(MAX(s."outsideGraceMinutes"),60)::int AS "graceMinutes"
-    FROM "AttendanceSite" s
-    LEFT JOIN "AttendanceSiteEmployee" se ON se."siteId"=s.id AND se."employeeId"=${employeeId}
-    WHERE s."organizationId"=${orgId} AND s.active=TRUE
-      AND (se."employeeId" IS NOT NULL OR EXISTS (SELECT 1 FROM "ProjectMember" pm WHERE pm."projectId"=s."projectId" AND pm."employeeId"=${employeeId}))
-  `
-  const grace = Number(graceCandidates[0]?.graceMinutes || 60)
-  const finalStatus = !record.checkInAt ? "ABSENT" : (!lastPresence || lastPresence.inside || outsideMinutes < grace ? "PRESENT" : "ABSENT")
-  return {
-    status: finalStatus,
-    outsideMinutes: Math.round(outsideMinutes),
-    lastPresence,
-    reason: finalStatus === "ABSENT" ? `Outside authorized site for ${Math.round(outsideMinutes)} minutes without returning` : null,
-  }
-}
+// NOTE: the mid-day "outside authorized site" auto-ABSENT flip used to live
+// here, computed from continuous AttendancePresenceEvent samples. Continuous
+// location tracking has been removed (attendance is now a one-shot geofence
+// check at check-in/check-out only), so this function — and the "final
+// status" it derived — no longer applies. Status now comes straight from the
+// AttendanceRecord written at check-in/check-out time.
 
 async function exportAttendanceSheet(req, res, next) {
   try {
@@ -244,18 +176,22 @@ async function exportAttendanceSheet(req, res, next) {
 
     const tz = organization.timezone || "UTC"
     const requestedDate = req.query.date || dateKeyInTimeZone(new Date(), tz)
-    const from = req.query.from || requestedDate
-    const to = req.query.to || requestedDate
+    // startDate/endDate is the documented range param; from/to and a bare
+    // date are kept working for anything still calling the old shape.
+    const from = req.query.startDate || req.query.from || requestedDate
+    const to = req.query.endDate || req.query.to || requestedDate
     const format = String(req.query.format || "xlsx").toLowerCase()
     const fromDate = toDateOnly(from)
     const toDate = toDateOnly(to)
     const endExclusive = new Date(toDate)
     endExclusive.setUTCDate(endExclusive.getUTCDate() + 1)
 
-    const [employees, records] = await Promise.all([
+    const [employees, records, sites] = await Promise.all([
       prisma.user.findMany({ where: { organizationId, status: "ACTIVE" }, include: { department: true }, orderBy: { name: "asc" } }),
       prisma.attendanceRecord.findMany({ where: { organizationId, date: { gte: fromDate, lt: endExclusive } }, orderBy: [{ date: "asc" }, { employeeId: "asc" }] }),
+      prisma.attendanceSite.findMany({ where: { organizationId }, select: { id: true, name: true } }),
     ])
+    const siteNameById = new Map(sites.map((s) => [s.id, s.name]))
     const byKey = new Map(records.map(r => [`${r.employeeId}|${r.date.toISOString().slice(0,10)}`, r]))
     const rows=[]
     for (let d=new Date(fromDate); d<endExclusive; d.setUTCDate(d.getUTCDate()+1)) {
@@ -263,12 +199,12 @@ async function exportAttendanceSheet(req, res, next) {
       const dayKey=dateOnly.toISOString().slice(0,10)
       for (const emp of employees) {
         const record=byKey.get(`${emp.id}|${dayKey}`)
-        const final=await computeFinalAttendance(organizationId, emp.id, dateOnly, record)
         rows.push({
           employee: emp.name, department: emp.department?.name || "", date: dayKey,
-          status: final.status, reason: final.reason || "", site: final.lastPresence?.siteName || final.lastPresence?.siteId || "",
+          status: record?.status || "ABSENT", site: (record?.siteId && siteNameById.get(record.siteId)) || "",
+          locationMode: record?.locationMode || "",
           checkIn: record?.checkInAt ? record.checkInAt.toISOString() : "", checkOut: record?.checkOutAt ? record.checkOutAt.toISOString() : "",
-          workingMinutes: record?.workingMinutes ?? "", outsideMinutes: final.outsideMinutes,
+          workingMinutes: record?.workingMinutes ?? "",
           source: record?.source || "MANUAL", offline: record?.offlineRecorded ? "YES" : "NO",
           latitude: record?.latitude == null ? "" : Number(record.latitude), longitude: record?.longitude == null ? "" : Number(record.longitude),
           gpsAccuracy: record?.gpsAccuracy ?? "", distanceMeters: record?.distanceMeters ?? "",
@@ -276,23 +212,10 @@ async function exportAttendanceSheet(req, res, next) {
       }
     }
 
-    const presenceEvents = await prisma.$queryRaw`
-      SELECT e."recordedAt", e."employeeId", u.name AS "employeeName", e."eventType", e.inside,
-             e."siteId", s.name AS "siteName", p.name AS "projectName", e."latitude", e."longitude",
-             e."gpsAccuracy", e."distanceMeters", e.metadata
-      FROM "AttendancePresenceEvent" e
-      JOIN "User" u ON u.id=e."employeeId"
-      LEFT JOIN "AttendanceSite" s ON s.id=e."siteId"
-      LEFT JOIN "Project" p ON p.id=s."projectId"
-      WHERE e."organizationId"=${organizationId}
-        AND e."recordedAt" >= ${fromDate} AND e."recordedAt" < ${endExclusive}
-      ORDER BY e."recordedAt" ASC
-    `
-
     if (format === "csv") {
-      const headers=["Employee","Department","Date","Final Status","Reason","Site","Check In","Check Out","Working Minutes","Outside Site Minutes","Source","Offline","Latitude","Longitude","GPS Accuracy","Check-in Distance"]
+      const headers=["Employee","Department","Date","Status","Site","Location Mode","Check In","Check Out","Working Minutes","Source","Offline","Latitude","Longitude","GPS Accuracy","Check-in Distance"]
       const esc=v=>`"${String(v ?? "").replace(/"/g,'""')}"`
-      const csv=[headers, ...rows.map(r=>[r.employee,r.department,r.date,r.status,r.reason,r.site,r.checkIn,r.checkOut,r.workingMinutes,r.outsideMinutes,r.source,r.offline,r.latitude,r.longitude,r.gpsAccuracy,r.distanceMeters])].map(row=>row.map(esc).join(',')).join('\r\n')
+      const csv=[headers, ...rows.map(r=>[r.employee,r.department,r.date,r.status,r.site,r.locationMode,r.checkIn,r.checkOut,r.workingMinutes,r.source,r.offline,r.latitude,r.longitude,r.gpsAccuracy,r.distanceMeters])].map(row=>row.map(esc).join(',')).join('\r\n')
       res.setHeader("Content-Type","text/csv; charset=utf-8")
       res.setHeader("Content-Disposition",`attachment; filename="Attendance_${from}_${to}.csv"`)
       return res.send("\ufeff"+csv)
@@ -300,46 +223,15 @@ async function exportAttendanceSheet(req, res, next) {
 
     const workbook=new ExcelJS.Workbook()
     workbook.creator="AssetFlow"
-    const sheet=workbook.addWorksheet("Final Attendance Report")
+    const sheet=workbook.addWorksheet("Attendance Report")
     sheet.columns=[
-      {header:"Employee",key:"employee",width:24},{header:"Department",key:"department",width:18},{header:"Date",key:"date",width:13},{header:"Final Status",key:"status",width:15},{header:"Reason",key:"reason",width:42},{header:"Site",key:"site",width:24},{header:"Check In",key:"checkIn",width:24},{header:"Check Out",key:"checkOut",width:24},{header:"Working Minutes",key:"workingMinutes",width:17},{header:"Outside Site Minutes",key:"outsideMinutes",width:21},{header:"Source",key:"source",width:13},{header:"Offline",key:"offline",width:10},{header:"Latitude",key:"latitude",width:14},{header:"Longitude",key:"longitude",width:14},{header:"GPS Accuracy",key:"gpsAccuracy",width:15},{header:"Check-in Distance",key:"distanceMeters",width:18},
+      {header:"Employee",key:"employee",width:24},{header:"Department",key:"department",width:18},{header:"Date",key:"date",width:13},{header:"Status",key:"status",width:15},{header:"Site",key:"site",width:24},{header:"Location Mode",key:"locationMode",width:15},{header:"Check In",key:"checkIn",width:24},{header:"Check Out",key:"checkOut",width:24},{header:"Working Minutes",key:"workingMinutes",width:17},{header:"Source",key:"source",width:13},{header:"Offline",key:"offline",width:10},{header:"Latitude",key:"latitude",width:14},{header:"Longitude",key:"longitude",width:14},{header:"GPS Accuracy",key:"gpsAccuracy",width:15},{header:"Check-in Distance",key:"distanceMeters",width:18},
     ]
     rows.forEach(r=>sheet.addRow(r))
     sheet.getRow(1).font={bold:true}
     sheet.views=[{state:"frozen",ySplit:1}]
-    sheet.autoFilter={from:"A1",to:`P${Math.max(1,rows.length+1)}`}
+    sheet.autoFilter={from:"A1",to:`O${Math.max(1,rows.length+1)}`}
 
-    const timeline = workbook.addWorksheet("Presence Timeline")
-    timeline.columns=[
-      {header:"Time",key:"time",width:24},{header:"Employee",key:"employee",width:24},{header:"Event",key:"event",width:22},
-      {header:"Inside Site",key:"inside",width:14},{header:"Site",key:"site",width:24},{header:"Project",key:"project",width:24},
-      {header:"Latitude",key:"lat",width:14},{header:"Longitude",key:"lng",width:14},{header:"GPS Accuracy",key:"accuracy",width:15},
-      {header:"Distance",key:"distance",width:14},{header:"Source",key:"source",width:14},
-    ]
-    presenceEvents.forEach((e) => timeline.addRow({
-      time: new Date(e.recordedAt).toISOString(), employee: e.employeeName || e.employeeId, event: e.eventType,
-      inside: e.inside == null ? "" : (e.inside ? "YES" : "NO"), site: e.siteName || e.siteId || "", project: e.projectName || "",
-      lat: e.latitude == null ? "" : Number(e.latitude), lng: e.longitude == null ? "" : Number(e.longitude),
-      accuracy: e.gpsAccuracy == null ? "" : Number(e.gpsAccuracy), distance: e.distanceMeters == null ? "" : Number(e.distanceMeters),
-      source: e.metadata?.source || "LIVE",
-    }))
-    timeline.getRow(1).font={bold:true}
-    timeline.views=[{state:"frozen",ySplit:1}]
-    timeline.autoFilter={from:"A1",to:`K${Math.max(1,presenceEvents.length+1)}`}
-
-    const sitesSheet = workbook.addWorksheet("Site Summary")
-    sitesSheet.columns=[{header:"Site",key:"site",width:28},{header:"Project",key:"project",width:28},{header:"Events",key:"events",width:12},{header:"Inside Events",key:"inside",width:16},{header:"Outside Events",key:"outside",width:17}]
-    const siteMap = new Map()
-    for (const e of presenceEvents) {
-      const key=e.siteName || e.siteId || "Unassigned"
-      const row=siteMap.get(key) || {site:key,project:e.projectName || "",events:0,inside:0,outside:0}
-      row.events += 1
-      if (e.inside) row.inside += 1
-      else if (e.inside === false) row.outside += 1
-      siteMap.set(key,row)
-    }
-    for (const row of siteMap.values()) sitesSheet.addRow(row)
-    sitesSheet.getRow(1).font={bold:true}
     res.setHeader("Content-Type","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
     res.setHeader("Content-Disposition",`attachment; filename="Attendance_${from}_${to}.xlsx"`)
     await workbook.xlsx.write(res)
@@ -350,8 +242,11 @@ async function exportAttendanceSheet(req, res, next) {
 async function markSelfAttendance(req, res, next) {
   try {
     const { organizationId, userId } = req.user
-    const { status, latitude, longitude, siteId } = req.body || {}
+    const { status, latitude, longitude, siteId, locationMode } = req.body || {}
     if (!['PRESENT','ABSENT'].includes(status)) return res.status(400).json({ error: 'status must be one of: PRESENT, ABSENT' })
+    const validLocationModes = ['OFFICE', 'FIELD', 'WFH']
+    const mode = validLocationModes.includes(locationMode) ? locationMode : 'OFFICE'
+    const isWfh = mode === 'WFH'
 
     const [organization, employee] = await Promise.all([
       prisma.organization.findUnique({ where: { id: organizationId }, select: { geofenceEnabled:true, officeLatitude:true, officeLongitude:true, geofenceRadiusMeters:true, shiftStartDefault:true, lateThresholdMinutes:true, timezone:true, breakStart:true, breakEnd:true } }),
@@ -362,9 +257,10 @@ async function markSelfAttendance(req, res, next) {
     const existing=await prisma.attendanceRecord.findUnique({ where:{ employeeId_date:{employeeId:userId,date:today} } })
     if (existing?.status==='LEAVE') return res.status(400).json({ error:'Today is already recorded as leave' })
 
-    const hasCoords=Number.isFinite(Number(latitude)) && Number.isFinite(Number(longitude))
+    // WFH skips the geofence check entirely — no location is required or used.
+    const hasCoords=!isWfh && Number.isFinite(Number(latitude)) && Number.isFinite(Number(longitude))
     const isMobileDevice=/Android|iPhone|iPad|iPod|Windows Phone|Mobile/i.test(String(req.headers['user-agent']||''))
-    if (status==='PRESENT' && isMobileDevice && !hasCoords) return res.status(400).json({ error:'Location is required to mark attendance from a mobile or tablet' })
+    if (status==='PRESENT' && isMobileDevice && !hasCoords && !isWfh) return res.status(400).json({ error:'Location is required to mark attendance from a mobile or tablet' })
 
     let chosenSite=null, chosenDistance=null, assignedSites=[]
     if (hasCoords) {
@@ -404,12 +300,14 @@ async function markSelfAttendance(req, res, next) {
     const now=new Date()
     const shiftStartStr=(employee.shiftStart && employee.shiftStart.trim()) || organization.shiftStartDefault || '09:00'
     if (status==='PRESENT' && !autoFlagged && localMinutes(now,organization.timezone||'UTC') > parseHHMM(shiftStartStr)+Number(organization.lateThresholdMinutes||15)) finalStatus='LATE'
-    const locationData=hasCoords ? {latitude:Number(latitude),longitude:Number(longitude),distanceMeters:chosenDistance==null?null:Math.round(chosenDistance)} : {latitude:null,longitude:null,distanceMeters:null}
+    const locationData=hasCoords
+      ? {latitude:Number(latitude),longitude:Number(longitude),distanceMeters:chosenDistance==null?null:Math.round(chosenDistance),siteId:chosenSite?.id||null}
+      : {latitude:null,longitude:null,distanceMeters:null,siteId:null}
 
     const record=await prisma.attendanceRecord.upsert({
       where:{employeeId_date:{employeeId:userId,date:today}},
-      update:{status:finalStatus,markedById:userId,autoFlagged,checkInAt:now,...locationData},
-      create:{organizationId,employeeId:userId,date:today,status:finalStatus,markedById:userId,autoFlagged,checkInAt:now,...locationData},
+      update:{status:finalStatus,markedById:userId,autoFlagged,checkInAt:now,locationMode:mode,...locationData},
+      create:{organizationId,employeeId:userId,date:today,status:finalStatus,markedById:userId,autoFlagged,checkInAt:now,locationMode:mode,...locationData},
     })
     if (hasCoords) {
       const presenceId=`ape_${Date.now().toString(36)}_${crypto.randomBytes(5).toString('hex')}`
@@ -490,7 +388,10 @@ async function syncOfflineAttendance(req, res, next) {
         const recordedAt = new Date(event.localRecordedAt)
         if (Number.isNaN(recordedAt.getTime())) throw new Error("Invalid recorded timestamp")
         const day = toDateOnly(String(event.localDate))
-        const hasCoords = Number.isFinite(Number(event.latitude)) && Number.isFinite(Number(event.longitude))
+        const locationMode = ["OFFICE", "FIELD", "WFH"].includes(event.locationMode) ? event.locationMode : "OFFICE"
+        const isWfh = locationMode === "WFH"
+        // WFH skips the geofence check entirely, same as the online path.
+        const hasCoords = !isWfh && Number.isFinite(Number(event.latitude)) && Number.isFinite(Number(event.longitude))
 
         // Durable server-side idempotency journal. CHECK_IN and CHECK_OUT each
         // retain their own event ID instead of overwriting one AttendanceRecord ID.
@@ -613,6 +514,7 @@ async function syncOfflineAttendance(req, res, next) {
                   status: finalStatus,
                   markedById: userId,
                   checkInAt: recordedAt,
+                  locationMode,
                   latitude: hasCoords ? Number(event.latitude) : null,
                   longitude: hasCoords ? Number(event.longitude) : null,
                   distanceMeters: distance,
@@ -624,6 +526,7 @@ async function syncOfflineAttendance(req, res, next) {
                   status: finalStatus,
                   markedById: userId,
                   checkInAt: recordedAt,
+                  locationMode,
                   latitude: hasCoords ? Number(event.latitude) : null,
                   longitude: hasCoords ? Number(event.longitude) : null,
                   distanceMeters: distance,
@@ -782,5 +685,4 @@ module.exports = {
   resolveAttendanceAnomaly,
   createAttendanceCorrection,
   listAttendanceCorrections,
-  computeFinalAttendance,
 }

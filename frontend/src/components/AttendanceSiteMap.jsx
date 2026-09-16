@@ -1,177 +1,242 @@
-import { useEffect, useRef, useState } from "react"
-import { MapPinned, RotateCcw, Trash2 } from "lucide-react"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { MapContainer, TileLayer, Marker, Circle, Polygon, useMap, useMapEvents } from "react-leaflet"
+import L from "leaflet"
+import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png"
+import markerIcon from "leaflet/dist/images/marker-icon.png"
+import markerShadow from "leaflet/dist/images/marker-shadow.png"
+import { MapPinned, RotateCcw, Search, Trash2 } from "lucide-react"
+import { polygonAreaMeters, polygonPerimeterMeters } from "../utils/siteGeofence"
 
-let mapsPromise
+// Standard Leaflet + bundler workaround — Leaflet's default marker icon URLs
+// are relative paths meant for a plain <script> include, so under Vite they
+// 404. Point the default icon at the actual bundled asset URLs instead.
+delete L.Icon.Default.prototype._getIconUrl
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: markerIcon2x,
+  iconUrl: markerIcon,
+  shadowUrl: markerShadow,
+})
 
-function loadGoogleMaps() {
-  const key = import.meta.env.VITE_GOOGLE_MAPS_API_KEY
-  if (!key) return Promise.reject(new Error("VITE_GOOGLE_MAPS_API_KEY is not configured"))
-  if (window.google?.maps?.drawing) return Promise.resolve(window.google.maps)
-  if (mapsPromise) return mapsPromise
+// Lahore — just a sensible starting view before any site has coordinates.
+const DEFAULT_CENTER = { lat: 31.5204, lng: 74.3587 }
 
-  mapsPromise = new Promise((resolve, reject) => {
-    const existing = document.querySelector('script[data-assetflow-google-maps="true"]')
-    if (existing) {
-      existing.addEventListener("load", () => resolve(window.google.maps), { once: true })
-      existing.addEventListener("error", () => reject(new Error("Google Maps failed to load")), { once: true })
-      return
-    }
-    const script = document.createElement("script")
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&libraries=drawing,geometry`
-    script.async = true
-    script.defer = true
-    script.dataset.assetflowGoogleMaps = "true"
-    script.onload = () => resolve(window.google.maps)
-    script.onerror = () => reject(new Error("Google Maps failed to load. Check the API key and enabled APIs."))
-    document.head.appendChild(script)
-  })
-  return mapsPromise
-}
+// A triangle is technically a valid polygon, but for real property
+// boundaries we require at least one more point so the shape actually
+// tracks the site's corners rather than a rough approximation.
+const MIN_POLYGON_POINTS = 4
 
-function closeRing(points) {
-  return points.map((p) => ({ lat: Number(p.lat), lng: Number(p.lng) }))
-}
-
-export default function AttendanceSiteMap({ latitude, longitude, boundary, type = "POLYGON", onChange }) {
-  const mapEl = useRef(null)
-  const mapRef = useRef(null)
-  const polygonRef = useRef(null)
-  const drawingRef = useRef(null)
-  const [error, setError] = useState("")
-  const [loaded, setLoaded] = useState(false)
-  const [measure, setMeasure] = useState({ area: 0, perimeter: 0 })
-
-  const center = {
-    lat: Number(latitude) || 31.5204,
-    lng: Number(longitude) || 74.3587,
+function boundaryCenter(boundary) {
+  return {
+    lat: boundary.reduce((sum, p) => sum + Number(p.lat), 0) / boundary.length,
+    lng: boundary.reduce((sum, p) => sum + Number(p.lng), 0) / boundary.length,
   }
+}
+
+function ClickToPlace({ onPoint }) {
+  useMapEvents({ click: (e) => onPoint(e.latlng) })
+  return null
+}
+
+// Mailing-address details like a commercial registration number, PO box or
+// postal code aren't physical map locations, so the geocoder can't place
+// them — stripping them out and retrying with what's left (typically the
+// city/area) turns an address like "C.R. 1433560, P.O. Box: 800, P.C. 121,
+// Muscat Oman" into a searchable "Muscat Oman".
+function simplifyAddressQuery(q) {
+  return q
+    .replace(/\bC\.?\s*R\.?\s*[:#-]?\s*\d+/gi, "")
+    .replace(/\bP\.?\s*O\.?\s*Box\s*[:#-]?\s*\d+/gi, "")
+    .replace(/\bP\.?\s*C\.?\s*[:#-]?\s*\d+/gi, "")
+    .replace(/[,\s]+/g, " ")
+    .trim()
+}
+
+async function geocode(q) {
+  const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=5&accept-language=en&q=${encodeURIComponent(q)}`)
+  const data = await res.json()
+  return Array.isArray(data) ? data : []
+}
+
+// Free-text location search using OpenStreetMap's Nominatim geocoder (no
+// API key). Results are requested in English regardless of the searched
+// place's local language, to match the English basemap.
+function LocationSearch({ onPick }) {
+  const map = useMap()
+  const boxRef = useRef(null)
+  const debounceRef = useRef(null)
+  const [query, setQuery] = useState("")
+  const [results, setResults] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [open, setOpen] = useState(false)
+  const [fallbackUsed, setFallbackUsed] = useState(null)
 
   useEffect(() => {
-    let cancelled = false
-    loadGoogleMaps()
-      .then((maps) => {
-        if (cancelled || !mapEl.current || mapRef.current) return
-        const map = new maps.Map(mapEl.current, {
-          center,
-          zoom: 17,
-          mapTypeId: "satellite",
-          streetViewControl: false,
-          fullscreenControl: true,
-          mapTypeControl: true,
-        })
-        mapRef.current = map
-        setLoaded(true)
-      })
-      .catch((err) => setError(err.message))
-    return () => { cancelled = true }
+    if (!boxRef.current) return
+    // Same trick Leaflet's own controls use — stops map drag/zoom/click
+    // from firing when the user is interacting with this overlay instead.
+    L.DomEvent.disableClickPropagation(boxRef.current)
+    L.DomEvent.disableScrollPropagation(boxRef.current)
   }, [])
 
-  useEffect(() => {
-    if (!loaded || !mapRef.current) return
-    mapRef.current.setCenter(center)
-  }, [latitude, longitude, loaded])
-
-  useEffect(() => {
-    if (!loaded || !mapRef.current || !window.google?.maps?.drawing) return
-    const maps = window.google.maps
-    if (polygonRef.current) polygonRef.current.setMap(null)
-    polygonRef.current = null
-    if (drawingRef.current) drawingRef.current.setMap(null)
-
-    if (type === "POLYGON" && Array.isArray(boundary) && boundary.length >= 3) {
-      polygonRef.current = new maps.Polygon({
-        paths: closeRing(boundary),
-        editable: true,
-        draggable: true,
-        strokeOpacity: 0.95,
-        strokeWeight: 2,
-        fillOpacity: 0.22,
-      })
-      polygonRef.current.setMap(mapRef.current)
-      mapRef.current.fitBounds(getBounds(maps, boundary))
-      attachPolygonListeners(polygonRef.current, maps)
-      updateMeasurement(polygonRef.current)
+  async function runSearch(q) {
+    setLoading(true)
+    setFallbackUsed(null)
+    try {
+      let data = await geocode(q)
+      if (!data.length) {
+        const simplified = simplifyAddressQuery(q)
+        if (simplified && simplified.toLowerCase() !== q.trim().toLowerCase()) {
+          data = await geocode(simplified)
+          if (data.length) setFallbackUsed(simplified)
+        }
+      }
+      setResults(data)
+      setOpen(true)
+    } catch {
+      setResults([])
+    } finally {
+      setLoading(false)
     }
-
-    const manager = new maps.drawing.DrawingManager({
-      drawingMode: type === "POLYGON" ? maps.drawing.OverlayType.POLYGON : null,
-      drawingControl: false,
-      polygonOptions: {
-        editable: true,
-        draggable: true,
-        strokeOpacity: 0.95,
-        strokeWeight: 2,
-        fillOpacity: 0.22,
-      },
-    })
-    drawingRef.current = manager
-    manager.setMap(mapRef.current)
-    maps.event.addListener(manager, "polygoncomplete", (polygon) => {
-      if (polygonRef.current) polygonRef.current.setMap(null)
-      polygonRef.current = polygon
-      manager.setDrawingMode(null)
-      attachPolygonListeners(polygon, maps)
-      emitPolygon(polygon)
-    })
-
-    return () => {
-      if (drawingRef.current) drawingRef.current.setMap(null)
-      drawingRef.current = null
-    }
-  }, [loaded, type])
-
-  function getBounds(maps, points) {
-    const bounds = new maps.LatLngBounds()
-    points.forEach((p) => bounds.extend(p))
-    return bounds
   }
 
-  function emitPolygon(polygon) {
-    const path = polygon.getPath()
-    const points = []
-    for (let i = 0; i < path.getLength(); i += 1) {
-      const point = path.getAt(i)
-      points.push({ lat: point.lat(), lng: point.lng() })
+  function handleChange(e) {
+    const value = e.target.value
+    setQuery(value)
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    if (!value.trim()) {
+      setResults([])
+      setOpen(false)
+      return
     }
-    const maps = window.google.maps
-    const area = maps.geometry.spherical.computeArea(path)
-    const perimeter = maps.geometry.spherical.computeLength(path)
-    setMeasure({ area, perimeter })
-    const bounds = getBounds(maps, points)
-    const c = bounds.getCenter()
+    debounceRef.current = setTimeout(() => runSearch(value), 400)
+  }
+
+  function handleKeyDown(e) {
+    if (e.key !== "Enter") return
+    e.preventDefault()
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    if (query.trim()) runSearch(query)
+  }
+
+  function pick(result) {
+    const lat = Number(result.lat)
+    const lng = Number(result.lon)
+    map.flyTo([lat, lng], 17)
+    onPick({ lat, lng })
+    setQuery(result.display_name)
+    setResults([])
+    setOpen(false)
+  }
+
+  return (
+    <div className="leaflet-top leaflet-left" style={{ left: 8, top: 8 }}>
+      <div ref={boxRef} className="leaflet-control relative w-64 max-w-[70vw]">
+        <div className="flex items-center gap-1.5 rounded-xl border border-border bg-surface px-2.5 py-2 shadow-lg">
+          <Search size={13} className="shrink-0 text-muted" />
+          <input
+            value={query}
+            onChange={handleChange}
+            onKeyDown={handleKeyDown}
+            onFocus={() => results.length && setOpen(true)}
+            placeholder="Search for a location…"
+            className="w-full bg-transparent text-xs text-ink outline-none placeholder:text-muted"
+          />
+        </div>
+        {open && (loading || query.trim()) && (
+          <ul className="absolute mt-1 max-h-64 w-full overflow-y-auto rounded-xl border border-border bg-surface shadow-lg">
+            {loading && <li className="px-3 py-2 text-xs text-muted">Searching…</li>}
+            {!loading && fallbackUsed && (
+              <li className="border-b border-border px-3 py-1.5 text-[10px] text-muted">No exact match — showing results for "{fallbackUsed}"</li>
+            )}
+            {!loading && results.map((r) => (
+              <li key={r.place_id}>
+                <button
+                  type="button"
+                  onClick={() => pick(r)}
+                  className="block w-full truncate px-3 py-2 text-left text-xs text-ink hover:bg-surface-2"
+                  title={r.display_name}
+                >
+                  {r.display_name}
+                </button>
+              </li>
+            ))}
+            {!loading && results.length === 0 && (
+              <li className="px-3 py-2 text-xs text-muted">
+                No results. PO boxes, postal codes and registration numbers aren't map locations — try searching the city or area name instead.
+              </li>
+            )}
+          </ul>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Click-to-place site map. Two modes:
+ *  - RADIUS: click/drag a single marker; the shaded circle shows the
+ *    radiusMeters fallback geofence used at check-in/check-out time.
+ *  - POLYGON: click to add boundary vertices, drag a vertex to fine-tune it.
+ */
+export default function AttendanceSiteMap({ latitude, longitude, boundary = [], radiusMeters, type = "RADIUS", onChange }) {
+  const initialCenter = useMemo(() => {
+    if (latitude && longitude) return { lat: Number(latitude), lng: Number(longitude) }
+    if (boundary.length) return boundaryCenter(boundary)
+    return DEFAULT_CENTER
+    // Only used for the map's initial view — react-leaflet doesn't recenter
+    // on prop changes after mount, and we don't want it to fight the user
+    // while they're actively placing points.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const markerPosition = latitude && longitude ? { lat: Number(latitude), lng: Number(longitude) } : null
+
+  function emitPolygon(points) {
+    if (points.length < MIN_POLYGON_POINTS) {
+      onChange({ type: "POLYGON", boundary: points })
+      return
+    }
+    const c = boundaryCenter(points)
     onChange({
       type: "POLYGON",
       boundary: points,
-      latitude: c.lat(),
-      longitude: c.lng(),
-      areaSqMeters: Math.round(area * 100) / 100,
-      perimeterMeters: Math.round(perimeter * 100) / 100,
+      latitude: c.lat,
+      longitude: c.lng,
+      areaSqMeters: Math.round(polygonAreaMeters(points) * 100) / 100,
+      perimeterMeters: Math.round(polygonPerimeterMeters(points) * 100) / 100,
     })
   }
 
-  function attachPolygonListeners(polygon, maps) {
-    const path = polygon.getPath()
-    ;["set_at", "insert_at", "remove_at"].forEach((eventName) => {
-      maps.event.addListener(path, eventName, () => emitPolygon(polygon))
-    })
-    maps.event.addListener(polygon, "dragend", () => emitPolygon(polygon))
-    emitPolygon(polygon)
-  }
-
-  function clearBoundary() {
-    if (polygonRef.current) polygonRef.current.setMap(null)
-    polygonRef.current = null
-    setMeasure({ area: 0, perimeter: 0 })
-    onChange({ type: "RADIUS", boundary: [], areaSqMeters: 0, perimeterMeters: 0 })
-    if (drawingRef.current && window.google?.maps?.drawing) {
-      drawingRef.current.setDrawingMode(type === "POLYGON" ? window.google.maps.drawing.OverlayType.POLYGON : null)
+  function handleMapClick(latlng) {
+    if (type === "POLYGON") {
+      emitPolygon([...boundary, { lat: latlng.lat, lng: latlng.lng }])
+    } else {
+      onChange({ type: "RADIUS", latitude: latlng.lat, longitude: latlng.lng })
     }
+  }
+
+  function handleSearchPick(latlng) {
+    // POLYGON mode: searching just recenters the map (handled by the
+    // search box itself) — the user still clicks to place boundary points.
+    if (type === "RADIUS") {
+      onChange({ type: "RADIUS", latitude: latlng.lat, longitude: latlng.lng })
+    }
+  }
+
+  function moveVertex(index, latlng) {
+    emitPolygon(boundary.map((p, i) => (i === index ? { lat: latlng.lat, lng: latlng.lng } : p)))
   }
 
   function startDrawing() {
-    if (drawingRef.current && window.google?.maps?.drawing) {
-      drawingRef.current.setDrawingMode(window.google.maps.drawing.OverlayType.POLYGON)
-    }
+    onChange({ type: "POLYGON", boundary: [] })
+  }
+
+  function undoLastPoint() {
+    emitPolygon(boundary.slice(0, -1))
+  }
+
+  function clearBoundary() {
+    onChange({ type: "RADIUS", boundary: [], areaSqMeters: 0, perimeterMeters: 0 })
   }
 
   return (
@@ -180,23 +245,68 @@ export default function AttendanceSiteMap({ latitude, longitude, boundary, type 
         <button type="button" onClick={startDrawing} className="pill-secondary inline-flex items-center gap-1.5 px-3 py-2 text-xs">
           <MapPinned size={13} /> Draw site boundary
         </button>
+        {type === "POLYGON" && boundary.length > 0 && (
+          <button type="button" onClick={undoLastPoint} className="pill-secondary inline-flex items-center gap-1.5 px-3 py-2 text-xs">
+            <RotateCcw size={13} /> Undo last point
+          </button>
+        )}
         <button type="button" onClick={clearBoundary} className="pill-secondary inline-flex items-center gap-1.5 px-3 py-2 text-xs">
           <Trash2 size={13} /> Clear boundary
         </button>
-        {Array.isArray(boundary) && boundary.length >= 3 && (
-          <span className="text-[11px] text-muted">{Math.round(measure.area || 0).toLocaleString()} m² · {Math.round(measure.perimeter || 0).toLocaleString()} m perimeter</span>
+        {type === "POLYGON" && boundary.length >= MIN_POLYGON_POINTS && (
+          <span className="text-[11px] text-muted">
+            {Math.round(polygonAreaMeters(boundary)).toLocaleString()} m² · {Math.round(polygonPerimeterMeters(boundary)).toLocaleString()} m perimeter
+          </span>
         )}
       </div>
-      <div ref={mapEl} className="h-[390px] w-full overflow-hidden rounded-2xl border border-border bg-surface-2" />
-      {error ? (
-        <div className="rounded-2xl bg-chip-yellow-bg px-3 py-2.5 text-xs text-chip-yellow-fg">
-          {error}. Add <strong>VITE_GOOGLE_MAPS_API_KEY</strong> to the frontend environment to enable the map. Manual coordinates still work.
-        </div>
-      ) : !loaded ? (
-        <p className="text-[11px] text-muted">Loading Google Maps…</p>
-      ) : (
-        <p className="text-[11px] text-muted">Satellite view. Draw the actual property boundary, then drag points to fine-tune it.</p>
-      )}
+      <div className="h-[390px] w-full overflow-hidden rounded-2xl border border-border">
+        <MapContainer center={initialCenter} zoom={16} style={{ height: "100%", width: "100%" }}>
+          <TileLayer
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          />
+          <ClickToPlace onPoint={handleMapClick} />
+          <LocationSearch onPick={handleSearchPick} />
+
+          {type === "RADIUS" && markerPosition && (
+            <>
+              <Marker
+                position={markerPosition}
+                draggable
+                eventHandlers={{
+                  dragend: (e) => {
+                    const pos = e.target.getLatLng()
+                    onChange({ type: "RADIUS", latitude: pos.lat, longitude: pos.lng })
+                  },
+                }}
+              />
+              <Circle center={markerPosition} radius={Number(radiusMeters) || 250} pathOptions={{ color: "#3B82F6", fillOpacity: 0.15 }} />
+            </>
+          )}
+
+          {type === "POLYGON" && boundary.length > 0 && (
+            <>
+              {boundary.length >= MIN_POLYGON_POINTS && (
+                <Polygon positions={boundary.map((p) => [Number(p.lat), Number(p.lng)])} pathOptions={{ color: "#3B82F6", fillOpacity: 0.2 }} />
+              )}
+              {boundary.map((p, i) => (
+                <Marker
+                  key={i}
+                  position={[Number(p.lat), Number(p.lng)]}
+                  draggable
+                  eventHandlers={{ dragend: (e) => moveVertex(i, e.target.getLatLng()) }}
+                />
+              ))}
+            </>
+          )}
+        </MapContainer>
+      </div>
+      <p className="text-[11px] text-muted">
+        Use the search box on the map to jump to an address, then{" "}
+        {type === "POLYGON"
+          ? "click the map to add boundary points, drag a point to fine-tune it."
+          : "click the map to place the site marker, or drag it to fine-tune the position. The shaded circle shows the fallback radius."}
+      </p>
     </div>
   )
 }
