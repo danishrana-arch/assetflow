@@ -5,6 +5,7 @@ import App from "./App"
 import { AuthProvider } from "./context/AuthContext"
 import ErrorBoundary from "./components/ErrorBoundary"
 import "./styles/index.css"
+import { registerServiceWorker } from "./utils/registerServiceWorker"
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -17,6 +18,8 @@ const queryClient = new QueryClient({
     },
   },
 })
+
+registerServiceWorker()
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>

@@ -1,3 +1,46 @@
+# AssetFlow Offline Attendance V2
+
+This package upgrades the existing offline attendance implementation to use IndexedDB instead of localStorage as the primary queue and adds a durable server-side idempotency journal.
+
+## What changed
+
+- Attendance events are stored locally in IndexedDB when the API/internet is unavailable.
+- Existing localStorage attendance queues are migrated automatically into IndexedDB.
+- Assigned attendance sites and the latest attendance snapshot are cached so the attendance screen can still open offline after a reload.
+- Check-in and check-out events keep independent unique client event IDs.
+- A server-side `AttendanceSyncEvent` journal prevents duplicate processing even when the same event is uploaded repeatedly.
+- Failed sync events remain retryable instead of being lost.
+- The app shell is cached by a service worker in production so an already-used AssetFlow frontend can reopen while offline.
+- Synchronization runs automatically when connectivity returns and periodically while the attendance page is open.
+
+## Apply
+
+Extract this package into the AssetFlow project root and overwrite the matching files.
+
+Backend:
+
+```bash
+cd "C:\Users\tahir laptop dealer✔\Downloads\assetflow-app-with-payroll\project\backend"
+npx prisma migrate deploy
+npx prisma generate
+npm run dev
+```
+
+Frontend:
+
+```bash
+cd "C:\Users\tahir laptop dealer✔\Downloads\assetflow-app-with-payroll\project\frontend"
+npm run dev
+```
+
+Do NOT run `prisma migrate reset`.
+
+## Production
+
+After deploying the frontend over HTTPS, the service worker will cache the AssetFlow app shell. The employee must have opened AssetFlow at least once while online before relying on a full page reload while offline.
+
+The live PostgreSQL/Neon database is still the authoritative database. Offline records are temporary local records and are uploaded automatically when the API becomes reachable again.
+
 # Round: wiring up Tasks and Performance
 
 ## What was wrong

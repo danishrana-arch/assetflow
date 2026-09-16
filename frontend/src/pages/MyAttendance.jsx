@@ -2,17 +2,23 @@ import { useEffect, useMemo, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { CheckCircle2, XCircle, Palmtree, Send, Ban, MapPin, Wifi, WifiOff, RefreshCw, AlertTriangle } from "lucide-react"
 import api from "../api/client"
+import { useAuth } from "../context/AuthContext"
 import PageHeader from "../components/ui/PageHeader"
 import SectionHeader from "../components/ui/SectionHeader"
 import StatusPill from "../components/ui/StatusPill"
 import { TextField, TextAreaField, SelectField } from "../components/ui/Field"
 import EmptyState from "../components/ui/EmptyState"
 import OfflineAttendanceVerification from "../components/OfflineAttendanceVerification"
+import { nearestAssignedSite } from "../utils/siteGeofence"
 import {
   getAttendanceDeviceId,
   getOfflineAttendanceQueue,
   queueOfflineAttendance,
   syncOfflineAttendanceQueue,
+  cacheAttendanceSnapshot,
+  readCachedAttendanceSnapshot,
+  cacheAssignedSites,
+  readCachedAssignedSites,
 } from "../utils/offlineAttendance"
 
 const ATTENDANCE_TONE = { PRESENT: "green", LATE: "yellow", ABSENT: "pink", LEAVE: "yellow" }
@@ -30,23 +36,34 @@ function fmtTime(dateStr, timezone) {
 
 export default function MyAttendance() {
   const queryClient = useQueryClient()
+  const { user, organization } = useAuth()
   const [online, setOnline] = useState(() => navigator.onLine)
-  const [pendingCount, setPendingCount] = useState(() => getOfflineAttendanceQueue().length)
+  const [pendingCount, setPendingCount] = useState(0)
+  const [offlineToday, setOfflineToday] = useState({ checkInAt: null, checkOutAt: null, status: null })
   const [offlineVerification, setOfflineVerification] = useState(null)
   const [locating, setLocating] = useState(false)
   const [locationError, setLocationError] = useState("")
   const [flagNotice, setFlagNotice] = useState(null)
   const [leaveForm, setLeaveForm] = useState({ startDate: "", endDate: "", reason: "", type: "CASUAL" })
   const [leaveError, setLeaveError] = useState("")
+  const [presence, setPresence] = useState({ inside: null, site: null, outsideSince: null, breakActive: false })
 
   const { data: attendance, isLoading: loadingAttendance } = useQuery({
     queryKey: ["attendance-self"],
-    queryFn: () => api.get("/attendance/self").then((r) => r.data),
+    queryFn: () => api.get("/attendance/self").then((r) => {
+      cacheAttendanceSnapshot(r.data)
+      return r.data
+    }),
+    initialData: readCachedAttendanceSnapshot,
     retry: online ? 1 : false,
   })
   const { data: sites = [] } = useQuery({
     queryKey: ["attendance-assigned-sites"],
-    queryFn: () => api.get("/attendance-sites/assigned").then((r) => r.data),
+    queryFn: () => api.get("/attendance-sites/assigned").then((r) => {
+      cacheAssignedSites(r.data)
+      return r.data
+    }),
+    initialData: readCachedAssignedSites,
     staleTime: 5 * 60 * 1000,
     retry: 1,
   })
@@ -60,17 +77,48 @@ export default function MyAttendance() {
   })
 
   const primarySite = useMemo(() => sites.find((s) => s.isPrimary) || sites[0] || null, [sites])
+  const activeSite = useMemo(() => presence.site || primarySite, [presence.site, primarySite])
+  const effectiveCheckInAt = attendance?.today?.checkInAt || offlineToday.checkInAt
+  const effectiveCheckOutAt = attendance?.today?.checkOutAt || offlineToday.checkOutAt
+  const todayStatus = attendance?.today?.status || offlineToday.status
+  const isOnLeaveToday = todayStatus === "LEAVE"
+
+  function nearestSite(latitude, longitude) {
+    return nearestAssignedSite(sites, latitude, longitude)
+  }
+
+  async function refreshOfflineQueueState() {
+    const queue = await getOfflineAttendanceQueue()
+    setPendingCount(queue.length)
+    const today = new Intl.DateTimeFormat("en-CA", {
+      timeZone: attendance?.timezone || organization?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+    }).format(new Date())
+    const todayEvents = queue
+      .filter((event) => event.localDate === today)
+      .sort((a, b) => new Date(a.localRecordedAt) - new Date(b.localRecordedAt))
+    const checkIn = [...todayEvents].reverse().find((event) => event.type === "CHECK_IN")
+    const checkOut = [...todayEvents].reverse().find((event) => event.type === "CHECK_OUT")
+    setOfflineToday({
+      checkInAt: checkIn?.localRecordedAt || null,
+      checkOutAt: checkOut?.localRecordedAt || null,
+      status: checkIn ? "PRESENT" : null,
+    })
+    return queue
+  }
 
   async function syncQueue() {
-    if (!navigator.onLine) return
+    if (!navigator.onLine) {
+      await refreshOfflineQueueState()
+      return
+    }
     try {
       const result = await syncOfflineAttendanceQueue(api)
-      setPendingCount(getOfflineAttendanceQueue().length)
+      await refreshOfflineQueueState()
       if (result.synced || result.duplicates) {
         queryClient.invalidateQueries({ queryKey: ["attendance-self"] })
       }
     } catch {
-      setPendingCount(getOfflineAttendanceQueue().length)
+      await refreshOfflineQueueState()
     }
   }
 
@@ -90,6 +138,39 @@ export default function MyAttendance() {
       clearInterval(timer)
     }
   }, [])
+
+  useEffect(() => {
+    if (!effectiveCheckInAt || effectiveCheckOutAt || isOnLeaveToday) return undefined
+    let cancelled = false
+    async function samplePresence() {
+      try {
+        const position = await getPosition()
+        if (cancelled) return
+        const nearest = nearestSite(position.coords.latitude, position.coords.longitude)
+        const now = new Date()
+        const timezone = attendance?.timezone || organization?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
+        const localDate = new Intl.DateTimeFormat("en-CA", { timeZone: timezone }).format(now)
+        const event = {
+          type: "GEOFENCE",
+          localRecordedAt: now.toISOString(), localDate, timezone,
+          latitude: position.coords.latitude, longitude: position.coords.longitude,
+          gpsAccuracy: position.coords.accuracy, siteId: nearest?.site?.id || null,
+          siteName: nearest?.site?.name || null, deviceId: getAttendanceDeviceId(),
+          networkType: navigator.connection?.effectiveType || (navigator.onLine ? "online" : "offline"),
+          clientEventId: `geo-${globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : `${Date.now()}-${Math.random()}`}`,
+        }
+        setPresence((old) => ({ ...old, inside: nearest?.inside ?? false, site: nearest?.site || null, outsideSince: nearest?.inside ? null : (old.outsideSince || now.toISOString()) }))
+        if (navigator.onLine) {
+          await api.post("/attendance-presence/event", event).catch(async () => { await queueOfflineAttendance(event) })
+        } else {
+          await queueOfflineAttendance(event)
+        }
+      } catch {}
+    }
+    samplePresence()
+    const timer = setInterval(samplePresence, 60 * 1000)
+    return () => { cancelled = true; clearInterval(timer) }
+  }, [effectiveCheckInAt, effectiveCheckOutAt, isOnLeaveToday, sites, attendance?.timezone, organization?.timezone])
 
   function getPosition() {
     return new Promise((resolve, reject) => {
@@ -122,9 +203,17 @@ export default function MyAttendance() {
     setLocating(false)
 
     const now = new Date()
-    const timezone = attendance?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
+    const timezone = attendance?.timezone || organization?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
     const localDate = new Intl.DateTimeFormat("en-CA", { timeZone: timezone }).format(now)
-    const site = primarySite
+    const nearest = nearestSite(position.coords.latitude, position.coords.longitude)
+    const site = nearest?.site || primarySite
+    const inside = nearest?.inside ?? false
+    if (site && site.geofenceMode === "STRICT" && !inside) {
+      setLocationError(site?.boundary?.length >= 3
+        ? `You are outside the assigned site boundary. Move inside the marked project area and try again.`
+        : `You are outside your assigned site geofence. ${Math.round(nearest?.distance || 0)}m from the site center; allowed radius is ${site.radiusMeters}m.`)
+      return
+    }
 
     const event = {
       type,
@@ -134,11 +223,12 @@ export default function MyAttendance() {
       latitude: position.coords.latitude,
       longitude: position.coords.longitude,
       gpsAccuracy: position.coords.accuracy,
-      distanceMeters: null,
+      distanceMeters: nearest?.distance != null ? Math.round(nearest.distance) : null,
       siteId: site?.id || null,
       siteName: site?.name || "Unassigned / no site",
       deviceId: getAttendanceDeviceId(),
       networkType: navigator.connection?.effectiveType || (navigator.onLine ? "online" : "offline"),
+      clientEventId: `att-${globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : `${Date.now()}-${Math.random()}`}`,
     }
 
     // If online, use the existing server endpoint first. If it fails because the
@@ -150,6 +240,9 @@ export default function MyAttendance() {
             status: "PRESENT",
             latitude: event.latitude,
             longitude: event.longitude,
+            gpsAccuracy: event.gpsAccuracy,
+            siteId: event.siteId,
+            clientEventId: event.clientEventId,
           })
           if (response.data?.autoFlagged) {
             setFlagNotice("Your location was outside the configured office geofence and the server flagged the attendance for review.")
@@ -166,11 +259,11 @@ export default function MyAttendance() {
       }
     }
 
-    const queued = queueOfflineAttendance(event)
-    setPendingCount(getOfflineAttendanceQueue().length)
+    const queued = await queueOfflineAttendance(event)
+    await refreshOfflineQueueState()
     setOfflineVerification({
       ...queued,
-      employeeName: "Current employee",
+      employeeName: user?.name || "Current employee",
       timezone,
       siteName: site?.name || "Unassigned / no site",
       status: type === "CHECK_IN" ? "PRESENT" : "PENDING",
@@ -202,8 +295,6 @@ export default function MyAttendance() {
     submitLeave.mutate()
   }
 
-  const todayStatus = attendance?.today?.status
-  const isOnLeaveToday = todayStatus === "LEAVE"
 
   return (
     <div>
@@ -222,7 +313,14 @@ export default function MyAttendance() {
       </div>
 
       {offlineVerification && (
-        <OfflineAttendanceVerification record={offlineVerification} site={primarySite} />
+        <OfflineAttendanceVerification record={offlineVerification} site={activeSite} />
+      )}
+
+      {effectiveCheckInAt && !effectiveCheckOutAt && presence.inside !== null && (
+        <div className={`mb-4 rounded-2xl px-4 py-3 text-sm ${presence.inside ? "bg-chip-green-bg text-chip-green-fg" : "bg-chip-yellow-bg text-chip-yellow-fg"}`}>
+          <div className="flex items-center gap-2 font-semibold"><MapPin size={15} /> {presence.inside ? `Inside ${activeSite?.name || "authorized site"}` : `Outside ${activeSite?.name || "authorized site"}`}</div>
+          {!presence.inside && <p className="mt-1 text-xs">The outside-site timer is running. Returning to an authorized site cancels the timer and restores Present status.</p>}
+        </div>
       )}
 
       <div className="grid gap-5 lg:grid-cols-2">
@@ -238,32 +336,32 @@ export default function MyAttendance() {
               <p className="mb-3 text-sm text-muted">
                 Current status: {todayStatus ? <StatusPill tone={ATTENDANCE_TONE[todayStatus] || "slate"}>{todayStatus}</StatusPill> : <span className="font-medium text-muted-2">Not marked yet</span>}
               </p>
-              {attendance?.today?.checkInAt && (
-                <p className="mb-1 text-sm text-muted">Check in: <strong>{fmtTime(attendance.today.checkInAt, attendance?.timezone)}</strong></p>
+              {effectiveCheckInAt && (
+                <p className="mb-1 text-sm text-muted">Check in: <strong>{fmtTime(effectiveCheckInAt, attendance?.timezone)}</strong>{!attendance?.today?.checkInAt && <span className="ml-2 text-[10px] text-chip-yellow-fg">offline</span>}</p>
               )}
-              {attendance?.today?.checkOutAt && (
-                <p className="mb-3 text-sm text-muted">Check out: <strong>{fmtTime(attendance.today.checkOutAt, attendance?.timezone)}</strong></p>
+              {effectiveCheckOutAt && (
+                <p className="mb-3 text-sm text-muted">Check out: <strong>{fmtTime(effectiveCheckOutAt, attendance?.timezone)}</strong>{!attendance?.today?.checkOutAt && <span className="ml-2 text-[10px] text-chip-yellow-fg">offline</span>}</p>
               )}
 
-              {primarySite && (
+              {activeSite && (
                 <div className="mb-4 rounded-2xl bg-surface-2 p-3">
                   <p className="text-[10px] font-semibold uppercase tracking-wide text-muted">Assigned site</p>
-                  <p className="mt-1 flex items-center gap-1.5 text-sm font-semibold text-ink"><MapPin size={14} /> {primarySite.name}</p>
-                  <p className="mt-1 text-xs text-muted">{primarySite.radiusMeters}m geofence · {primarySite.geofenceMode}</p>
+                  <p className="mt-1 flex items-center gap-1.5 text-sm font-semibold text-ink"><MapPin size={14} /> {activeSite.name}</p>
+                  <p className="mt-1 text-xs text-muted">{activeSite.boundary?.length >= 3 ? "Custom project boundary" : `${activeSite.radiusMeters}m radius`} · {activeSite.geofenceMode}{activeSite.projectName ? ` · ${activeSite.projectName}` : ""} · {activeSite.outsideGraceMinutes || 60} min outside grace</p>
                 </div>
               )}
 
               <div className="grid gap-2 sm:grid-cols-2">
                 <button
                   onClick={() => handleMark("CHECK_IN")}
-                  disabled={locating || !!attendance?.today?.checkInAt}
+                  disabled={locating || !!effectiveCheckInAt}
                   className="pill-accent flex items-center justify-center gap-1.5 px-4 py-3 text-sm disabled:opacity-50"
                 >
                   <CheckCircle2 size={16} /> {locating ? "Getting location…" : "Check In"}
                 </button>
                 <button
                   onClick={() => handleMark("CHECK_OUT")}
-                  disabled={locating || !attendance?.today?.checkInAt || !!attendance?.today?.checkOutAt}
+                  disabled={locating || !effectiveCheckInAt || !!effectiveCheckOutAt}
                   className="pill-secondary flex items-center justify-center gap-1.5 px-4 py-3 text-sm disabled:opacity-50"
                 >
                   <XCircle size={16} /> Check Out

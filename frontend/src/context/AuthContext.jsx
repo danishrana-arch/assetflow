@@ -31,6 +31,27 @@ function pickActiveOrganization(user, organizations) {
   return allowed.find((org) => org.id === user?.organization?.id) || allowed[0] || user?.organization || null
 }
 
+function normalizeAuthPayload(data) {
+  if (!data) return { user: null, organization: null, organizations: [] }
+
+  const nestedUser = data.user || null
+  const rootUser = nestedUser || {
+    id: data.id,
+    name: data.name,
+    email: data.email,
+    role: data.role,
+    status: data.status,
+    canManageAttendance: data.canManageAttendance,
+    organization: data.organization,
+  }
+
+  return {
+    user: rootUser,
+    organization: data.organization || rootUser?.organization || null,
+    organizations: data.organizations || normalizeOrganizations(rootUser, []),
+  }
+}
+
 export function AuthProvider({ children }) {
   const cached = readCachedUser()
   const [user, setUser] = useState(cached?.user || null)
@@ -48,17 +69,19 @@ export function AuthProvider({ children }) {
   }, [])
 
   const applyAuthData = useCallback((data) => {
-    const nextOrganizations = normalizeOrganizations(data.user, data.organizations || [])
-    const active = pickActiveOrganization(data.user, nextOrganizations)
-    const nextOrganization = data.organization || active || data.user?.organization || null
+    const normalized = normalizeAuthPayload(data)
+    const nextUser = normalized.user
+    const nextOrganizations = normalizeOrganizations(nextUser, normalized.organizations || [])
+    const active = pickActiveOrganization(nextUser, nextOrganizations)
+    const nextOrganization = normalized.organization || active || nextUser?.organization || null
 
-    setUser(data.user)
+    setUser(nextUser)
     setOrganizations(nextOrganizations)
     setOrganization(nextOrganization)
 
     if (nextOrganization?.id) localStorage.setItem(ORG_KEY, nextOrganization.id)
     localStorage.setItem(USER_CACHE_KEY, JSON.stringify({
-      user: data.user,
+      user: nextUser,
       organization: nextOrganization,
       organizations: nextOrganizations,
     }))
@@ -108,7 +131,7 @@ export function AuthProvider({ children }) {
     // Always start a new session on the user's own organization. A previous
     // management session may have left another company's org selected.
     localStorage.removeItem(ORG_KEY)
-    applyAuthData(res.data)
+    applyAuthData(normalizeAuthPayload(res.data))
     return res.data
   }
 
@@ -127,9 +150,10 @@ export function AuthProvider({ children }) {
         api.get("/auth/me"),
       ])
 
-      const nextOrganization = orgRes.data || meRes.data.organization || allowed
-      const nextUser = meRes.data.user || user
-      const nextOrganizations = meRes.data.organizations || organizations
+      const normalized = normalizeAuthPayload(meRes.data)
+      const nextOrganization = orgRes.data || normalized.organization || allowed
+      const nextUser = normalized.user || user
+      const nextOrganizations = normalized.organizations || organizations
 
       applyAuthData({
         user: nextUser,

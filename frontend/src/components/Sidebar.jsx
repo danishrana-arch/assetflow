@@ -31,6 +31,9 @@ import {
   BadgeCheck,
   Landmark,
   UserRound,
+  Mic,
+  Speaker,
+  Megaphone,
 } from "lucide-react"
 import { useAuth } from "../context/AuthContext"
 import { useTheme } from "../context/ThemeContext"
@@ -229,15 +232,22 @@ export default function Sidebar() {
               isDark={isDark}
             />
 
+            <RailItem to="/tasks" label="Tasks" icon={ListTodo} isDark={isDark} />
+            <RailItem to="/performance" label="Performance" icon={Award} isDark={isDark} />
+
+             <RailItem
+              to="/announcements"
+              label="Announcements"
+              icon={Megaphone}
+              isDark={isDark}
+            />
+
             <RailItem
               to="/departments"
               label="Departments"
               icon={Building2}
               isDark={isDark}
             />
-
-            <RailItem to="/tasks" label="Tasks" icon={ListTodo} isDark={isDark} />
-            <RailItem to="/performance" label="Performance" icon={Award} isDark={isDark} />
 
             <RailItem
               to="/asset-requests"
@@ -253,13 +263,6 @@ export default function Sidebar() {
               isDark={isDark}
             />
 
-
-            <RailItem
-              to="/announcements"
-              label="Announcements"
-              icon={Bell}
-              isDark={isDark}
-            />
 
             <RailItem
               to="/tickets"
