@@ -6,4 +6,9 @@ export default defineConfig({
   server: {
     port: 5173,
   },
+  build: {
+    // Never ship sourcemaps in the production bundle — they let anyone
+    // de-obfuscate the minified JS back into readable source in devtools.
+    sourcemap: false,
+  },
 });

@@ -385,6 +385,71 @@ async function archiveSubOrganization(req, res, next) {
 }
 
 
+// CEO-only: promotes an existing sub-organization to be the new main company.
+// The org being promoted becomes its own root (companyId = itself,
+// parentOrganizationId = null), the old main becomes its child, and every
+// other org under the old company is repointed to the new companyId — all
+// inside one transaction so it can never half-apply.
+async function setMainCompany(req, res, next) {
+  try {
+    const { role, organizationId, userId } = req.user
+    if (role !== "CEO") {
+      return res.status(403).json({ error: "Only a CEO can change the main company" })
+    }
+
+    const targetOrganizationId = String(req.body.targetOrganizationId || "")
+    if (!targetOrganizationId) {
+      return res.status(400).json({ error: "targetOrganizationId is required" })
+    }
+
+    const current = await prisma.organization.findFirst({
+      where: { id: organizationId, archivedAt: null },
+      select: { id: true, companyId: true },
+    })
+    if (!current) return res.status(404).json({ error: "Organization not found" })
+
+    const companyId = current.companyId || current.id
+
+    const target = await prisma.organization.findFirst({
+      where: { id: targetOrganizationId, companyId, archivedAt: null },
+    })
+    if (!target) {
+      return res.status(404).json({ error: "Target must be an active organization within the same company" })
+    }
+    if (target.id === companyId) {
+      return res.status(400).json({ error: "That organization is already the main company" })
+    }
+
+    await prisma.$transaction([
+      prisma.organization.updateMany({
+        where: { companyId },
+        data: { companyId: target.id },
+      }),
+      prisma.organization.update({
+        where: { id: target.id },
+        data: { companyId: target.id, parentOrganizationId: null },
+      }),
+      prisma.organization.update({
+        where: { id: companyId },
+        data: { parentOrganizationId: target.id },
+      }),
+    ])
+
+    logAudit({
+      organizationId: target.id,
+      actorId: userId,
+      action: "organization.main_company_changed",
+      targetType: "Organization",
+      targetId: target.id,
+      note: `${target.name} promoted to main company (previously ${companyId})`,
+    })
+
+    res.json({ newMainCompanyId: target.id })
+  } catch (err) {
+    next(err)
+  }
+}
+
 async function getOrganizationComparison(req, res, next) {
   try {
     if (!['ADMIN', 'CEO'].includes(req.user.role)) {
@@ -500,4 +565,4 @@ async function getOrganizationComparison(req, res, next) {
   }
 }
 
-module.exports = { getOrganization, updateOrganization, listCompanyOrganizations, createSubOrganization, archiveSubOrganization, getOrganizationComparison }
+module.exports = { getOrganization, updateOrganization, listCompanyOrganizations, createSubOrganization, archiveSubOrganization, getOrganizationComparison, setMainCompany }

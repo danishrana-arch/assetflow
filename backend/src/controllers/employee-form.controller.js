@@ -123,6 +123,10 @@ async function getEmployeeFormSubmissions(req, res, next) {
     res.json(submissions.map((s) => ({
       ...s,
       cnic: decryptField(s.cnic),
+      fatherName: decryptField(s.fatherName),
+      personalEmail: decryptField(s.personalEmail),
+      phone: decryptField(s.phone),
+      address: decryptField(s.address),
     })))
   } catch (err) {
     next(err)
@@ -185,10 +189,10 @@ async function submitPublicEmployeeForm(req, res, next) {
         formId: form.id,
         organizationId: form.organizationId,
         name,
-        fatherName: clean(req.body.fatherName, 120),
-        personalEmail,
-        phone: clean(req.body.phone, 50),
-        address: clean(req.body.address, 500),
+        fatherName: encryptField(clean(req.body.fatherName, 120)),
+        personalEmail: encryptField(personalEmail),
+        phone: encryptField(clean(req.body.phone, 50)),
+        address: encryptField(clean(req.body.address, 500)),
         cnic: encryptField(cnic),
         dob,
         education: clean(req.body.education, 180),

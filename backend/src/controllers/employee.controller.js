@@ -6,14 +6,24 @@ const { logAudit } = require("../utils/audit")
 const { parseCsv } = require("../utils/csv")
 
 function stripSensitive(user, canSeeSensitive) {
-  const { password, cnic, bankAccountNumber, ...rest } = user
+  const { password, cnic, bankAccountNumber, phone, address, personalEmail, fatherName, ...rest } = user
   if (!canSeeSensitive) return rest
-  return { ...rest, cnic: decryptField(cnic), bankAccountNumber: decryptField(bankAccountNumber) }
+  return {
+    ...rest,
+    cnic: decryptField(cnic),
+    bankAccountNumber: decryptField(bankAccountNumber),
+    phone: decryptField(phone),
+    address: decryptField(address),
+    personalEmail: decryptField(personalEmail),
+    fatherName: decryptField(fatherName),
+  }
 }
 
 function stripForIT(user) {
   const { id, name, email, phone, role, status, photoUrl, designation, department, assignedAssets } = user
-  return { id, name, email, phone, role, status, photoUrl, designation, department, assignedAssets }
+  // IT support legitimately needs a contact number, so this is one of the
+  // few places a non-management role sees a decrypted PII field.
+  return { id, name, email, phone: decryptField(phone), role, status, photoUrl, designation, department, assignedAssets }
 }
 
 async function listEmployees(req, res, next) {
@@ -168,9 +178,18 @@ async function getEmployee(req, res, next) {
     // role. CNIC and the bank account number are stored encrypted at rest
     // and only decrypted right here, for an authorized viewer.
     const isSelfOrManagement = MANAGEMENT_ROLES.includes(role) || userId === id
-    const { password, cnic, dob, address, bankAccountNumber, ...rest } = employee
+    const { password, cnic, dob, address, bankAccountNumber, phone, personalEmail, fatherName, ...rest } = employee
     const safe = isSelfOrManagement
-      ? { ...rest, cnic: decryptField(cnic), dob, address, bankAccountNumber: decryptField(bankAccountNumber) }
+      ? {
+          ...rest,
+          cnic: decryptField(cnic),
+          dob,
+          address: decryptField(address),
+          bankAccountNumber: decryptField(bankAccountNumber),
+          phone: decryptField(phone),
+          personalEmail: decryptField(personalEmail),
+          fatherName: decryptField(fatherName),
+        }
       : rest
 
     // Certifications are visible to ADMIN/CEO and to the employee themselves.
@@ -262,6 +281,17 @@ async function updateEmployee(req, res, next) {
       }
       else if (field === "cnic") data.cnic = encryptField(req.body.cnic)
       else if (field === "bankAccountNumber") data.bankAccountNumber = encryptField(req.body.bankAccountNumber)
+      else if (field === "personalEmail") {
+        // Validate the raw value BEFORE encrypting — the regex can't run
+        // against ciphertext.
+        if (req.body.personalEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(req.body.personalEmail))) {
+          return res.status(400).json({ error: "Invalid personal email" })
+        }
+        data.personalEmail = req.body.personalEmail ? encryptField(req.body.personalEmail) : null
+      }
+      else if (["phone", "address", "fatherName"].includes(field)) {
+        data[field] = req.body[field] ? encryptField(req.body[field]) : null
+      }
       // Enum/foreign-key fields don't accept "" as a value — an empty
       // string from a "None" dropdown selection has to become null.
       else if (["seniorityLevel", "departmentId", "managerId"].includes(field)) {
@@ -273,12 +303,6 @@ async function updateEmployee(req, res, next) {
         }
         data.baseSalary = n
       } else data[field] = req.body[field]
-    }
-
-    if (data.personalEmail !== undefined && data.personalEmail) {
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(data.personalEmail))) {
-        return res.status(400).json({ error: "Invalid personal email" })
-      }
     }
 
     if (data.linkedinUrl !== undefined && data.linkedinUrl) {
@@ -498,9 +522,9 @@ async function importEmployees(req, res, next) {
             email,
             password: hashed,
             role: assignedRole,
-            phone: valueAt(row, "phone") || null,
-            personalEmail: valueAt(row, "personalEmail") || null,
-            fatherName: valueAt(row, "fatherName") || null,
+            phone: encryptField(valueAt(row, "phone") || null),
+            personalEmail: encryptField(valueAt(row, "personalEmail") || null),
+            fatherName: encryptField(valueAt(row, "fatherName") || null),
             education: valueAt(row, "education") || null,
             currentUniversity: valueAt(row, "currentUniversity") || null,
             linkedinUrl: valueAt(row, "linkedinUrl") || null,
@@ -508,7 +532,7 @@ async function importEmployees(req, res, next) {
             shiftEnd: valueAt(row, "shiftEnd") || null,
             cnic: encryptField(valueAt(row, "cnic") || null),
             dob: dobRaw ? dob : null,
-            address: valueAt(row, "address") || null,
+            address: encryptField(valueAt(row, "address") || null),
             skill: valueAt(row, "skill") || null,
             seniorityLevel: VALID_LEVELS.includes(seniorityLevel) ? seniorityLevel : null,
             departmentId: deptByName.get(departmentName.toLowerCase()) || null,
