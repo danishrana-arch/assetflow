@@ -4,6 +4,14 @@ import { useAuth } from "./context/AuthContext"
 import { ThemeProvider, useTheme } from "./context/ThemeContext"
 import { isManagement, canManageInventory, canViewEmployeeDirectory, canAccessPayroll } from "./utils/roles"
 import DashboardLayout from "./layouts/DashboardLayout"
+// Not lazy-loaded like the other pages below: this is the offline-first
+// check-in/check-out page, so its code must already be in the main bundle
+// a device downloaded on its last online visit. A lazy chunk is only ever
+// cached after being fetched once — a field employee opening this page for
+// the first time while offline would otherwise hit a network request that
+// can't succeed, crashing with "Failed to fetch dynamically imported
+// module" instead of loading the page that's supposed to work offline.
+import MyAttendance from "./pages/MyAttendance"
 const Login = lazy(() => import("./pages/Login"))
 const Register = lazy(() => import("./pages/Register"))
 const Welcome = lazy(() => import("./pages/Welcome"))
@@ -23,7 +31,6 @@ const OrganizationComparison = lazy(() => import("./pages/OrganizationComparison
 const Employee360 = lazy(() => import("./pages/Employee360"))
 const Attendance = lazy(() => import("./pages/Attendance"))
 const AttendanceSites = lazy(() => import("./pages/AttendanceSites"))
-const MyAttendance = lazy(() => import("./pages/MyAttendance"))
 const LeaveRequests = lazy(() => import("./pages/LeaveRequests"))
 const LeaveCalendar = lazy(() => import("./pages/LeaveCalendar"))
 const Holidays = lazy(() => import("./pages/Holidays"))

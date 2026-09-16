@@ -26,19 +26,30 @@ export default class ErrorBoundary extends Component {
   render() {
     if (!this.state.error) return this.props.children
 
+    const message = String(this.state.error?.message || this.state.error)
+    // A lazy-loaded page's JS is only cached on this device after it has
+    // been opened at least once — this is the error the browser throws
+    // when that fetch can't happen (no connection) or the file it cached
+    // no longer exists (a new version was deployed since).
+    const isChunkLoadFailure = /dynamically imported module|loading chunk|importing a module script failed/i.test(message)
+    const offline = typeof navigator !== "undefined" && navigator.onLine === false
+    const heading = isChunkLoadFailure ? (offline ? "You're offline" : "A new version is available") : "Something went wrong"
+    const description = isChunkLoadFailure
+      ? offline
+        ? "This page hasn't been opened on this device before, so it can't be downloaded without an internet connection. Reconnect and try again — once a page has loaded successfully at least once, it keeps working offline after that."
+        : "The app was updated since this tab was opened, and the old version of this page is no longer available. Reloading will fetch the current version."
+      : "This page hit an error and couldn't finish loading. Reloading usually fixes it — if it keeps happening, share the message below with support."
+
     return (
       <div className="flex min-h-screen items-center justify-center bg-canvas p-6">
         <div className="card w-full max-w-md p-6 text-center">
           <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-chip-pink-bg text-chip-pink-fg">
             <AlertTriangle size={22} />
           </div>
-          <h1 className="text-lg font-bold text-ink">Something went wrong</h1>
-          <p className="mt-1.5 text-sm text-muted">
-            This page hit an error and couldn't finish loading. Reloading usually fixes it — if it keeps happening,
-            share the message below with support.
-          </p>
+          <h1 className="text-lg font-bold text-ink">{heading}</h1>
+          <p className="mt-1.5 text-sm text-muted">{description}</p>
           <pre className="mt-4 max-h-32 overflow-auto rounded-2xl bg-surface-2 p-3 text-left text-[11px] text-muted">
-            {String(this.state.error?.message || this.state.error)}
+            {message}
           </pre>
           <button
             onClick={() => {

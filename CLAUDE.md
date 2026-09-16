@@ -231,6 +231,69 @@ New shared component `frontend/src/components/ui/WorkingTimeProgress.jsx`:
   both `Attendance.jsx` (`data.date`) and `EmployeeProfile.jsx`
   (`todayRecord.date`).
 
+## Post-module addition: deployment env flags
+
+- `frontend/.env.example`: documented `VITE_API_URL` (already used in
+  `src/api/client.js`, was previously undocumented — a production deploy
+  that forgets to set it silently falls back to `http://localhost:4000/api`
+  and every API call fails) and added `VITE_APP_ENV` (development/
+  production — a general-purpose flag, not wired to any behavior yet).
+- `backend/.env.example`: clarified the existing `NODE_ENV` flag's comment
+  — it's already used by `error.middleware.js`, `attendance-site.controller.js`
+  (hide error detail in prod) and `lib/prisma.js` (quiet query logging).
+  No new variable added here, since one already existed.
+- Frontend deploys to Vercel; backend deploys elsewhere (Railway/Render/
+  Fly/VPS) — see chat for the full Vercel env-var setup walkthrough.
+
+## Post-module fix: offline chunk-load crash on MyAttendance
+
+Reported symptom: opening the app while offline (or losing connectivity
+mid-session, then navigating client-side) sometimes crashed with the
+ErrorBoundary's generic "Something went wrong" screen, showing "Failed to
+fetch dynamically imported module" in the error detail.
+
+Root cause: every page in `App.jsx`, including `MyAttendance` (the
+offline-first check-in/check-out page), was loaded via `lazy(() =>
+import(...))`. A lazy chunk is a separate network request the browser only
+issues — and the service worker only caches — the first time that specific
+route is opened on that device. If a field employee opens the app with a
+signal, then loses it before ever opening "My Attendance" in that
+session/device, the chunk fetch has nothing to fall back to and fails. On
+top of that, `service-worker.js`'s fetch handler made it worse: on a cache
+miss it fell back to the cached `index.html` for *any* same-origin request,
+including JS/CSS assets — so a missing chunk request got back an HTML
+document instead of a network error, and the browser's attempt to parse
+HTML as a JS module is what actually produced the "Failed to fetch
+dynamically imported module" message.
+
+Fixes:
+- `App.jsx`: `MyAttendance` is now a regular top-level `import`, not
+  `lazy()` — its code (and its offline-queue utilities) ships inside the
+  main bundle, so it's available the moment the app shell loads, with no
+  separate fetch ever required. Confirmed via build output: no more
+  `MyAttendance-*.js` chunk; main `index-*.js` grew to absorb it.
+- `public/service-worker.js`: the fetch handler's cache-miss fallback to
+  `index.html` now only applies to actual page navigations
+  (`request.mode === "navigate"`); a missing JS/CSS asset now fails as a
+  normal network error instead of getting a corrupted HTML-as-JS response.
+  Bumped `CACHE_NAME` to `v2` so the new logic actually takes over (the
+  `activate` handler already purges any cache key that isn't current).
+- `ErrorBoundary.jsx`: detects a chunk-load-failure message and shows a
+  tailored explanation — "You're offline" (page never opened on this
+  device before, needs one successful online load) vs "A new version is
+  available" (stale tab after a redeploy) — instead of the generic
+  "Something went wrong" copy. The raw error is still shown below for
+  support purposes.
+
+**Deliberately out of scope for now** (per user request — "we can see it
+later"): the same lazy-chunk-on-first-visit gap still exists for every
+*other* route (Dashboard, Employees, Settings, etc.) — only `MyAttendance`
+was pulled out of lazy-loading, since it's the one page explicitly meant to
+work offline. A full fix for all routes would mean precaching the actual
+built JS/CSS asset list in the service worker (e.g. via a proper
+Workbox/`vite-plugin-pwa` precache manifest), which is a bigger, separate
+piece of work.
+
 ## Known gaps flagged by whoever prepared these patches
 
 1. **`.env` git-history check** (brief §1): run

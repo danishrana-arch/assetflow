@@ -1,4 +1,4 @@
-const CACHE_NAME = "assetflow-app-shell-v1"
+const CACHE_NAME = "assetflow-app-shell-v2"
 const APP_SHELL = ["/", "/index.html"]
 
 self.addEventListener("install", (event) => {
@@ -22,6 +22,8 @@ self.addEventListener("fetch", (event) => {
   // when connectivity is available.
   if (url.pathname.startsWith("/api/")) return
 
+  const isNavigation = request.mode === "navigate"
+
   event.respondWith(
     fetch(request)
       .then((response) => {
@@ -31,6 +33,18 @@ self.addEventListener("fetch", (event) => {
         }
         return response
       })
-      .catch(() => caches.match(request).then((cached) => cached || caches.match("/index.html")))
+      .catch(() =>
+        caches.match(request).then((cached) => {
+          if (cached) return cached
+          // Substituting the cached HTML shell only makes sense for a page
+          // navigation. Doing it for a JS/CSS asset request that was never
+          // cached (e.g. a lazy route chunk nobody has opened on this
+          // device yet) hands back an HTML document where a script was
+          // expected — the browser then fails trying to parse it as a
+          // module, which is worse than just letting the fetch fail.
+          if (isNavigation) return caches.match("/index.html")
+          return Response.error()
+        })
+      )
   )
 })
