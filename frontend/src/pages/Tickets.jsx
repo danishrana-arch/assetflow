@@ -122,7 +122,50 @@ export default function Tickets() {
         ))}
       </div>
 
-      <div className="card overflow-hidden">
+      <div className="space-y-3 md:hidden">
+        {isLoading && <p className="text-sm text-muted">Loading…</p>}
+        {(tickets || []).map((t) => (
+          <div key={t.id} className="card p-4">
+            <div className="flex items-start gap-3">
+              <IconChip icon={TicketIcon} tone={PRIORITY_TONE[t.priority] || "slate"} size="sm" />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-semibold text-ink">{t.subject}</p>
+                <p className="truncate text-xs text-muted">{t.description}</p>
+                <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
+                  <span>{t.category || "—"}</span>
+                  <span>{t.raisedBy?.name || "—"}</span>
+                </div>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <StatusPill tone={PRIORITY_TONE[t.priority] || "slate"}>{humanize(t.priority)}</StatusPill>
+                  {isAdmin ? (
+                    <select
+                      value={t.status}
+                      onChange={(e) => updateStatus.mutate({ id: t.id, status: e.target.value })}
+                      className="field !py-1.5 !px-3 !text-xs"
+                    >
+                      {STATUS_OPTIONS.map((s) => (
+                        <option key={s} value={s}>{humanize(s)}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <StatusPill tone={STATUS_TONE[t.status] || "slate"}>{humanize(t.status)}</StatusPill>
+                  )}
+                </div>
+              </div>
+              {isAdmin && (
+                <button onClick={() => handleRemove(t)} className="shrink-0 text-xs font-semibold text-danger hover:underline">
+                  Remove
+                </button>
+              )}
+            </div>
+          </div>
+        ))}
+        {tickets?.length === 0 && !isLoading && (
+          <EmptyState icon={TicketIcon} title="No tickets" description="Raise your first support request above." />
+        )}
+      </div>
+
+      <div className="card hidden overflow-hidden md:block">
         <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="text-left text-[11px] font-semibold uppercase tracking-wide text-muted">

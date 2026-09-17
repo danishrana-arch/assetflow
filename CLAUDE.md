@@ -13,7 +13,7 @@ place. Update the Status column as each module lands.
 | 03 | CEO limit 2 → 3 | ✅ applied |
 | 04 | Timezone list — GCC + full region grouping | ✅ applied |
 | 05 | Leaflet geofence rewrite (drops Google Maps) + bundled §6/§7/§8 | ✅ applied (`npm install leaflet react-leaflet@4` done, frontend build verified) |
-| 07 | WFH schema migration (`AttendanceLocationMode`) | ⚠️ schema + migration file written; **`npx prisma migrate deploy` and `npx prisma generate` still need to be run manually** — blocked here by a Windows file lock (EPERM) from a running dev node process holding the query engine DLL. Stop your dev backend, then run both commands from `backend/`. |
+| 07 | WFH schema migration (`AttendanceLocationMode`) | ✅ applied — migration was already deployed to the live Neon DB (`prisma migrate status` reported schema up to date); `npx prisma generate` run 2026-09-17 after stopping the dev backend to clear the Windows EPERM file lock. Verified `prisma.attendancePermission.findMany` resolves on the generated client. |
 
 There is intentionally no `06`: modules 6 (attendance export date range)
 and 8 (check-in progress fill animation) have no standalone patch — they
@@ -302,11 +302,12 @@ chat request (not a prepared `NN-*.patch`).
 - **New `AttendancePermission` model** (`backend/prisma/schema.prisma`) +
   hand-written migration at
   `backend/prisma/migrations/20260917120000_attendance_permission_matrix/migration.sql`.
-  **Manual step, required**, same as module 07: run
-  `cd backend && npx prisma migrate deploy && npx prisma generate` in an
-  environment with normal network access to Prisma's binary CDN before this
-  lands in a real database — not run here for the same reasons module 07
-  wasn't (no live DB/network in this environment).
+  **Done** — the migration was already applied to the live Neon DB; only
+  `npx prisma generate` was still outstanding (blocked earlier by a Windows
+  EPERM lock from the running dev backend), run 2026-09-17 after stopping
+  the dev server. Confirmed `prisma.attendancePermission.findMany` resolves
+  on the regenerated client, fixing the `Cannot read properties of
+  undefined (reading 'findMany')` crash in `getAttendancePermissions`.
 - Role-based, full-CRUD Attendance permission matrix, editable by
   ADMIN/CEO/MANAGER from Settings → "Attendance permission matrix" (replaces
   what used to be a static, non-functional placeholder table in the same

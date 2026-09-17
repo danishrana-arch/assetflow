@@ -207,7 +207,132 @@ export default function Payroll() {
         </div>
       )}
 
-      <div className="overflow-hidden rounded-card bg-surface shadow-card">
+      <div className="space-y-3 md:hidden">
+        {(records || []).map((r) => {
+          const isEditing = editing?.id === r.id
+          const isDraft = r.status === "DRAFT"
+          const isPaid = r.status === "PAID"
+          return (
+            <div key={r.id} className="card p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-2.5">
+                  <Avatar name={r.employee?.name} size="sm" />
+                  <div className="min-w-0">
+                    <div className="truncate font-medium text-ink">{r.employee?.name}</div>
+                    <div className="truncate text-xs text-muted">{r.employee?.department?.name || "—"}</div>
+                  </div>
+                </div>
+                <StatusPill tone={STATUS_TONE[r.status]}>{r.status.replace("_", " ")}</StatusPill>
+              </div>
+
+              <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
+                <div>
+                  <p className="text-muted-2">Base</p>
+                  <p className="font-mono text-ink">{money(r.baseSalary)}</p>
+                </div>
+                <div>
+                  <p className="text-muted-2">Net pay</p>
+                  <p className="font-mono font-semibold text-ink">{money(r.netPay)}</p>
+                </div>
+                <div>
+                  <p className="text-muted-2">Bonus</p>
+                  {isEditing ? (
+                    <input
+                      type="number"
+                      min="1000"
+                      step="1000"
+                      value={editing.bonus}
+                      onChange={(e) => setEditing((s) => ({ ...s, bonus: e.target.value }))}
+                      className="w-full rounded-lg border border-border-strong bg-canvas px-2 py-1 font-mono text-xs"
+                    />
+                  ) : (
+                    <p className="font-mono text-chip-green-fg">+{money(r.bonus)}</p>
+                  )}
+                </div>
+                <div>
+                  <p className="text-muted-2">Deductions</p>
+                  {isEditing ? (
+                    <input
+                      type="number"
+                      min="1000"
+                      step="1000"
+                      value={editing.deductions}
+                      onChange={(e) => setEditing((s) => ({ ...s, deductions: e.target.value }))}
+                      className="w-full rounded-lg border border-border-strong bg-canvas px-2 py-1 font-mono text-xs"
+                    />
+                  ) : (
+                    <p className="font-mono text-chip-pink-fg">-{money(r.deductions)}</p>
+                  )}
+                </div>
+              </div>
+
+              <div className="mt-3 text-xs">
+                <p className="text-muted-2">Bank</p>
+                <p className="text-ink">{r.bankName || "—"}</p>
+                <p className="font-mono text-[11px] text-muted">{r.bankAccountNumber || "No account on file"}</p>
+              </div>
+
+              {(r.unpaidLeaveDays > 0 || r.halfDayLeaveDays > 0 || r.lateDays > 0) && (
+                <div className="mt-2 text-xs text-muted">
+                  {r.unpaidLeaveDays > 0 && <div>{r.unpaidLeaveDays} unpaid day{r.unpaidLeaveDays === 1 ? "" : "s"}</div>}
+                  {r.halfDayLeaveDays > 0 && <div>{r.halfDayLeaveDays} half-day{r.halfDayLeaveDays === 1 ? "" : "s"}</div>}
+                  {r.lateDays > 0 && <div>{r.lateDays} late</div>}
+                </div>
+              )}
+
+              <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+                {isDraft && isAdmin && isEditing && (
+                  <button
+                    onClick={() => save.mutate({ id: r.id, bonus: editing.bonus, deductions: editing.deductions })}
+                    disabled={save.isPending}
+                    className="rounded-full bg-accent px-3 py-1.5 text-xs font-semibold text-white"
+                  >
+                    Save
+                  </button>
+                )}
+                {isDraft && isAdmin && !isEditing && (
+                  <button
+                    onClick={() => setEditing({ id: r.id, bonus: r.bonus, deductions: r.deductions })}
+                    className="rounded-full border border-border-strong px-3 py-1.5 text-xs font-semibold text-ink hover:bg-surface-2"
+                  >
+                    Edit
+                  </button>
+                )}
+                {!isPaid && isCeo && (
+                  <button
+                    onClick={() => markPaid.mutate(r.id)}
+                    disabled={markPaid.isPending}
+                    title="Mark this one paid"
+                    className="flex h-8 w-8 items-center justify-center rounded-full text-chip-green-fg hover:bg-chip-green-bg"
+                  >
+                    <CheckCircle2 size={16} />
+                  </button>
+                )}
+                {!isPaid && (isAdmin || isCeo) && (
+                  <button
+                    onClick={() => remove.mutate(r.id)}
+                    disabled={remove.isPending}
+                    title="Delete record"
+                    className="flex h-8 w-8 items-center justify-center rounded-full text-chip-pink-fg hover:bg-chip-pink-bg"
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                )}
+              </div>
+            </div>
+          )
+        })}
+        {!isLoading && records?.length === 0 && (
+          <EmptyState
+            icon={Wallet}
+            title="No payroll for this month yet"
+            description="Generate it from active employees with a base salary set. Employees without a base salary are skipped add one from their profile."
+            className="my-4"
+          />
+        )}
+      </div>
+
+      <div className="hidden overflow-hidden rounded-card bg-surface shadow-card md:block">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[960px] text-left text-sm">
             <thead>

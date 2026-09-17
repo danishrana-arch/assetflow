@@ -148,17 +148,6 @@ export default function Attendance() {
     setTimeout(() => window.URL.revokeObjectURL(url), 1000)
   }
 
-  if (permissionLoading) return <p className="text-sm text-muted">Loading...</p>
-
-  if (!hasAccess) {
-    return (
-      <EmptyState
-        title="Attendance is admin-only"
-        description="Contact an org admin if you need access to manage attendance."
-      />
-    )
-  }
-
   const { data: anomalies = [] } = useQuery({
     queryKey: ["attendance-anomalies"],
     queryFn: () => api.get("/attendance/anomalies?limit=20").then((r) => r.data),
@@ -170,6 +159,17 @@ export default function Attendance() {
     mutationFn: (id) => api.patch(`/attendance/anomalies/${id}/resolve`),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["attendance-anomalies"] }),
   })
+
+  if (permissionLoading) return <p className="text-sm text-muted">Loading...</p>
+
+  if (!hasAccess) {
+    return (
+      <EmptyState
+        title="Attendance is admin-only"
+        description="Contact an org admin if you need access to manage attendance."
+      />
+    )
+  }
 
   const presentCount = rows.filter((r) => r.status === "PRESENT").length
 
