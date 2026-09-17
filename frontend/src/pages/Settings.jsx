@@ -216,7 +216,7 @@ export default function Settings() {
       <PageHeader title="Organization Settings" subtitle="Configure how your workspace looks and behaves." backTo="/" />
 
       <div className="grid gap-5 lg:grid-cols-2">
-        <div className="card p-6">
+        <div className="card min-w-0 p-6">
           <SectionHeader title="Workspace" />
           <div className="space-y-4">
             <TextField label="Organization name" value={name} onChange={(e) => setName(e.target.value)} />
@@ -274,12 +274,12 @@ export default function Settings() {
           </div>
       </div>
 
-        <div className="card p-6">
+        <div className="card min-w-0 p-6">
           <SectionHeader title="Leave Policy" />
           <p className="mb-4 text-xs text-muted">
             Yearly paid-leave allowance per employee. Unpaid leave has no cap but still needs approval.
           </p>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <TextField
               label="Sick days / year"
               type="number"
@@ -319,7 +319,7 @@ export default function Settings() {
           </div>
         </div>
 
-        <div className="card p-6 lg:col-span-2">
+        <div className="card min-w-0 p-6 lg:col-span-2">
           <SectionHeader title="Company & Organizations" />
           <p className="mb-4 text-xs text-muted">
             {isOwnerTier
@@ -397,12 +397,12 @@ export default function Settings() {
         </div>
 
         {canEditSchedule && (
-          <div className="card p-6">
+          <div className="card min-w-0 p-6">
             <SectionHeader title="Work Schedule & Time Zone" />
             <p className="mb-4 text-xs text-muted">
               These values drive automatic attendance calculations. The standard 5-day week is Monday through Friday.
             </p>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <TextField
                 label="Working hours / day"
                 type="number"
@@ -422,7 +422,7 @@ export default function Settings() {
                 onChange={(e) => setWorkingDaysPerWeek(e.target.value)}
               />
             </div>
-            <div className="grid grid-cols-2 gap-4 mt-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 mt-4">
               <TextField
                 label="Default shift start (HH:mm)"
                 type="time"
@@ -438,7 +438,7 @@ export default function Settings() {
                 onChange={(e) => setLateThresholdMinutes(e.target.value)}
               />
             </div>
-            <div className="grid grid-cols-2 gap-4 mt-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 mt-4">
               <TextField
                 label="Default shift end (HH:mm)"
                 type="time"
@@ -461,7 +461,7 @@ export default function Settings() {
             <div className="mt-4 rounded-2xl bg-surface-2 p-4">
               <p className="text-xs font-semibold uppercase tracking-wide text-muted">Office break</p>
               <p className="mt-1 text-xs text-muted">Punches during this period are ignored for check-in/check-out purposes. The break remains part of office time, so a checkout during the break cannot become the employee's timeout.</p>
-              <div className="mt-3 grid grid-cols-2 gap-4">
+              <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <TextField label="Break start" type="time" value={breakStart} onChange={(e) => setBreakStart(e.target.value)} />
                 <TextField label="Break end" type="time" value={breakEnd} onChange={(e) => setBreakEnd(e.target.value)} />
               </div>
@@ -484,7 +484,7 @@ export default function Settings() {
         )}
 
         {isOwnerTier && (
-          <div className="card p-6">
+          <div className="card min-w-0 p-6">
             <SectionHeader title="Attendance Geofence" />
             <p className="mb-4 text-xs text-muted">
               When enabled, office-based employees marking themselves Present outside this radius are
@@ -514,7 +514,7 @@ export default function Settings() {
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <TextField
                 label="Office latitude"
                 type="number"
@@ -565,7 +565,7 @@ export default function Settings() {
           </div>
         )}
 
-          <div className="card p-6">
+          <div className="card min-w-0 p-6">
             <SectionHeader title="Payroll Account" />
             <p className="mb-4 text-xs text-muted">
               CEO-only. Every salary is disbursed from this account no one else can see or change it.
@@ -607,7 +607,7 @@ export default function Settings() {
           </div>
 
         {isOwnerTier && (
-          <div className="card p-6 lg:col-span-2">
+          <div className="card min-w-0 p-6 lg:col-span-2">
             <SectionHeader title="Attendance permission matrix" />
             <p className="mb-4 text-xs text-muted">
               Choose exactly what each role can do on the Attendance page. ADMIN, CEO and MANAGER always have full
@@ -660,7 +660,7 @@ export default function Settings() {
           </div>
         )}
 
-        <div className="card p-6">
+        <div className="card min-w-0 p-6">
           <SectionHeader title="Plan" />
           <div className="flex items-center justify-between rounded-2xl bg-surface-2 p-4">
             <div>
