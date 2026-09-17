@@ -39,11 +39,15 @@ async function applyOrganizationScope(req) {
   // Selecting the user's own organization is always safe.
   if (selectedOrganizationId === current.id) return
 
-  // Only a MAIN COMPANY ADMIN or a CEO may switch to another organization.
-  // In particular, an ADMIN belonging to a sub-organization cannot use a
-  // forged X-Organization-Id header to read or mutate another organization.
+  // Only a MAIN COMPANY ADMIN, a CEO, or a MAIN COMPANY IT_MANAGER may switch
+  // to another organization. In particular, an ADMIN/IT_MANAGER belonging to
+  // a sub-organization cannot use a forged X-Organization-Id header to read
+  // or mutate another organization. IT_MANAGER's role-based nav/data access
+  // stays inventory-scoped regardless of which organization is selected —
+  // this only controls which organization's data they're allowed to select.
   const canSwitchCompanyWide =
-    role === "CEO" || (role === "ADMIN" && isMainCompany)
+    role === "CEO" ||
+    ((role === "ADMIN" || role === "IT_MANAGER") && isMainCompany)
 
   if (!canSwitchCompanyWide) {
     const error = new Error(
@@ -193,6 +197,7 @@ function requireInventoryAccess(req, res, next) {
   const allowedRoles = [
     "ADMIN",
     "CEO",
+    "MANAGER",
     "HR",
     "IT_MANAGER",
   ]
@@ -206,41 +211,10 @@ function requireInventoryAccess(req, res, next) {
   next()
 }
 
-async function requireAttendanceAccess(req, res, next) {
-  try {
-    if (["ADMIN", "CEO"].includes(req.user?.role)) {
-      return next()
-    }
-
-    if (req.user?.role === "HR") {
-      return next()
-    }
-
-    const user = await prisma.user.findUnique({
-      where: { id: req.user.userId },
-      select: {
-        canManageAttendance: true,
-      },
-    })
-
-    if (!user || !user.canManageAttendance) {
-      return res.status(403).json({
-        error:
-          "Attendance access is limited to designated admins",
-      })
-    }
-
-    next()
-  } catch (err) {
-    next(err)
-  }
-}
-
 module.exports = {
   requireAuth,
   requireRole,
   requireManagement,
   requireManagementOrSelf,
   requireInventoryAccess,
-  requireAttendanceAccess,
 }

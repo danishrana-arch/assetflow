@@ -24,6 +24,18 @@ function organizationSummary(organization) {
   }
 }
 
+// CEO and a main-company ADMIN can already see every organization in the
+// company. An IT_MANAGER gets the same company-wide list, but only when
+// their own home organization *is* the main company — a sub-organization's
+// IT_MANAGER stays locked to their own org, same as a sub-organization ADMIN
+// (see applyOrganizationScope in auth.middleware.js, which is the actual
+// enforcement point — this just decides what the org-switcher shows).
+function canSeeCompanyOrganizations(user) {
+  if (["ADMIN", "CEO"].includes(user.role)) return true
+  if (user.role === "IT_MANAGER") return user.organization.id === user.organization.companyId
+  return false
+}
+
 async function getCompanyOrganizations(companyId) {
   const organizations = await prisma.organization.findMany({
     where: { companyId, archivedAt: null },
@@ -118,7 +130,7 @@ async function login(req, res, next) {
     }
 
     const token = signToken({ userId: user.id, organizationId: user.organizationId, companyId: user.organization.companyId, role: user.role })
-    const organizations = ["ADMIN", "CEO"].includes(user.role)
+    const organizations = canSeeCompanyOrganizations(user)
       ? await getCompanyOrganizations(user.organization.companyId)
       : [organizationSummary(user.organization)]
 
@@ -250,7 +262,7 @@ async function me(req, res, next) {
     })
     if (!user) return res.status(404).json({ error: "User not found" })
 
-    const organizations = ["ADMIN", "CEO"].includes(user.role)
+    const organizations = canSeeCompanyOrganizations(user)
       ? await getCompanyOrganizations(user.organization.companyId)
       : [organizationSummary(user.organization)]
 

@@ -1,6 +1,7 @@
 const MANAGEMENT_ROLES = [
   "ADMIN",
   "CEO",
+  "MANAGER",
   "SALES_HEAD",
   "HR",
   "MANAGEMENT",
@@ -10,6 +11,7 @@ const MANAGEMENT_ROLES = [
 const ASSIGNABLE_ROLES = [
   "ADMIN",
   "CEO",
+  "MANAGER",
   "SALES_HEAD",
   "HR",
   "MANAGEMENT",
@@ -22,6 +24,7 @@ const ASSIGNABLE_ROLES = [
 const EMPLOYEE_DIRECTORY_ROLES = [
   "ADMIN",
   "CEO",
+  "MANAGER",
   "SALES_HEAD",
   "HR",
   "MANAGEMENT",

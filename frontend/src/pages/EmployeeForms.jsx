@@ -84,7 +84,7 @@ export default function EmployeeForms() {
 
   const clearRecipients = () => setRecipientEmployeeIds([])
 
-  if (!["ADMIN", "CEO"].includes(user?.role)) return null
+  if (!["ADMIN", "CEO", "MANAGER"].includes(user?.role)) return null
 
   return (
     <div>

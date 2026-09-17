@@ -70,7 +70,7 @@ async function syncAttendanceFromPunches({ organizationId, employeeId, deviceId,
 }
 
 function management(req) {
-  return req.user?.role === "ADMIN" || req.user?.role === "CEO" || !!req.user?.canManageAttendance
+  return ["ADMIN", "CEO", "MANAGER"].includes(req.user?.role) || !!req.user?.canManageAttendance
 }
 
 async function listDevices(req, res, next) {
@@ -171,76 +171,104 @@ async function heartbeat(req, res, next) {
   } catch (e) { next(e) }
 }
 
+// Shared by both ingestion paths: the token-authenticated connector endpoint
+// (POST /connector/punches) and the SN-identified ADMS push endpoint
+// (POST /iclock/cdata). A device can hand us thousands of historical punches
+// in one batch (a fresh device with no watermark yet syncs its whole log, or
+// an ADMS device that was offline a while). Doing a findFirst + mapping
+// lookup + attendance recompute per punch is one to several DB round trips
+// each, which does not survive a large backfill within any reasonable
+// request timeout — so dedupe and mapping lookups are two bulk queries
+// instead of N, and attendance recompute collapses to once per
+// (employee, calendar day) actually touched instead of once per punch.
+async function ingestPunchBatch(device, punches) {
+  const candidates = []
+  const batchFingerprints = new Set()
+  let duplicates = 0
+  for (const p of punches) {
+    if (!p.externalUserId || !p.occurredAt) continue
+    const occurredAt = new Date(p.occurredAt)
+    if (Number.isNaN(occurredAt.getTime())) continue
+
+    const fingerprint = punchFingerprint({ deviceId: device.id, externalUserId: p.externalUserId, occurredAt })
+    if (batchFingerprints.has(fingerprint)) {
+      duplicates++
+      continue
+    }
+    batchFingerprints.add(fingerprint)
+    candidates.push({ p, occurredAt, fingerprint, externalId: p.externalId ? String(p.externalId) : null })
+  }
+
+  if (!candidates.length) {
+    await prisma.biometricDevice.update({ where: { id: device.id }, data: { lastSeenAt: new Date(), lastSyncAt: new Date(), lastError: null } })
+    return { accepted: 0, duplicates, unmatched: 0 }
+  }
+
+  const externalIds = candidates.map((c) => c.externalId).filter(Boolean)
+  const existing = await prisma.biometricPunch.findMany({
+    where: {
+      deviceId: device.id,
+      OR: [
+        { fingerprint: { in: candidates.map((c) => c.fingerprint) } },
+        ...(externalIds.length ? [{ externalId: { in: externalIds } }] : []),
+      ],
+    },
+    select: { fingerprint: true, externalId: true },
+  })
+  const existingFingerprints = new Set(existing.map((e) => e.fingerprint))
+  const existingExternalIds = new Set(existing.filter((e) => e.externalId).map((e) => e.externalId))
+
+  const mappings = await prisma.biometricDeviceEmployee.findMany({ where: { deviceId: device.id }, select: { externalUserId: true, employeeId: true } })
+  const employeeByExternalId = new Map(mappings.map((m) => [m.externalUserId, m.employeeId]))
+
+  const toInsert = []
+  let unmatched = 0
+  for (const c of candidates) {
+    if (existingFingerprints.has(c.fingerprint) || (c.externalId && existingExternalIds.has(c.externalId))) {
+      duplicates++
+      continue
+    }
+    const employeeId = employeeByExternalId.get(String(c.p.externalUserId)) || null
+    if (!employeeId) unmatched++
+    toInsert.push({
+      organizationId: device.organizationId,
+      deviceId: device.id,
+      employeeId,
+      externalUserId: String(c.p.externalUserId),
+      occurredAt: c.occurredAt,
+      verification: c.p.verification || null,
+      externalId: c.externalId,
+      fingerprint: c.fingerprint,
+      rawPayload: c.p.rawPayload || c.p,
+    })
+  }
+
+  // skipDuplicates covers the rare race where a concurrent retry inserted
+  // the same fingerprint/externalId between our lookup above and this call.
+  if (toInsert.length) await prisma.biometricPunch.createMany({ data: toInsert, skipDuplicates: true })
+  const accepted = toInsert.length
+
+  const organization = await prisma.organization.findUnique({ where: { id: device.organizationId }, select: { timezone: true } })
+  const timeZone = organization?.timezone || "UTC"
+  const seenEmployeeDays = new Set()
+  for (const row of toInsert) {
+    if (!row.employeeId) continue
+    const key = `${row.employeeId}|${dateKeyInTimeZone(row.occurredAt, timeZone)}`
+    if (seenEmployeeDays.has(key)) continue
+    seenEmployeeDays.add(key)
+    await syncAttendanceFromPunches({ organizationId: device.organizationId, employeeId: row.employeeId, deviceId: device.id, occurredAt: row.occurredAt })
+  }
+
+  await prisma.biometricDevice.update({ where: { id: device.id }, data: { lastSeenAt: new Date(), lastSyncAt: new Date(), lastError: null } })
+  return { accepted, duplicates, unmatched }
+}
+
 async function ingestPunches(req, res, next) {
   try {
     const device = req.biometricDevice
     const punches = Array.isArray(req.body.punches) ? req.body.punches : [req.body]
-    let accepted = 0, duplicates = 0, unmatched = 0
-    const batchFingerprints = new Set()
-
-    for (const p of punches) {
-      if (!p.externalUserId || !p.occurredAt) continue
-      const occurredAt = new Date(p.occurredAt)
-      if (Number.isNaN(occurredAt.getTime())) continue
-
-      const fingerprint = punchFingerprint({ deviceId: device.id, externalUserId: p.externalUserId, occurredAt })
-      if (batchFingerprints.has(fingerprint)) {
-        duplicates++
-        continue
-      }
-      batchFingerprints.add(fingerprint)
-
-      const externalId = p.externalId ? String(p.externalId) : null
-      const existing = await prisma.biometricPunch.findFirst({
-        where: {
-          OR: [
-            { fingerprint },
-            ...(externalId ? [{ deviceId: device.id, externalId }] : []),
-          ],
-        },
-        select: { id: true },
-      })
-      if (existing) {
-        duplicates++
-        continue
-      }
-
-      const mapping = await prisma.biometricDeviceEmployee.findFirst({ where: { deviceId: device.id, externalUserId: String(p.externalUserId) } })
-
-      try {
-        await prisma.biometricPunch.create({
-          data: {
-            organizationId: device.organizationId,
-            deviceId: device.id,
-            employeeId: mapping?.employeeId || null,
-            externalUserId: String(p.externalUserId),
-            occurredAt,
-            verification: p.verification || null,
-            externalId,
-            fingerprint,
-            rawPayload: p.rawPayload || p,
-          },
-        })
-      } catch (error) {
-        // A concurrent connector retry may race this request. The unique
-        // fingerprint makes the second insert harmless.
-        if (error?.code === "P2002") {
-          duplicates++
-          continue
-        }
-        throw error
-      }
-
-      accepted++
-      if (!mapping) {
-        unmatched++
-        continue
-      }
-      await syncAttendanceFromPunches({ organizationId: device.organizationId, employeeId: mapping.employeeId, deviceId: device.id, occurredAt })
-    }
-
-    await prisma.biometricDevice.update({ where: { id: device.id }, data: { lastSeenAt: new Date(), lastSyncAt: new Date(), lastError: null } })
-    res.json({ accepted, duplicates, unmatched })
+    const result = await ingestPunchBatch(device, punches)
+    res.json(result)
   } catch (e) { next(e) }
 }
 
@@ -265,4 +293,4 @@ async function listMappings(req, res, next) {
   } catch (e) { next(e) }
 }
 
-module.exports = { listDevices, createDevice, rotateToken, updateDevice, deleteDevice, connectorAuth, connectorConfig, heartbeat, ingestPunches, mapEmployee, listMappings }
+module.exports = { listDevices, createDevice, rotateToken, updateDevice, deleteDevice, connectorAuth, connectorConfig, heartbeat, ingestPunches, ingestPunchBatch, mapEmployee, listMappings }

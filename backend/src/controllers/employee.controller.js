@@ -192,9 +192,9 @@ async function getEmployee(req, res, next) {
         }
       : rest
 
-    // Certifications are visible to ADMIN/CEO and to the employee themselves.
-    // They are not part of other viewers' profile responses.
-    if (!(["ADMIN", "CEO"].includes(role) || userId === id)) delete safe.certifications
+    // Certifications are visible to ADMIN/CEO/MANAGER and to the employee
+    // themselves. They are not part of other viewers' profile responses.
+    if (!(["ADMIN", "CEO", "MANAGER"].includes(role) || userId === id)) delete safe.certifications
 
     res.json(safe)
   } catch (err) {

@@ -15,6 +15,7 @@ const organizationRoutes = require("./routes/organization.routes")
 const attendanceRoutes = require("./routes/attendance.routes")
 const attendanceSiteRoutes = require("./routes/attendance-site.routes")
 const biometricRoutes = require("./routes/biometric.routes")
+const admsRoutes = require("./routes/adms.routes")
 const leaveRoutes = require("./routes/leave.routes")
 const holidayRoutes = require("./routes/holiday.routes")
 const auditRoutes = require("./routes/audit.routes")
@@ -91,6 +92,12 @@ app.use(
 )
 
 app.get("/health", (req, res) => res.json({ status: "ok" }))
+
+// Mounted at root, not under /api — ZKTeco (and compatible) devices in ADMS
+// push mode expect these exact paths (Comm > ADMS > Server URL just takes a
+// host, the device appends /iclock/... itself) and speak plain text, not
+// our normal JSON API.
+app.use("/iclock", admsRoutes)
 
 app.use("/api/auth", authRoutes)
 app.use("/api/employees", employeeRoutes)

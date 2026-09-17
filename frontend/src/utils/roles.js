@@ -1,6 +1,7 @@
 export const MANAGEMENT_ROLES = [
   "ADMIN",
   "CEO",
+  "MANAGER",
   "SALES_HEAD",
   "HR",
   "MANAGEMENT",
@@ -10,11 +11,13 @@ export const MANAGEMENT_ROLES = [
 export const ROLE_LABELS = {
   ADMIN: "Owner / Admin",
   CEO: "CEO",
+  MANAGER: "Manager",
   SALES_HEAD: "Sales Head",
   HR: "HR",
   MANAGEMENT: "Management",
   EMPLOYEE: "Employee",
   DEPARTMENT_HEAD: "Department Head",
+  IT_MANAGER: "IT Manager",
 }
 
 export function isManagement(role) {
@@ -26,17 +29,18 @@ export function roleLabel(role) {
 }
 
 export function canAccessPayroll(role) {
-  return ["ADMIN", "CEO", "HR", "MANAGEMENT"].includes(role)
+  return ["ADMIN", "CEO", "MANAGER", "HR", "MANAGEMENT"].includes(role)
 }
 
 export function canManageInventory(role) {
-  return ["ADMIN", "CEO", "IT_MANAGER"].includes(role)
+  return ["ADMIN", "CEO", "MANAGER", "IT_MANAGER"].includes(role)
 }
 
 export function canViewEmployeeDirectory(role) {
   return [
     "ADMIN",
     "CEO",
+    "MANAGER",
     "HR",
     "MANAGEMENT",
     "DEPARTMENT_HEAD",

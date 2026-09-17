@@ -55,7 +55,7 @@ function Row({ to, icon: Icon, label, end, onClick }) {
 export default function MobileNav({ open, onClose }) {
   const { user, logout } = useAuth()
   const isAdmin = isManagement(user?.role)
-  const isOwner = ["ADMIN", "CEO"].includes(user?.role)
+  const isOwner = ["ADMIN", "CEO", "MANAGER"].includes(user?.role)
   const isIT = user?.role === "IT_MANAGER"
   if (!open) return null
 
@@ -69,7 +69,7 @@ export default function MobileNav({ open, onClose }) {
             <X size={18} />
           </button>
         </div>
-        {(["ADMIN", "CEO"].includes(user?.role)) && (
+        {(["ADMIN", "CEO", "IT_MANAGER"].includes(user?.role)) && (
           <div className="mb-3 rounded-2xl border border-border bg-surface-2 p-3">
             <OrganizationSwitcher />
           </div>
@@ -116,6 +116,7 @@ export default function MobileNav({ open, onClose }) {
               <Row to="/assignments" icon={ClipboardCheck} label="Asset Assignments" onClick={onClose} />
               <Row to="/asset-requests" icon={PackageSearch} label="Asset Requests" onClick={onClose} />
               <Row to="/tickets" icon={Ticket} label="Requests / Tickets" onClick={onClose} />
+              <Row to="/attendance/me" icon={CalendarCheck} label="My Attendance" onClick={onClose} />
             </>
           ) : (
             <>

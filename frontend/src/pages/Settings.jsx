@@ -9,6 +9,10 @@ import PageHeader from "../components/ui/PageHeader"
 import SectionHeader from "../components/ui/SectionHeader"
 import { TextField } from "../components/ui/Field"
 import { TIMEZONE_GROUPS, timezoneLabel } from "../utils/timezones"
+import { roleLabel } from "../utils/roles"
+import OfficeLocationMap from "../components/OfficeLocationMap"
+
+const ATTENDANCE_PERMISSION_FIELDS = ["canCreate", "canRead", "canUpdate", "canDelete"]
 
 const PRESETS = [
   { label: "Blue", value: "#3B82F6" },
@@ -23,7 +27,7 @@ const PRESETS = [
 export default function Settings() {
   const { user, organizations, refreshUser, switchOrganization } = useAuth()
   const isCeo = user?.role === "CEO"
-  const canEditSchedule = user?.role === "ADMIN" || user?.role === "CEO"
+  const canEditSchedule = ["ADMIN", "CEO", "MANAGER"].includes(user?.role)
   const queryClient = useQueryClient()
   const { applyAccent } = useTheme()
   const [name, setName] = useState("")
@@ -53,6 +57,9 @@ export default function Settings() {
   const [scheduleError, setScheduleError] = useState("")
   const [geofenceError, setGeofenceError] = useState("")
   const [payrollError, setPayrollError] = useState("")
+  const [attendanceMatrix, setAttendanceMatrix] = useState([])
+  const [permissionsError, setPermissionsError] = useState("")
+  const isOwnerTier = user?.role === "ADMIN" || user?.role === "CEO" || user?.role === "MANAGER"
 
   const { data: organization } = useQuery({
     queryKey: ["organization"],
@@ -87,8 +94,32 @@ export default function Settings() {
       setScheduleError("")
       setGeofenceError("")
       setPayrollError("")
+      setPermissionsError("")
     }
   }, [organization])
+
+  const { data: attendancePermissions } = useQuery({
+    queryKey: ["attendance-permissions"],
+    queryFn: () => api.get("/organization/attendance-permissions").then((r) => r.data),
+    enabled: isOwnerTier,
+  })
+
+  useEffect(() => {
+    if (attendancePermissions) setAttendanceMatrix(attendancePermissions)
+  }, [attendancePermissions])
+
+  const saveAttendancePermissions = useMutation({
+    mutationFn: () => api.put("/organization/attendance-permissions", { permissions: attendanceMatrix }),
+    onSuccess: () => {
+      setPermissionsError("")
+      queryClient.invalidateQueries({ queryKey: ["attendance-permissions"] })
+    },
+    onError: (err) => setPermissionsError(err.response?.data?.error || "Could not save — please try again"),
+  })
+
+  function toggleAttendancePermission(role, field) {
+    setAttendanceMatrix((prev) => prev.map((row) => (row.role === role ? { ...row, [field]: !row[field] } : row)))
+  }
 
   const save = useMutation({
     mutationFn: () => api.patch("/organization", { name, primaryColor }),
@@ -291,12 +322,12 @@ export default function Settings() {
         <div className="card p-6 lg:col-span-2">
           <SectionHeader title="Company & Organizations" />
           <p className="mb-4 text-xs text-muted">
-            {user?.role === "CEO" || user?.role === "ADMIN"
+            {isOwnerTier
               ? "Manage the main company and its organizations from one account. Employees and HR stay limited to the organization they belong to."
               : "Your account is limited to its assigned organization."}
           </p>
 
-          {(user?.role === "CEO" || user?.role === "ADMIN") ? (
+          {isOwnerTier ? (
             <>
               <div className="grid gap-2 sm:grid-cols-2">
                 {(organizations || []).map((org) => (
@@ -452,7 +483,7 @@ export default function Settings() {
           </div>
         )}
 
-        {(user?.role === "ADMIN" || isCeo) && (
+        {isOwnerTier && (
           <div className="card p-6">
             <SectionHeader title="Attendance Geofence" />
             <p className="mb-4 text-xs text-muted">
@@ -469,6 +500,20 @@ export default function Settings() {
               />
               Enable geofenced attendance
             </label>
+
+            <div className="mb-4">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Office location</p>
+              <OfficeLocationMap
+                latitude={officeLatitude}
+                longitude={officeLongitude}
+                radiusMeters={geofenceRadiusMeters}
+                onChange={({ latitude, longitude }) => {
+                  setOfficeLatitude(latitude)
+                  setOfficeLongitude(longitude)
+                }}
+              />
+            </div>
+
             <div className="grid grid-cols-2 gap-4">
               <TextField
                 label="Office latitude"
@@ -561,11 +606,59 @@ export default function Settings() {
             {payrollError && <p className="mt-2 text-xs text-chip-pink-fg">{payrollError}</p>}
           </div>
 
-        <div className="card p-6 lg:col-span-2">
-          <SectionHeader title="Role & permission matrix" />
-          <p className="mb-4 text-xs text-muted">Current built-in permissions for AssetFlow. Organization data remains scoped by the active organization for non-owner roles.</p>
-          <div className="overflow-x-auto rounded-2xl border border-border"><table className="w-full min-w-[760px] text-left text-xs"><thead className="bg-surface-2 text-muted"><tr><th className="px-3 py-3 font-semibold">Permission</th><th className="px-3 py-3">CEO</th><th className="px-3 py-3">ADMIN</th><th className="px-3 py-3">HR</th><th className="px-3 py-3">MANAGER</th><th className="px-3 py-3">EMPLOYEE</th></tr></thead><tbody className="divide-y divide-border">{[["Employees","All","All","All","Team","Self"],["Projects","All","All","—","Team","Assigned"],["Inventory","All","All","All","—","Assigned"],["Payroll","All","All","Review","—","Self"],["Organizations","All","All","—","—","—"],["Audit logs","All","All","—","—","—"]].map(r=><tr key={r[0]}><td className="px-3 py-3 font-semibold text-ink">{r[0]}</td>{r.slice(1).map((v,i)=><td key={i} className="px-3 py-3 text-muted">{v}</td>)}</tr>)}</tbody></table></div>
-        </div>
+        {isOwnerTier && (
+          <div className="card p-6 lg:col-span-2">
+            <SectionHeader title="Attendance permission matrix" />
+            <p className="mb-4 text-xs text-muted">
+              Choose exactly what each role can do on the Attendance page. ADMIN, CEO and MANAGER always have full
+              access and aren't shown here — they can't be downgraded.
+            </p>
+            <div className="overflow-x-auto rounded-2xl border border-border">
+              <table className="w-full min-w-[520px] text-left text-xs">
+                <thead className="bg-surface-2 text-muted">
+                  <tr>
+                    <th className="px-3 py-3 font-semibold">Role</th>
+                    <th className="px-3 py-3 text-center">Create</th>
+                    <th className="px-3 py-3 text-center">Read</th>
+                    <th className="px-3 py-3 text-center">Update</th>
+                    <th className="px-3 py-3 text-center">Delete</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {attendanceMatrix.map((row) => (
+                    <tr key={row.role}>
+                      <td className="px-3 py-3 font-semibold text-ink">{roleLabel(row.role)}</td>
+                      {ATTENDANCE_PERMISSION_FIELDS.map((field) => (
+                        <td key={field} className="px-3 py-3 text-center">
+                          <input
+                            type="checkbox"
+                            checked={!!row[field]}
+                            onChange={() => toggleAttendancePermission(row.role, field)}
+                            className="h-4 w-4 rounded border-border-strong"
+                          />
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                  {!attendanceMatrix.length && (
+                    <tr><td colSpan={5} className="px-3 py-6 text-center text-muted">Loading…</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <button
+              onClick={() => saveAttendancePermissions.mutate()}
+              disabled={saveAttendancePermissions.isPending}
+              className="pill-accent mt-4 px-5 py-2.5 text-sm disabled:opacity-60"
+            >
+              {saveAttendancePermissions.isPending ? "Saving…" : "Save permissions"}
+            </button>
+            {saveAttendancePermissions.isSuccess && !saveAttendancePermissions.isPending && !permissionsError && (
+              <p className="mt-2 text-xs text-chip-green-fg">Saved.</p>
+            )}
+            {permissionsError && <p className="mt-2 text-xs text-chip-pink-fg">{permissionsError}</p>}
+          </div>
+        )}
 
         <div className="card p-6">
           <SectionHeader title="Plan" />

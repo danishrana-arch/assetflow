@@ -88,7 +88,7 @@ export default function EmployeeProfile() {
   const [usageDrafts, setUsageDrafts] = useState({}) // { [assetId]: { notUsing: bool, actual: string } }
   const [usageSubmitted, setUsageSubmitted] = useState({}) // { [assetId]: true }
   const [certificateDrafts, setCertificateDrafts] = useState([])
-  const canManageCertifications = ["ADMIN", "CEO"].includes(user?.role) || isSelf
+  const canManageCertifications = ["ADMIN", "CEO", "MANAGER"].includes(user?.role) || isSelf
 
   const { data: employee, isLoading } = useQuery({
     queryKey: ["employee", id],
@@ -422,47 +422,6 @@ export default function EmployeeProfile() {
               </div>
             </div>
 
-            {/* Timeline bar */}
-            <div className="mt-2 h-3 w-full rounded-full bg-surface-2 relative overflow-hidden">
-              {(() => {
-                const shiftStartStr = employee.shiftStart || organization?.shiftStartDefault || "09:00"
-                const workingHours = Number(organization?.workingHoursPerDay || 8)
-                const parseHHMM = (s) => { const [h,m] = String(s||"09:00").split(":").map((v)=>Number(v||0)); return (h||0)*60 + (m||0) }
-                const shiftStart = parseHHMM(shiftStartStr)
-                const shiftEnd = shiftStart + Math.round(workingHours * 60)
-                const clamp = (v, a, b) => Math.max(a, Math.min(b, v))
-                const parseTime = (t) => t ? new Date(t) : null
-                const inAt = parseTime(todayRecord.checkInAt) || null
-                const outAt = parseTime(todayRecord.checkOutAt) || new Date()
-                if (!inAt) return null
-                const inMin = inAt.getHours()*60 + inAt.getMinutes()
-                const outMin = outAt.getHours()*60 + outAt.getMinutes()
-                const total = Math.max(1, shiftEnd - shiftStart)
-                const workStart = clamp(inMin, shiftStart - total, shiftEnd + total)
-                const workEnd = clamp(outMin, shiftStart - total, shiftEnd + total)
-                const left = ((Math.max(workStart, shiftStart) - shiftStart) / total) * 100
-                const width = ((Math.max(0, Math.min(workEnd, shiftEnd) - Math.max(workStart, shiftStart))) / total) * 100
-                const leftOverflow = workStart < shiftStart ? ((shiftStart - workStart) / total) * 100 : 0
-                const rightOverflow = workEnd > shiftEnd ? ((workEnd - shiftEnd) / total) * 100 : 0
-                const color = organization?.primaryColor || "#3B82F6"
-                return (
-                  <>
-                    {/* worked inside shift */}
-                    <div style={{ left: `${left}%`, width: `${width}%` }} className="absolute top-0 h-3" />
-                    <div style={{ left: `${left}%`, width: `${width}%`, backgroundColor: color }} className="absolute top-0 h-3 rounded-full" />
-                    {/* overflow left */}
-                    {leftOverflow > 0 && (
-                      <div style={{ left: `${-leftOverflow}%`, width: `${leftOverflow}%`, backgroundColor: "#ff4d4f" }} className="absolute top-0 h-3 rounded-full" />
-                    )}
-                    {/* overflow right */}
-                    {rightOverflow > 0 && (
-                      <div style={{ right: `${-rightOverflow}%`, width: `${rightOverflow}%`, backgroundColor: "#ff4d4f" }} className="absolute top-0 h-3 rounded-full" />
-                    )}
-                  </>
-                )
-              })()}
-            </div>
-
             <WorkingTimeProgress
               workingMinutes={todayRecord.workingMinutes}
               checkInAt={todayRecord.checkInAt}
@@ -508,6 +467,24 @@ export default function EmployeeProfile() {
       <section className="mb-5 grid gap-4 lg:grid-cols-2">
         <div className="card p-5"><SectionHeader title="Projects & time"/><div className="mt-3 space-y-2">{(employee.projectMemberships||[]).slice(0,6).map(m=><div key={m.id} className="flex items-center justify-between rounded-2xl bg-surface-2 p-3"><div className="min-w-0"><p className="truncate text-sm font-semibold text-ink">{m.project?.name}</p><p className="text-xs text-muted">{m.project?.status?.replaceAll("_"," ")} · {Number(m.hoursSpent||0).toFixed(1)}h</p></div>{m.project?.deadline&&<span className="text-[11px] text-muted">Due {new Date(m.project.deadline).toLocaleDateString()}</span>}</div>)}{!(employee.projectMemberships||[]).length&&<p className="text-sm text-muted">No project assignments.</p>}</div></div>
         <div className="card p-5"><SectionHeader title="Recent payroll"/><div className="mt-3 space-y-2">{(employee.payrollRecords||[]).slice(0,5).map(p=><div key={p.id} className="flex items-center justify-between rounded-2xl bg-surface-2 p-3"><div><p className="text-sm font-semibold text-ink">{p.month}/{p.year}</p><p className="text-xs text-muted">{p.status}</p></div><span className="text-sm font-semibold text-ink">PKR {Number(p.netPay||0).toLocaleString()}</span></div>)}{!(employee.payrollRecords||[]).length&&<p className="text-sm text-muted">No payroll records.</p>}</div></div>
+      </section>
+
+      {/* Attendance History — links out to its own page rather than listing
+          records inline here; the destination reuses the same
+          `["employee", id]` query, so it's already warm from this page's cache. */}
+      <section className="mb-5">
+        <div className="card flex flex-wrap items-center justify-between gap-3 p-5">
+          <div>
+            <h3 className="section-title">Attendance History</h3>
+            <p className="mt-1 text-sm text-muted">View {employee.name.split(" ")[0]}'s full check-in/check-out history.</p>
+          </div>
+          <Link
+            to={`/employees/${id}/attendance`}
+            className="pill-secondary inline-flex shrink-0 items-center gap-2 px-4 py-2.5 text-sm"
+          >
+            <CalendarRange size={15} /> View Attendance History
+          </Link>
+        </div>
       </section>
         </>
       )}

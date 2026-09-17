@@ -1,5 +1,6 @@
 const logger = require("./logger")
 const state = require("./state")
+const cfg = require("./config")
 const { unlockDoor } = require("./door")
 
 function toMillis(v) {
@@ -53,15 +54,26 @@ async function syncOnce({ config, adapter, client }) {
     return 0
   }
 
-  await runDoorUnlockIfMapped(config, newPunches)
-  await client.post("/connector/punches", { punches: newPunches })
+  // A first-ever sync (or one after a long offline gap) can mean thousands
+  // of punches at once — send them in batches so no single request risks
+  // the backend timing out, and persist the watermark after each batch so a
+  // failure partway through resumes from there instead of re-sending
+  // everything already landed.
+  let sent = 0
+  for (let i = 0; i < newPunches.length; i += cfg.PUNCH_BATCH_SIZE) {
+    const batch = newPunches.slice(i, i + cfg.PUNCH_BATCH_SIZE)
+    await runDoorUnlockIfMapped(config, batch)
+    await client.post("/connector/punches", { punches: batch })
 
-  const newestOccurredAt = new Date(
-    Math.max(...newPunches.map((p) => new Date(p.occurredAt).getTime()))
-  ).toISOString()
-  state.recordSync(config.id, { newestOccurredAt, sentCount: newPunches.length })
-  logger.info(`Sent ${newPunches.length} new punch(es)`, { device: config.name, watermark: newestOccurredAt })
-  return newPunches.length
+    const newestOccurredAt = new Date(
+      Math.max(...batch.map((p) => new Date(p.occurredAt).getTime()))
+    ).toISOString()
+    sent += batch.length
+    state.recordSync(config.id, { newestOccurredAt, sentCount: batch.length })
+    logger.info(`Sent ${batch.length} punch(es)`, { device: config.name, watermark: newestOccurredAt, progress: `${sent}/${newPunches.length}` })
+  }
+
+  return sent
 }
 
 module.exports = { syncOnce, filterNewPunches }

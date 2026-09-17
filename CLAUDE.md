@@ -294,6 +294,68 @@ built JS/CSS asset list in the service worker (e.g. via a proper
 Workbox/`vite-plugin-pwa` precache manifest), which is a bigger, separate
 piece of work.
 
+## Post-module addition: Attendance permission matrix, MANAGER role, IT Manager cross-org access
+
+Not part of the original patch set — added afterward directly, per a live
+chat request (not a prepared `NN-*.patch`).
+
+- **New `AttendancePermission` model** (`backend/prisma/schema.prisma`) +
+  hand-written migration at
+  `backend/prisma/migrations/20260917120000_attendance_permission_matrix/migration.sql`.
+  **Manual step, required**, same as module 07: run
+  `cd backend && npx prisma migrate deploy && npx prisma generate` in an
+  environment with normal network access to Prisma's binary CDN before this
+  lands in a real database — not run here for the same reasons module 07
+  wasn't (no live DB/network in this environment).
+- Role-based, full-CRUD Attendance permission matrix, editable by
+  ADMIN/CEO/MANAGER from Settings → "Attendance permission matrix" (replaces
+  what used to be a static, non-functional placeholder table in the same
+  spot). Backend: `backend/src/utils/permissions.js` (`getAttendancePermission`,
+  `requireAttendancePermission`), `backend/src/controllers/permissions.controller.js`,
+  wired into `backend/src/routes/organization.routes.js`
+  (`/organization/attendance-permissions*`) and
+  `backend/src/routes/attendance.routes.js` (replaces the old binary
+  `requireAttendanceAccess` middleware, which is now deleted). Roles with no
+  explicit row default to: HR → read-only; everyone else → the legacy
+  per-user `canManageAttendance` flag if set, else no access. Frontend:
+  `frontend/src/pages/Attendance.jsx` now fetches its own effective
+  permission (`/organization/attendance-permissions/me`) instead of a
+  hardcoded role check, and hides the Mark/Save/Resolve controls for
+  read-only viewers.
+- **`MANAGER` role fix**: the Prisma `UserRole` enum has always included
+  `MANAGER`, but no role-list constant anywhere in the app (frontend or
+  backend `utils/roles.js`) included it — they used the string
+  `"MANAGEMENT"` instead, which isn't a valid enum value. A user assigned
+  `MANAGER` therefore had no elevated access anywhere. Added `"MANAGER"`
+  alongside `"ADMIN"`/`"CEO"` everywhere a hardcoded full-access role list
+  existed (both `utils/roles.js` files, `RequireOwner`/`isOwner`-style route
+  and nav gates, `requireRole(...)` calls, inventory/project/task/
+  certification/biometric/announcement access checks, etc.) — deliberately
+  left the pre-existing `"MANAGEMENT"` entries alone rather than renaming
+  them, so no other role's behavior changed. Did **not** extend role-
+  reassignment privileges (who can change another user's role) to `MANAGER`
+  — that stays ADMIN/CEO-only as a deliberate scope decision, since it's a
+  privilege-escalation-sensitive action distinct from general CRUD.
+- **IT Manager cross-org access**: an `IT_MANAGER` whose home organization
+  *is* the main company (same `isMainCompany` check already used for a
+  main-company `ADMIN`) can now switch organizations via the same
+  `X-Organization-Id` mechanism, in `backend/src/middleware/auth.middleware.js`
+  (`applyOrganizationScope`) and `backend/src/controllers/auth.controller.js`
+  (`canSeeCompanyOrganizations`). Their nav/lens stays inventory-scoped
+  regardless of which org is selected (unchanged — `isIT` branches in
+  `Sidebar.jsx`/`MobileNav.jsx` are role-based, not org-based). Also added a
+  "My Attendance" nav link to those `isIT` branches (the route already
+  worked for any authenticated role, it just had no nav entry before).
+  **Fixed an edge case this surfaced**: the four self-service attendance
+  endpoints in `backend/src/controllers/attendance.controller.js`
+  (`markSelfAttendance`, `getSelfAttendance`, `syncOfflineAttendance`,
+  `createAttendanceCorrection`) used to trust `req.user.organizationId`
+  directly, which `applyOrganizationScope` can reassign for the duration of
+  a request — so marking your own attendance while viewing a switched org
+  would have recorded it against that org instead of your real employer.
+  All four now re-resolve the employee's actual `organizationId` from their
+  `User` row first.
+
 ## Known gaps flagged by whoever prepared these patches
 
 1. **`.env` git-history check** (brief §1): run

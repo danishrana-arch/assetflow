@@ -15,6 +15,8 @@ let config = null
 let adapter = null
 let syncInFlight = false
 let stopping = false
+let realtimeHandle = null
+let realtimeReconnectTimer = null
 
 // --- retry/backoff helper -------------------------------------------------
 // Any network or device call in this service goes through here so a flaky
@@ -66,6 +68,46 @@ async function runSyncCycle() {
   }
 }
 
+// --- real-time subscription (ZKTECO PULL devices only) ---------------------
+// When the adapter supports it, this replaces periodic full-log re-pulling
+// as the primary feed: one persistent connection, device pushes each punch
+// the instant it happens. The regular setInterval(runSyncCycle, ...) cycle
+// keeps running underneath as a reconciliation pass — it'll pick up
+// anything missed during a disconnect (or before this subscription existed
+// at all), it just no longer has to be the fast/frequent path.
+async function startRealtime() {
+  if (stopping || !adapter || typeof adapter.subscribeRealTime !== "function") return
+  try {
+    realtimeHandle = await adapter.subscribeRealTime(
+      async (punch) => {
+        try {
+          await client.post("/connector/punches", { punches: [punch] })
+          logger.info("Live punch synced", { device: config.name, externalUserId: punch.externalUserId, occurredAt: punch.occurredAt })
+        } catch (e) {
+          logger.warn("Failed to push a live punch — the next reconciliation cycle will pick it up", { error: e.message })
+        }
+      },
+      (err) => {
+        logger.warn("Real-time connection dropped, will reconnect", { device: config.name, error: err.message })
+        realtimeHandle = null
+        scheduleRealtimeReconnect()
+      }
+    )
+    logger.info("Real-time punch subscription active", { device: config.name })
+  } catch (e) {
+    logger.warn("Could not start real-time subscription, relying on periodic sync only", { error: e.message })
+    scheduleRealtimeReconnect()
+  }
+}
+
+function scheduleRealtimeReconnect() {
+  if (realtimeReconnectTimer || stopping) return
+  realtimeReconnectTimer = setTimeout(() => {
+    realtimeReconnectTimer = null
+    startRealtime()
+  }, cfg.RETRY_BASE_MS)
+}
+
 // --- local push receiver ---------------------------------------------------
 // For PUSH-mode devices/relays that call us directly instead of waiting to
 // be polled. Punches arriving this way still go through door-unlock +
@@ -114,6 +156,10 @@ async function main() {
   })
   await withRetry("Initial config load", loadConfig, { attempts: 10 })
   await runSyncCycle()
+  await startRealtime()
+  if (realtimeHandle) {
+    logger.info(`Periodic sync every ${Math.round(cfg.POLL_INTERVAL_MS / 60000)}m now runs as a reconciliation pass alongside the live subscription`)
+  }
 
   syncTimer = setInterval(runSyncCycle, cfg.POLL_INTERVAL_MS)
   heartbeatTimer = setInterval(heartbeat, cfg.HEARTBEAT_INTERVAL_MS)
@@ -125,6 +171,8 @@ async function main() {
     logger.info(`Received ${signal}, shutting down gracefully`)
     clearInterval(syncTimer)
     clearInterval(heartbeatTimer)
+    if (realtimeReconnectTimer) clearTimeout(realtimeReconnectTimer)
+    if (realtimeHandle) { try { realtimeHandle.disconnect() } catch { /* already gone */ } }
     pushServer.close(() => {
       logger.info("Shutdown complete")
       process.exit(0)

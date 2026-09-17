@@ -1,7 +1,7 @@
 const prisma = require("../lib/prisma")
 const { createNotification } = require("../utils/notifications")
 
-const MANAGEMENT = ["ADMIN", "CEO", "SALES_HEAD", "HR", "MANAGEMENT", "DEPARTMENT_HEAD"]
+const MANAGEMENT = ["ADMIN", "CEO", "MANAGER", "SALES_HEAD", "HR", "MANAGEMENT", "DEPARTMENT_HEAD"]
 const STATUSES = ["TODO", "IN_PROGRESS", "BLOCKED", "DONE"]
 const PRIORITIES = ["LOW", "MEDIUM", "HIGH", "URGENT"]
 

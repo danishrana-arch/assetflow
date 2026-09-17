@@ -1,5 +1,4 @@
 const prisma = require("../lib/prisma")
-const { MANAGEMENT_ROLES } = require("../utils/roles")
 
 function parseDate(value) {
   if (!value) return null
@@ -10,7 +9,7 @@ function parseDate(value) {
 
 async function addCertification(req, res, next) {
   try {
-    const isManagement = MANAGEMENT_ROLES.includes(req.user?.role) && ["ADMIN", "CEO"].includes(req.user.role)
+    const isManagement = ["ADMIN", "CEO", "MANAGER"].includes(req.user?.role)
     const isSelf = req.user?.userId === req.params.id
     if (!isManagement && !isSelf) {
       return res.status(403).json({ error: "Only the employee or an ADMIN/CEO can manage certifications" })
@@ -62,7 +61,7 @@ async function addCertification(req, res, next) {
 
 async function updateCertification(req, res, next) {
   try {
-    const isManagement = MANAGEMENT_ROLES.includes(req.user?.role) && ["ADMIN", "CEO"].includes(req.user.role)
+    const isManagement = ["ADMIN", "CEO", "MANAGER"].includes(req.user?.role)
     const isSelf = req.user?.userId === req.params.id
     if (!isManagement && !isSelf) {
       return res.status(403).json({ error: "Only the employee or an ADMIN/CEO can manage certifications" })
@@ -113,7 +112,7 @@ async function updateCertification(req, res, next) {
 
 async function deleteCertification(req, res, next) {
   try {
-    const isManagement = MANAGEMENT_ROLES.includes(req.user?.role) && ["ADMIN", "CEO"].includes(req.user.role)
+    const isManagement = ["ADMIN", "CEO", "MANAGER"].includes(req.user?.role)
     const isSelf = req.user?.userId === req.params.id
     if (!isManagement && !isSelf) {
       return res.status(403).json({ error: "Only the employee or an ADMIN/CEO can manage certifications" })

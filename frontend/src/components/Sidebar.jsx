@@ -1,3 +1,4 @@
+import { useRef, useState } from "react"
 import { NavLink } from "react-router-dom"
 import {
   LayoutDashboard,
@@ -43,14 +44,79 @@ import api from "../api/client"
 import Avatar from "./ui/Avatar"
 import logoFull from "../assets/logo1.png"
 
-function RailItem({ to, label, icon: Icon, end, isDark, showNotificationDot = false }) {
+// Small pill tooltip shown beside an icon while the rail is still collapsed.
+// Positioned via a measured `fixed` coordinate (not `absolute`) because the
+// nav list scrolls (`overflow-y-auto`), and a scrolling ancestor forces its
+// cross-axis to clip too — an `absolute` tooltip poking out to the right
+// would get cut off. `fixed` escapes that clipping entirely. Only rendered
+// while `expanded` is false — once the rail opens, the row's own inline
+// label takes over, so the two never show at once.
+function HoverTooltipAnchor({ label, isDark, expanded, className = "", children }) {
+  const [point, setPoint] = useState(null)
+  const anchorRef = useRef(null)
+
+  function handleEnter() {
+    if (expanded) return
+    const rect = anchorRef.current?.getBoundingClientRect()
+    if (rect) setPoint({ top: rect.top + rect.height / 2, left: rect.right + 8 })
+  }
+
+  function handleLeave() {
+    setPoint(null)
+  }
+
+  return (
+    <span
+      ref={anchorRef}
+      className={`relative shrink-0 ${className}`}
+      onMouseEnter={handleEnter}
+      onMouseLeave={handleLeave}
+    >
+      {children}
+      {point && !expanded && (
+        <span
+          className={`
+            pointer-events-none fixed z-50
+            -translate-y-1/2 whitespace-nowrap rounded-md
+            px-[7px] py-[3px]
+            text-[11px] font-normal leading-none
+            shadow-sm border
+            ${isDark ? "bg-[#1c1c1c] text-white border-black/20" : "bg-white text-black border-black/10"}
+          `}
+          style={{ top: point.top, left: point.left, fontFamily: "Helvetica, Arial, sans-serif" }}
+        >
+          {label}
+        </span>
+      )}
+    </span>
+  )
+}
+
+// Inline label used once the rail is expanded — visibility is driven by the
+// `expanded` prop (JS state), not CSS hover, so it can stay in sync with the
+// tooltip above (only one of the two is ever visible).
+function RailLabel({ children, expanded }) {
+  return (
+    <span
+      className={`
+        overflow-hidden whitespace-nowrap
+        text-[12px] font-medium
+        transition-all duration-300
+        ${expanded ? "max-w-[160px] opacity-100" : "max-w-0 opacity-0"}
+      `}
+    >
+      {children}
+    </span>
+  )
+}
+
+function RailItem({ to, label, icon: Icon, end, isDark, expanded, showNotificationDot = false }) {
   return (
     <NavLink
       to={to}
       end={end}
-      title={label}
       className={({ isActive }) =>
-        `group relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition-all duration-200 active:scale-90 ${
+        `flex h-11 w-full shrink-0 items-center gap-3 rounded-full pl-2.5 pr-3 transition-colors duration-200 active:scale-[0.97] ${
           isActive
             ? "text-[var(--on-primary-container)]"
             : isDark
@@ -67,42 +133,34 @@ function RailItem({ to, label, icon: Icon, end, isDark, showNotificationDot = fa
           : undefined
       }
     >
-      <Icon size={19} strokeWidth={2} />
-      {showNotificationDot && (
-        <span className="absolute right-0.5 top-0.5 h-2 w-2 rounded-full bg-danger ring-2 ring-transparent" />
-      )}
-
-      <span
-        className={`
-          pointer-events-none absolute left-full ml-3 z-40
-          whitespace-nowrap rounded-lg
-          px-2.5 py-1.5
-          text-[11px] font-medium
-          opacity-0 shadow-md
-          transition-opacity
-          group-hover:opacity-100
-          backdrop-blur-xl
-          border
-          ${
-            isDark
-              ? "bg-white/90 text-black border-black/10"
-              : "bg-black/80 text-white border-white/10"
-          }
-        `}
+      <HoverTooltipAnchor
+        label={label}
+        isDark={isDark}
+        expanded={expanded}
+        className="flex h-7 w-7 items-center justify-center"
       >
-        {label}
-      </span>
+        <Icon size={19} strokeWidth={2} />
+        {showNotificationDot && (
+          <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-danger ring-2 ring-transparent" />
+        )}
+      </HoverTooltipAnchor>
+
+      <RailLabel expanded={expanded}>{label}</RailLabel>
     </NavLink>
   )
 }
 
-export default function Sidebar() {
+// `expanded`/`onMouseEnter`/`onMouseLeave` are owned by DashboardLayout, not
+// this component — the page content needs to shift in sync with the rail
+// opening, so the hover-intent state has to live one level up where both
+// the sidebar and the main content wrapper can read it.
+export default function Sidebar({ expanded, onMouseEnter, onMouseLeave }) {
   const { logout, user } = useAuth()
   const { mode, toggleMode } = useTheme()
 
   const isAdmin = isManagement(user?.role)
   const isIT = user?.role === "IT_MANAGER"
-  const isOwner = ["ADMIN", "CEO"].includes(user?.role)
+  const isOwner = ["ADMIN", "CEO", "MANAGER"].includes(user?.role)
   const isDark = mode === "dark"
 
   const canManageAttendance =
@@ -119,20 +177,22 @@ export default function Sidebar() {
 
   return (
     <aside
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
       className={`
-        fixed left-4 top-1/2 z-40 hidden
-        -translate-y-1/2
-        flex-col items-center
-        rounded-full
+        fixed left-4 top-6 bottom-6 z-40 hidden
+        flex-col items-stretch
+        rounded-[26px]
         py-6
-        transition-all duration-300
+        transition-[width] duration-300 ease-out
         lg:flex
         backdrop-blur-2xl
         backdrop-saturate-150
+        ${expanded ? "w-60" : "w-[72px]"}
         ${
           isDark
             ? `
-              bg-white/70
+              bg-white/75
               border border-white/80
               text-black
             `
@@ -144,32 +204,37 @@ export default function Sidebar() {
         }
       `}
       style={{
-        maxHeight: "calc(100vh - 48px)",
+        backgroundImage: isDark
+          ? "linear-gradient(180deg, rgba(255,255,255,0.35) 0%, rgba(255,255,255,0) 22%)"
+          : "linear-gradient(180deg, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0) 22%)",
         boxShadow: isDark
           ? "0 8px 32px rgba(0,0,0,0.10), inset 0 1px 1px rgba(255,255,255,0.45)"
           : "0 8px 32px rgba(0,0,0,0.18), inset 0 1px 1px rgba(255,255,255,0.12)",
       }}
     >
-      <div
-        className={`
-          mb-4
-          flex h-10 w-10 shrink-0
-          items-center justify-center
-          rounded-full
-          transition-all duration-300
-        `}
-      >
-        <img
-          src={logoFull}
-          alt="AssetFlow"
-          className="
-            h-9 w-9
-            object-contain
-            rounded-xl
-            drop-shadow-sm
-            transition-transform duration-300
-          "
-        />
+      <div className="mb-4 flex w-full shrink-0 items-center gap-3 pl-4 pr-3">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full">
+          <img
+            src={logoFull}
+            alt="AssetFlow"
+            className="
+              h-9 w-9
+              object-contain
+              rounded-xl
+              drop-shadow-sm
+            "
+          />
+        </div>
+        <span
+          className={`
+            overflow-hidden whitespace-nowrap
+            text-sm font-bold tracking-tight
+            transition-all duration-300
+            ${expanded ? "max-w-[160px] opacity-100" : "max-w-0 opacity-0"}
+          `}
+        >
+          AssetFlow
+        </span>
       </div>
 
       <nav
@@ -191,6 +256,7 @@ export default function Sidebar() {
               icon={LayoutDashboard}
               end
               isDark={isDark}
+              expanded={expanded}
             />
 
             <RailItem
@@ -198,6 +264,7 @@ export default function Sidebar() {
               label="Inventory"
               icon={Boxes}
               isDark={isDark}
+              expanded={expanded}
             />
 
             <RailItem
@@ -205,12 +272,13 @@ export default function Sidebar() {
               label="Employees"
               icon={Users}
               isDark={isDark}
+              expanded={expanded}
             />
 
              {canManageAttendance && (
               <>
-                <RailItem to="/attendance" label="Attendance" icon={CalendarCheck} isDark={isDark} />
-                <RailItem to="/attendance/sites" label="Attendance Sites" icon={MapPin} isDark={isDark} />
+                <RailItem to="/attendance" label="Attendance" icon={CalendarCheck} isDark={isDark} expanded={expanded} end />
+                <RailItem to="/attendance/sites" label="Attendance Sites" icon={MapPin} isDark={isDark} expanded={expanded} />
               </>
             )}
 
@@ -219,10 +287,11 @@ export default function Sidebar() {
               label="My Attendance"
               icon={UserCheck}
               isDark={isDark}
+              expanded={expanded}
             />
 
- <RailItem to="/calendar" label="Company Calendar" icon={CalendarRange} isDark={isDark} />
-            {isOwner && <RailItem to="/organization-comparison" label="Organization Comparison" icon={Landmark} isDark={isDark} />}
+ <RailItem to="/calendar" label="Company Calendar" icon={CalendarRange} isDark={isDark} expanded={expanded} />
+            {isOwner && <RailItem to="/organization-comparison" label="Organization Comparison" icon={Landmark} isDark={isDark} expanded={expanded} />}
 
 
             <RailItem
@@ -230,16 +299,18 @@ export default function Sidebar() {
               label="Projects"
               icon={FolderKanban}
               isDark={isDark}
+              expanded={expanded}
             />
 
-            <RailItem to="/tasks" label="Tasks" icon={ListTodo} isDark={isDark} />
-            <RailItem to="/performance" label="Performance" icon={Award} isDark={isDark} />
+            <RailItem to="/tasks" label="Tasks" icon={ListTodo} isDark={isDark} expanded={expanded} />
+            <RailItem to="/performance" label="Performance" icon={Award} isDark={isDark} expanded={expanded} />
 
              <RailItem
               to="/announcements"
               label="Announcements"
               icon={Megaphone}
               isDark={isDark}
+              expanded={expanded}
             />
 
             <RailItem
@@ -247,6 +318,7 @@ export default function Sidebar() {
               label="Departments"
               icon={Building2}
               isDark={isDark}
+              expanded={expanded}
             />
 
             <RailItem
@@ -254,6 +326,7 @@ export default function Sidebar() {
               label="Asset Requests"
               icon={PackageSearch}
               isDark={isDark}
+              expanded={expanded}
             />
 
             <RailItem
@@ -261,6 +334,7 @@ export default function Sidebar() {
               label="Assignments"
               icon={ClipboardCheck}
               isDark={isDark}
+              expanded={expanded}
             />
 
 
@@ -269,6 +343,7 @@ export default function Sidebar() {
               label="Tickets"
               icon={Ticket}
               isDark={isDark}
+              expanded={expanded}
             />
 
 
@@ -277,6 +352,7 @@ export default function Sidebar() {
               label="Leave Requests"
               icon={ClipboardList}
               isDark={isDark}
+              expanded={expanded}
             />
 
             <RailItem
@@ -284,6 +360,7 @@ export default function Sidebar() {
               label="Reports"
               icon={BarChart3}
               isDark={isDark}
+              expanded={expanded}
             />
 
             <RailItem
@@ -291,6 +368,7 @@ export default function Sidebar() {
               label="Export"
               icon={Download}
               isDark={isDark}
+              expanded={expanded}
             />
 
             <RailItem
@@ -298,6 +376,7 @@ export default function Sidebar() {
               label="Audit Log"
               icon={ShieldCheck}
               isDark={isDark}
+              expanded={expanded}
             />
 
             {/* Activity - different icon from Announcements */}
@@ -306,6 +385,7 @@ export default function Sidebar() {
               label="Activity"
               icon={BellRing}
               isDark={isDark}
+              expanded={expanded}
               showNotificationDot={hasUnreadNotifications}
             />
 
@@ -315,6 +395,7 @@ export default function Sidebar() {
                 label="Employee Forms"
                 icon={FileText}
                 isDark={isDark}
+                expanded={expanded}
               />
             )}
 
@@ -324,6 +405,7 @@ export default function Sidebar() {
                 label="Settings"
                 icon={SettingsIcon}
                 isDark={isDark}
+                expanded={expanded}
               />
             )}
 
@@ -333,19 +415,21 @@ export default function Sidebar() {
                 label="Payroll"
                 icon={Wallet}
                 isDark={isDark}
+                expanded={expanded}
               />
             )}
           </>
         ) : isIT ? (
           <>
-            <RailItem to="/" label="Dashboard" icon={LayoutDashboard} end isDark={isDark} />
-            <RailItem to="/inventory" label="Inventory" icon={Boxes} isDark={isDark} />
-            <RailItem to="/employees" label="Employees & Assets" icon={Users} isDark={isDark} />
-            <RailItem to="/assignments" label="Asset Assignments" icon={ClipboardCheck} isDark={isDark} />
-            <RailItem to="/asset-requests" label="Asset Requests" icon={PackageSearch} isDark={isDark} />
-            <RailItem to="/tickets" label="Requests / Tickets" icon={Ticket} isDark={isDark} />
-            <RailItem to="/calendar" label="Company Calendar" icon={CalendarDays} isDark={isDark} />
-            <RailItem to="/notifications" label="Notifications" icon={Activity} isDark={isDark} showNotificationDot={hasUnreadNotifications} />
+            <RailItem to="/" label="Dashboard" icon={LayoutDashboard} end isDark={isDark} expanded={expanded} />
+            <RailItem to="/inventory" label="Inventory" icon={Boxes} isDark={isDark} expanded={expanded} />
+            <RailItem to="/employees" label="Employees & Assets" icon={Users} isDark={isDark} expanded={expanded} />
+            <RailItem to="/assignments" label="Asset Assignments" icon={ClipboardCheck} isDark={isDark} expanded={expanded} />
+            <RailItem to="/asset-requests" label="Asset Requests" icon={PackageSearch} isDark={isDark} expanded={expanded} />
+            <RailItem to="/tickets" label="Requests / Tickets" icon={Ticket} isDark={isDark} expanded={expanded} />
+            <RailItem to="/calendar" label="Company Calendar" icon={CalendarDays} isDark={isDark} expanded={expanded} />
+            <RailItem to="/attendance/me" label="My Attendance" icon={CalendarCheck} isDark={isDark} expanded={expanded} />
+            <RailItem to="/notifications" label="Notifications" icon={Activity} isDark={isDark} expanded={expanded} showNotificationDot={hasUnreadNotifications} />
           </>
         ) : (
           <>
@@ -354,6 +438,7 @@ export default function Sidebar() {
               label="My Profile"
               icon={UserRound}
               isDark={isDark}
+              expanded={expanded}
             />
 
             <RailItem
@@ -361,6 +446,7 @@ export default function Sidebar() {
               label="My Projects"
               icon={FolderKanban}
               isDark={isDark}
+              expanded={expanded}
             />
 
             <RailItem
@@ -368,16 +454,18 @@ export default function Sidebar() {
               label="My Attendance"
               icon={CalendarCheck}
               isDark={isDark}
+              expanded={expanded}
             />
 
-            <RailItem to="/calendar" label="Company Calendar" icon={CalendarRange} isDark={isDark} />
-            <RailItem to={`/employee-360/${user?.id}`} label="My Employee 360°" icon={BadgeCheck} isDark={isDark} />
+            <RailItem to="/calendar" label="Company Calendar" icon={CalendarRange} isDark={isDark} expanded={expanded} />
+            <RailItem to={`/employee-360/${user?.id}`} label="My Employee 360°" icon={BadgeCheck} isDark={isDark} expanded={expanded} />
 
             <RailItem
               to="/payroll/me"
               label="My Payslips"
               icon={Wallet}
               isDark={isDark}
+              expanded={expanded}
             />
 
             <RailItem
@@ -385,6 +473,7 @@ export default function Sidebar() {
               label="Tickets"
               icon={Ticket}
               isDark={isDark}
+              expanded={expanded}
             />
 
             <RailItem
@@ -392,22 +481,24 @@ export default function Sidebar() {
               label="Notifications"
               icon={BellRing}
               isDark={isDark}
+              expanded={expanded}
               showNotificationDot={hasUnreadNotifications}
             />
           </>
         )}
       </nav>
 
-      {/* Bottom Controls */}
-      <div className="mt-2 flex shrink-0 flex-col items-center gap-1.5">
+      {/* Bottom Controls — px-3 matches <nav>'s own padding so these icons
+          land on the exact same vertical axis as the nav icons above. */}
+      <div className="mt-2 flex shrink-0 flex-col items-center gap-1.5 px-3">
         {/* Theme Toggle */}
         <button
           onClick={toggleMode}
           className={`
-            flex h-9 w-9
-            items-center justify-center
-            rounded-full
-            transition-all duration-200
+            flex h-11 w-full shrink-0
+            items-center gap-3
+            rounded-full pl-2.5 pr-3
+            transition-colors duration-200
             ${
               isDark
                 ? "text-black/55 hover:bg-black/10 hover:text-black"
@@ -419,27 +510,26 @@ export default function Sidebar() {
               ? "Switch to light mode"
               : "Switch to dark mode"
           }
-          title={
-            isDark
-              ? "Light mode"
-              : "Dark mode"
-          }
         >
-          {isDark ? (
-            <Sun size={16} />
-          ) : (
-            <Moon size={16} />
-          )}
+          <HoverTooltipAnchor
+            label={isDark ? "Light mode" : "Dark mode"}
+            isDark={isDark}
+            expanded={expanded}
+            className="flex h-7 w-7 items-center justify-center"
+          >
+            {isDark ? <Sun size={16} /> : <Moon size={16} />}
+          </HoverTooltipAnchor>
+          <RailLabel expanded={expanded}>{isDark ? "Light mode" : "Dark mode"}</RailLabel>
         </button>
 
         {/* Logout */}
         <button
           onClick={logout}
           className={`
-            flex h-9 w-9
-            items-center justify-center
-            rounded-full
-            transition-all duration-200
+            flex h-11 w-full shrink-0
+            items-center gap-3
+            rounded-full pl-2.5 pr-3
+            transition-colors duration-200
             ${
               isDark
                 ? "text-black/55 hover:bg-pink-100 hover:text-pink-600"
@@ -447,29 +537,43 @@ export default function Sidebar() {
             }
           `}
           aria-label="Logout"
-          title="Logout"
         >
-          <LogOut size={16} />
+          <HoverTooltipAnchor
+            label="Logout"
+            isDark={isDark}
+            expanded={expanded}
+            className="flex h-7 w-7 items-center justify-center"
+          >
+            <LogOut size={16} />
+          </HoverTooltipAnchor>
+          <RailLabel expanded={expanded}>Logout</RailLabel>
         </button>
 
         {/* Account */}
         <NavLink
           to="/profile"
-          title="My Account"
-          className="mt-1 block"
+          className="mt-1 flex h-11 w-full shrink-0 items-center gap-3 rounded-full pl-2 pr-3"
         >
-          <Avatar
-            name={user?.name || "?"}
-            size="sm"
-            className={`
-              border-2
-              ${
-                isDark
-                  ? "border-black/10"
-                  : "border-white/20"
-              }
-            `}
-          />
+          <HoverTooltipAnchor
+            label="My Account"
+            isDark={isDark}
+            expanded={expanded}
+            className="flex h-8 w-8 items-center justify-center"
+          >
+            <Avatar
+              name={user?.name || "?"}
+              size="sm"
+              className={`
+                border-2
+                ${
+                  isDark
+                    ? "border-black/10"
+                    : "border-white/20"
+                }
+              `}
+            />
+          </HoverTooltipAnchor>
+          <RailLabel expanded={expanded}>{user?.name || "My Account"}</RailLabel>
         </NavLink>
       </div>
     </aside>

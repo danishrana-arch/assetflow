@@ -3,7 +3,7 @@ const { addCertification, updateCertification, deleteCertification } = require("
 const { requireAuth, requireRole } = require("../middleware/auth.middleware")
 
 const router = express.Router()
-router.use(requireAuth, requireRole("ADMIN", "CEO"))
+router.use(requireAuth, requireRole("ADMIN", "CEO", "MANAGER"))
 router.post("/:id/certifications", addCertification)
 router.patch("/:id/certifications/:certificationId", updateCertification)
 router.delete("/:id/certifications/:certificationId", deleteCertification)

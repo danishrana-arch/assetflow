@@ -287,11 +287,11 @@ export default function Dashboard() {
   ========================================================== */
 
   const isManagement =
-    ["ADMIN", "CEO"].includes(
+    ["ADMIN", "CEO", "MANAGER"].includes(
       user?.role
     )
   const isIT = user?.role === "IT_MANAGER"
-  const isManager = ["ADMIN", "CEO", "HR"].includes(user?.role)
+  const isManager = ["ADMIN", "CEO", "MANAGER", "HR"].includes(user?.role)
 
 
   /* ==========================================================

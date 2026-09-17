@@ -86,8 +86,16 @@ function LocationFlag({ row }) {
 
 export default function Attendance() {
   const { user } = useAuth()
-  const hasAccess = ["ADMIN", "CEO"].includes(user?.role) || !!user?.canManageAttendance
   const queryClient = useQueryClient()
+
+  const { data: permission, isLoading: permissionLoading } = useQuery({
+    queryKey: ["attendance-permission-me"],
+    queryFn: () => api.get("/organization/attendance-permissions/me").then((r) => r.data),
+  })
+  const hasAccess = !!permission?.canRead
+  const canWrite = !!(permission?.canCreate || permission?.canUpdate)
+  const canResolve = !!permission?.canUpdate
+
   const [date] = useState(() => new Date().toISOString().slice(0, 10))
   const [exportRange, setExportRange] = useState(() => {
     const today = new Date().toISOString().slice(0, 10)
@@ -139,6 +147,8 @@ export default function Attendance() {
     document.body.appendChild(link); link.click(); link.remove()
     setTimeout(() => window.URL.revokeObjectURL(url), 1000)
   }
+
+  if (permissionLoading) return <p className="text-sm text-muted">Loading...</p>
 
   if (!hasAccess) {
     return (
@@ -200,14 +210,16 @@ export default function Attendance() {
             <button onClick={exportSheet} className="pill-secondary flex items-center gap-1.5 px-4 py-2.5 text-sm">
               <Download size={15} /> Export
             </button>
-            <button
-              onClick={() => saveDay.mutate()}
-              disabled={!dirty || saveDay.isPending}
-              className="pill-accent flex items-center gap-1.5 px-4 py-2.5 text-sm disabled:opacity-40"
-            >
-              <Save size={15} />
-              {saveDay.isPending ? "Saving…" : "Save"}
-            </button>
+            {canWrite && (
+              <button
+                onClick={() => saveDay.mutate()}
+                disabled={!dirty || saveDay.isPending}
+                className="pill-accent flex items-center gap-1.5 px-4 py-2.5 text-sm disabled:opacity-40"
+              >
+                <Save size={15} />
+                {saveDay.isPending ? "Saving…" : "Save"}
+              </button>
+            )}
           </>
         }
       />
@@ -229,7 +241,9 @@ export default function Attendance() {
                   <p className="text-sm font-semibold text-ink">{a.employeeName || "Employee"} · {a.type}</p>
                   <p className="mt-0.5 text-xs text-muted">{a.message}{a.siteName ? ` · ${a.siteName}` : ""}</p>
                 </div>
-                <button onClick={() => resolveAnomaly.mutate(a.id)} className="pill-secondary px-3 py-1.5 text-xs">Resolve</button>
+                {canResolve && (
+                  <button onClick={() => resolveAnomaly.mutate(a.id)} className="pill-secondary px-3 py-1.5 text-xs">Resolve</button>
+                )}
               </div>
             ))}
           </div>
@@ -266,22 +280,24 @@ export default function Attendance() {
               </div>
               {statusPill(row.status)}
             </div>
-            <div className="mt-3 grid grid-cols-3 gap-2">
-              {Object.entries(STATUS_CONFIG).map(([key, cfg]) => (
-                <button
-                  key={key}
-                  onClick={() => setLocalStatus(row.employeeId, key)}
-                  className={`flex items-center justify-center gap-1.5 rounded-full py-2 text-[11px] font-semibold transition-colors ${
-                    row.status === key
-                      ? `bg-chip-${cfg.tone}-bg text-chip-${cfg.tone}-fg`
-                      : "bg-surface-2 text-muted hover:text-ink"
-                  }`}
-                >
-                  <cfg.icon size={12} strokeWidth={2.5} />
-                  {cfg.label}
-                </button>
-              ))}
-            </div>
+            {canWrite && (
+              <div className="mt-3 grid grid-cols-3 gap-2">
+                {Object.entries(STATUS_CONFIG).map(([key, cfg]) => (
+                  <button
+                    key={key}
+                    onClick={() => setLocalStatus(row.employeeId, key)}
+                    className={`flex items-center justify-center gap-1.5 rounded-full py-2 text-[11px] font-semibold transition-colors ${
+                      row.status === key
+                        ? `bg-chip-${cfg.tone}-bg text-chip-${cfg.tone}-fg`
+                        : "bg-surface-2 text-muted hover:text-ink"
+                    }`}
+                  >
+                    <cfg.icon size={12} strokeWidth={2.5} />
+                    {cfg.label}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         ))}
         {rows.length === 0 && !isLoading && <EmptyState title="No active employees" />}
@@ -298,7 +314,7 @@ export default function Attendance() {
               <th className="px-5 py-3.5">Working time</th>
               <th className="px-5 py-3.5">Location</th>
               <th className="px-5 py-3.5">Status</th>
-              <th className="px-5 py-3.5">Mark</th>
+              {canWrite && <th className="px-5 py-3.5">Mark</th>}
             </tr>
           </thead>
           <tbody>
@@ -327,28 +343,30 @@ export default function Attendance() {
                 <td className="px-5 py-3.5">
                   {statusPill(row.status)}
                 </td>
-                <td className="px-5 py-3.5">
-                  <div className="flex gap-1.5">
-                    {Object.entries(STATUS_CONFIG).map(([key, cfg]) => (
-                      <button
-                        key={key}
-                        onClick={() => setLocalStatus(row.employeeId, key)}
-                        className={`flex items-center gap-1 rounded-full px-3 py-1.5 text-[11px] font-semibold transition-colors ${
-                          row.status === key
-                            ? `bg-chip-${cfg.tone}-bg text-chip-${cfg.tone}-fg`
-                            : "bg-surface-2 text-muted hover:text-ink"
-                        }`}
-                      >
-                        <cfg.icon size={11} strokeWidth={2.5} />
-                        {cfg.label}
-                      </button>
-                    ))}
-                  </div>
-                </td>
+                {canWrite && (
+                  <td className="px-5 py-3.5">
+                    <div className="flex gap-1.5">
+                      {Object.entries(STATUS_CONFIG).map(([key, cfg]) => (
+                        <button
+                          key={key}
+                          onClick={() => setLocalStatus(row.employeeId, key)}
+                          className={`flex items-center gap-1 rounded-full px-3 py-1.5 text-[11px] font-semibold transition-colors ${
+                            row.status === key
+                              ? `bg-chip-${cfg.tone}-bg text-chip-${cfg.tone}-fg`
+                              : "bg-surface-2 text-muted hover:text-ink"
+                          }`}
+                        >
+                          <cfg.icon size={11} strokeWidth={2.5} />
+                          {cfg.label}
+                        </button>
+                      ))}
+                    </div>
+                  </td>
+                )}
               </tr>
             ))}
             {rows.length === 0 && !isLoading && (
-              <tr><td colSpan={7} className="px-5 py-10 text-center text-muted">No active employees.</td></tr>
+              <tr><td colSpan={canWrite ? 7 : 6} className="px-5 py-10 text-center text-muted">No active employees.</td></tr>
             )}
           </tbody>
         </table>

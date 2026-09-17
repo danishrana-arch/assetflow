@@ -57,16 +57,51 @@ class ZktecoAdapter {
       const rows = logs?.data || logs || []
       return rows
         .map((p, i) => ({
-          externalUserId: String(p.user_id ?? p.userId ?? p.uid ?? p.userId),
-          occurredAt: p.record_time || p.timestamp || p.datetime || p.time,
+          externalUserId: String(p.deviceUserId ?? p.user_id ?? p.userId ?? p.uid ?? ""),
+          occurredAt: p.recordTime || p.record_time || p.timestamp || p.datetime || p.time,
           verification: String(p.type ?? p.state ?? "biometric"),
-          externalId: String(p.uid ?? p.id ?? `${p.user_id || p.userId}:${p.record_time || p.timestamp || i}`),
+          externalId: String(p.userSn ?? p.uid ?? p.id ?? `${p.deviceUserId ?? p.user_id ?? p.userId}:${p.recordTime || p.record_time || p.timestamp || i}`),
           rawPayload: p,
         }))
         .filter((p) => p.externalUserId && p.occurredAt)
     } finally {
       try { await zk.disconnect() } catch { /* device may already be gone */ }
     }
+  }
+
+  // Opens one persistent connection and registers for the device's live
+  // event stream (CMD_REG_EVENT) instead of re-pulling and re-decoding the
+  // entire onboard log on a timer — the device pushes each new punch the
+  // moment it happens. onPunch is called once per punch; onError once if the
+  // connection drops, so the caller can reconnect. Returns the underlying
+  // zk handle so the caller can disconnect() on shutdown.
+  async subscribeRealTime(onPunch, onError) {
+    let ZKLib
+    try { ZKLib = require("node-zklib") } catch { throw new Error("ZKTeco adapter requires 'node-zklib' in connector. Run npm install node-zklib") }
+    const zk = new ZKLib(this.c.ipAddress, this.c.port || 4370, 10000, 4000, 0, "tcp")
+    let closed = false
+    const notifyClosed = (reason) => {
+      if (closed) return
+      closed = true
+      if (onError) onError(new Error(`Device connection lost (${reason})`))
+    }
+    await zk.createSocket(
+      (err) => notifyClosed(err?.message || "socket error"),
+      () => notifyClosed("connection closed")
+    )
+    await zk.getRealTimeLogs((record) => {
+      if (!record?.userId || !record?.attTime) return
+      const occurredAt = new Date(record.attTime)
+      if (Number.isNaN(occurredAt.getTime())) return
+      onPunch({
+        externalUserId: String(record.userId),
+        occurredAt: occurredAt.toISOString(),
+        verification: "biometric",
+        externalId: `${record.userId}:${occurredAt.getTime()}`,
+        rawPayload: record,
+      })
+    })
+    return zk
   }
 }
 

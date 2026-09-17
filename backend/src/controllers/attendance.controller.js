@@ -193,13 +193,18 @@ async function exportAttendanceSheet(req, res, next) {
     ])
     const siteNameById = new Map(sites.map((s) => [s.id, s.name]))
     const byKey = new Map(records.map(r => [`${r.employeeId}|${r.date.toISOString().slice(0,10)}`, r]))
-    const rows=[]
+    // One row-array per calendar day so the xlsx branch below can give each
+    // day its own worksheet — a multi-day export previously dumped every
+    // day into one flat sheet, which made it awkward to hand a single
+    // day's attendance to someone else without them scrolling/filtering.
+    const rowsByDay = new Map()
     for (let d=new Date(fromDate); d<endExclusive; d.setUTCDate(d.getUTCDate()+1)) {
       const dateOnly=new Date(d)
       const dayKey=dateOnly.toISOString().slice(0,10)
+      const dayRows=[]
       for (const emp of employees) {
         const record=byKey.get(`${emp.id}|${dayKey}`)
-        rows.push({
+        dayRows.push({
           employee: emp.name, department: emp.department?.name || "", date: dayKey,
           status: record?.status || "ABSENT", site: (record?.siteId && siteNameById.get(record.siteId)) || "",
           locationMode: record?.locationMode || "",
@@ -210,7 +215,9 @@ async function exportAttendanceSheet(req, res, next) {
           gpsAccuracy: record?.gpsAccuracy ?? "", distanceMeters: record?.distanceMeters ?? "",
         })
       }
+      rowsByDay.set(dayKey, dayRows)
     }
+    const rows = [...rowsByDay.values()].flat()
 
     if (format === "csv") {
       const headers=["Employee","Department","Date","Status","Site","Location Mode","Check In","Check Out","Working Minutes","Source","Offline","Latitude","Longitude","GPS Accuracy","Check-in Distance"]
@@ -223,14 +230,19 @@ async function exportAttendanceSheet(req, res, next) {
 
     const workbook=new ExcelJS.Workbook()
     workbook.creator="AssetFlow"
-    const sheet=workbook.addWorksheet("Attendance Report")
-    sheet.columns=[
+    const columns=[
       {header:"Employee",key:"employee",width:24},{header:"Department",key:"department",width:18},{header:"Date",key:"date",width:13},{header:"Status",key:"status",width:15},{header:"Site",key:"site",width:24},{header:"Location Mode",key:"locationMode",width:15},{header:"Check In",key:"checkIn",width:24},{header:"Check Out",key:"checkOut",width:24},{header:"Working Minutes",key:"workingMinutes",width:17},{header:"Source",key:"source",width:13},{header:"Offline",key:"offline",width:10},{header:"Latitude",key:"latitude",width:14},{header:"Longitude",key:"longitude",width:14},{header:"GPS Accuracy",key:"gpsAccuracy",width:15},{header:"Check-in Distance",key:"distanceMeters",width:18},
     ]
-    rows.forEach(r=>sheet.addRow(r))
-    sheet.getRow(1).font={bold:true}
-    sheet.views=[{state:"frozen",ySplit:1}]
-    sheet.autoFilter={from:"A1",to:`O${Math.max(1,rows.length+1)}`}
+    // One sheet per calendar day, named by that day (e.g. "2026-09-17") —
+    // a single-day export still yields exactly one sheet, unchanged from before.
+    for (const [dayKey, dayRows] of rowsByDay) {
+      const sheet=workbook.addWorksheet(dayKey)
+      sheet.columns=columns
+      dayRows.forEach(r=>sheet.addRow(r))
+      sheet.getRow(1).font={bold:true}
+      sheet.views=[{state:"frozen",ySplit:1}]
+      sheet.autoFilter={from:"A1",to:`O${Math.max(1,dayRows.length+1)}`}
+    }
 
     res.setHeader("Content-Type","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
     res.setHeader("Content-Disposition",`attachment; filename="Attendance_${from}_${to}.xlsx"`)
@@ -241,18 +253,24 @@ async function exportAttendanceSheet(req, res, next) {
 
 async function markSelfAttendance(req, res, next) {
   try {
-    const { organizationId, userId } = req.user
+    const { userId } = req.user
     const { status, latitude, longitude, siteId, locationMode } = req.body || {}
     if (!['PRESENT','ABSENT'].includes(status)) return res.status(400).json({ error: 'status must be one of: PRESENT, ABSENT' })
     const validLocationModes = ['OFFICE', 'FIELD', 'WFH']
     const mode = validLocationModes.includes(locationMode) ? locationMode : 'OFFICE'
     const isWfh = mode === 'WFH'
 
-    const [organization, employee] = await Promise.all([
-      prisma.organization.findUnique({ where: { id: organizationId }, select: { geofenceEnabled:true, officeLatitude:true, officeLongitude:true, geofenceRadiusMeters:true, shiftStartDefault:true, lateThresholdMinutes:true, timezone:true, breakStart:true, breakEnd:true } }),
-      prisma.user.findUnique({ where: { id: userId }, select: { workLocationType:true, shiftStart:true } }),
-    ])
-    if (!organization || !employee) return res.status(404).json({ error: 'Employee or organization not found' })
+    // Self-attendance is always tied to the employee's real home
+    // organization, never req.user.organizationId — applyOrganizationScope
+    // can reassign that for the duration of a request when the caller is
+    // viewing another organization (e.g. a cross-org IT_MANAGER browsing
+    // inventory elsewhere), and their own attendance must still land
+    // against their actual employer.
+    const employee = await prisma.user.findUnique({ where: { id: userId }, select: { workLocationType:true, shiftStart:true, organizationId:true } })
+    if (!employee) return res.status(404).json({ error: 'Employee or organization not found' })
+    const organizationId = employee.organizationId
+    const organization = await prisma.organization.findUnique({ where: { id: organizationId }, select: { geofenceEnabled:true, officeLatitude:true, officeLongitude:true, geofenceRadiusMeters:true, shiftStartDefault:true, lateThresholdMinutes:true, timezone:true, breakStart:true, breakEnd:true } })
+    if (!organization) return res.status(404).json({ error: 'Employee or organization not found' })
     const today=startOfDay(null, organization.timezone)
     const existing=await prisma.attendanceRecord.findUnique({ where:{ employeeId_date:{employeeId:userId,date:today} } })
     if (existing?.status==='LEAVE') return res.status(400).json({ error:'Today is already recorded as leave' })
@@ -331,8 +349,13 @@ async function markSelfAttendance(req, res, next) {
 // Employee self-service: their own recent attendance history.
 async function getSelfAttendance(req, res, next) {
   try {
-    const { userId, organizationId } = req.user
-    const organization = await prisma.organization.findUnique({ where: { id: organizationId }, select: { timezone: true } })
+    const { userId } = req.user
+    // Same reasoning as markSelfAttendance — always use the employee's real
+    // home organization for their own timezone, not the switched-scope one.
+    const employee = await prisma.user.findUnique({ where: { id: userId }, select: { organizationId: true } })
+    const organization = employee
+      ? await prisma.organization.findUnique({ where: { id: employee.organizationId }, select: { timezone: true } })
+      : null
     const today = startOfDay(null, organization?.timezone)
     const since = new Date(today)
     since.setUTCDate(since.getUTCDate() - 30)
@@ -363,9 +386,15 @@ module.exports = {
 // The client event ID makes the operation idempotent.
 async function syncOfflineAttendance(req, res, next) {
   try {
-    const { organizationId, userId } = req.user
+    const { userId } = req.user
     const events = Array.isArray(req.body?.events) ? req.body.events.slice(0, 100) : []
     if (!events.length) return res.json({ synced: 0, duplicates: 0, rejected: [] })
+
+    // Same reasoning as markSelfAttendance — always resolve the employee's
+    // real home organization, not the switched-scope req.user.organizationId.
+    const employee = await prisma.user.findUnique({ where: { id: userId }, select: { organizationId: true } })
+    if (!employee) return res.status(404).json({ error: "Employee not found" })
+    const organizationId = employee.organizationId
 
     const org = await prisma.organization.findUnique({
       where: { id: organizationId },
@@ -647,9 +676,14 @@ async function resolveAttendanceAnomaly(req, res, next) {
 
 async function createAttendanceCorrection(req, res, next) {
   try {
-    const { userId, organizationId } = req.user
+    const { userId } = req.user
     const { requestedCheckInAt, requestedCheckOutAt, reason, attendanceId } = req.body
     if (!String(reason || "").trim()) return res.status(400).json({ error: "A reason is required" })
+    // Same reasoning as markSelfAttendance — always resolve the employee's
+    // real home organization, not the switched-scope req.user.organizationId.
+    const employee = await prisma.user.findUnique({ where: { id: userId }, select: { organizationId: true } })
+    if (!employee) return res.status(404).json({ error: "Employee not found" })
+    const organizationId = employee.organizationId
     const correctionId = `cor_${Date.now().toString(36)}_${crypto.randomBytes(4).toString("hex")}`
     await prisma.$executeRaw`
       INSERT INTO "AttendanceCorrection"

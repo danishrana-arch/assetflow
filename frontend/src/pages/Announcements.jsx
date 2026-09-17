@@ -8,7 +8,7 @@ import SectionHeader from "../components/ui/SectionHeader"
 import { TextField, SelectField } from "../components/ui/Field"
 
 export default function Announcements(){
- const {user}=useAuth(), qc=useQueryClient(), management=["ADMIN","CEO"].includes(user?.role)
+ const {user}=useAuth(), qc=useQueryClient(), management=["ADMIN","CEO","MANAGER"].includes(user?.role)
  const [title,setTitle]=useState(""),[body,setBody]=useState(""),[audienceType,setAudienceType]=useState("ALL"),[audienceId,setAudienceId]=useState("")
  const {data:rows=[]}=useQuery({queryKey:["announcements"],queryFn:()=>api.get("/dashboard/announcements").then(r=>r.data)})
  const {data:departments=[]}=useQuery({queryKey:["departments"],queryFn:()=>api.get("/departments").then(r=>r.data),enabled:management})

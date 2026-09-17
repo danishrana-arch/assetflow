@@ -8,7 +8,7 @@ const {
 const { requireAuth, requireRole } = require("../middleware/auth.middleware")
 
 const router = express.Router()
-router.use(requireAuth, requireRole("ADMIN", "CEO"))
+router.use(requireAuth, requireRole("ADMIN", "CEO", "MANAGER"))
 router.get("/", listEmployeeForms)
 router.post("/", createEmployeeForm)
 router.patch("/:id/toggle", toggleEmployeeForm)

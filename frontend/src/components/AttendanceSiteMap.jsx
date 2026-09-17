@@ -32,7 +32,10 @@ function boundaryCenter(boundary) {
   }
 }
 
-function ClickToPlace({ onPoint }) {
+// Exported so other single-marker map pickers (e.g. the organization's
+// office-location setting) can reuse click-to-place + the geocoder search
+// box without duplicating this logic or re-running the Leaflet icon-URL fix.
+export function ClickToPlace({ onPoint }) {
   useMapEvents({ click: (e) => onPoint(e.latlng) })
   return null
 }
@@ -60,7 +63,7 @@ async function geocode(q) {
 // Free-text location search using OpenStreetMap's Nominatim geocoder (no
 // API key). Results are requested in English regardless of the searched
 // place's local language, to match the English basemap.
-function LocationSearch({ onPick }) {
+export function LocationSearch({ onPick }) {
   const map = useMap()
   const boxRef = useRef(null)
   const debounceRef = useRef(null)

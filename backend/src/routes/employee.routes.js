@@ -37,6 +37,6 @@ router.patch("/:id", requireManagementOrSelf, updateEmployee)
 // Admin-assisted "forgot password" — management resets to a known temp
 // password since there's no email-reset flow.
 router.post("/:id/reset-password", requireManagement, resetPassword)
-router.delete("/:id", requireRole("ADMIN", "CEO"), deleteEmployee)
+router.delete("/:id", requireRole("ADMIN", "CEO", "MANAGER"), deleteEmployee)
 
 module.exports = router

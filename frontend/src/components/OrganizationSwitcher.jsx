@@ -2,7 +2,6 @@ import { useState } from "react"
 import { Building2, ChevronDown, Loader2 } from "lucide-react"
 import { useQueryClient } from "@tanstack/react-query"
 import { useAuth } from "../context/AuthContext"
-import { isManagement } from "../utils/roles"
 
 export default function OrganizationSwitcher({ compact = false }) {
   const { user, organization, organizations, switchOrganization } = useAuth()
@@ -11,7 +10,7 @@ export default function OrganizationSwitcher({ compact = false }) {
 
   if (!user) return null
 
-  const canSwitch = isManagement(user.role) && ["ADMIN", "CEO"].includes(user.role) && organizations.length > 1
+  const canSwitch = ["ADMIN", "CEO", "IT_MANAGER"].includes(user.role) && organizations.length > 1
   const main = organizations.find((org) => org.id === organization?.companyId || org.isMain) || organization
 
   async function handleChange(event) {

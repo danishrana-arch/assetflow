@@ -19,6 +19,7 @@ const Welcome = lazy(() => import("./pages/Welcome"))
 const Dashboard = lazy(() => import("./pages/Dashboard"))
 const Employees = lazy(() => import("./pages/Employees"))
 const EmployeeProfile = lazy(() => import("./pages/EmployeeProfile"))
+const EmployeeAttendanceHistory = lazy(() => import("./pages/EmployeeAttendanceHistory"))
 const Inventory = lazy(() => import("./pages/Inventory"))
 const AssetProfile = lazy(() => import("./pages/AssetProfile"))
 const Assignments = lazy(() => import("./pages/Assignments"))
@@ -70,7 +71,7 @@ function RequireManagement({ children }) {
 
 function RequireOwner({ children }) {
   const { user } = useAuth()
-  if (!["ADMIN", "CEO"].includes(user?.role)) return <Navigate to="/" replace />
+  if (!["ADMIN", "CEO", "MANAGER"].includes(user?.role)) return <Navigate to="/" replace />
   return children
 }
 
@@ -123,6 +124,7 @@ function ProtectedShell() {
           <Route path="/dashboard" element={isManager || isIT ? <Dashboard /> : <Navigate to={`/employees/${user.id}`} replace />} />
           <Route path="/employees" element={<RequireEmployeeDirectory><Employees /></RequireEmployeeDirectory>} />
           <Route path="/employees/:id" element={<EmployeeProfile />} />
+          <Route path="/employees/:id/attendance" element={<EmployeeAttendanceHistory />} />
           <Route path="/employee-360/:id" element={<Employee360 />} />
           <Route path="/inventory" element={<RequireInventoryAccess><Inventory /></RequireInventoryAccess>} />
           <Route path="/inventory/:id" element={<RequireInventoryAccess><AssetProfile /></RequireInventoryAccess>} />

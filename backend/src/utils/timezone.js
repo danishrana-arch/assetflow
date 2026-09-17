@@ -74,6 +74,27 @@ function localDateKeyToUtc(dateKey, timeZone) {
   return new Date(guess)
 }
 
+// Same iterative-correction technique as localDateKeyToUtc, but for a full
+// wall-clock timestamp rather than just a calendar date — for parsing a
+// device's own local-time string (no timezone marker, e.g. ADMS's
+// "YYYY-MM-DD HH:MM:SS") into a correct UTC instant. Interpreting it with
+// `new Date(str)` instead would use the server process's OS timezone, which
+// only happens to match by coincidence in local dev and silently produces
+// wrong-by-hours timestamps once deployed somewhere set to UTC.
+function localDateTimeToUtc(dateTimeStr, timeZone) {
+  const match = String(dateTimeStr || "").match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/)
+  if (!match) return new Date(NaN)
+  const [, y, mo, d, h, mi, s] = match.map(Number)
+  const target = Date.UTC(y, mo - 1, d, h, mi, s)
+  let guess = target
+  for (let i = 0; i < 4; i += 1) {
+    const p = zonedParts(new Date(guess), timeZone)
+    const represented = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)
+    guess += target - represented
+  }
+  return new Date(guess)
+}
+
 module.exports = {
   isValidTimeZone,
   getTimeZone,
@@ -84,4 +105,5 @@ module.exports = {
   isWithinTimeRange,
   isWithinBreak,
   localDateKeyToUtc,
+  localDateTimeToUtc,
 }

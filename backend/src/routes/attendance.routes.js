@@ -12,7 +12,8 @@ const {
   createAttendanceCorrection,
   listAttendanceCorrections,
 } = require("../controllers/attendance.controller")
-const { requireAuth, requireAttendanceAccess } = require("../middleware/auth.middleware")
+const { requireAuth } = require("../middleware/auth.middleware")
+const { requireAttendancePermission } = require("../utils/permissions")
 const { startAttendanceAutoAbsentJob } = require("../services/attendance-auto-absent.service")
 
 const router = express.Router()
@@ -27,13 +28,15 @@ router.post("/self/mark", markSelfAttendance)
 router.post("/self/offline-sync", syncOfflineAttendance)
 router.post("/self/corrections", createAttendanceCorrection)
 
-// Full attendance grid — designated attendance admins / owner only.
-router.get("/", requireAttendanceAccess, getDailyAttendance)
-router.post("/mark", requireAttendanceAccess, markAttendance)
-router.post("/save", requireAttendanceAccess, saveDayAttendance)
-router.get("/export", requireAttendanceAccess, exportAttendanceSheet)
-router.get("/anomalies", requireAttendanceAccess, getAttendanceAnomalies)
-router.patch("/anomalies/:id/resolve", requireAttendanceAccess, resolveAttendanceAnomaly)
-router.get("/corrections", requireAttendanceAccess, listAttendanceCorrections)
+// Full attendance grid — gated by the per-role Attendance permission matrix
+// (Settings), not a fixed role list. ADMIN/CEO/MANAGER are always full
+// access; everyone else is whatever's configured (HR defaults to read-only).
+router.get("/", requireAttendancePermission("canRead"), getDailyAttendance)
+router.post("/mark", requireAttendancePermission("canCreate", "canUpdate"), markAttendance)
+router.post("/save", requireAttendancePermission("canCreate", "canUpdate"), saveDayAttendance)
+router.get("/export", requireAttendancePermission("canRead"), exportAttendanceSheet)
+router.get("/anomalies", requireAttendancePermission("canRead"), getAttendanceAnomalies)
+router.patch("/anomalies/:id/resolve", requireAttendancePermission("canUpdate"), resolveAttendanceAnomaly)
+router.get("/corrections", requireAttendancePermission("canRead"), listAttendanceCorrections)
 
 module.exports = router

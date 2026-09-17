@@ -43,12 +43,24 @@ export default function AttendanceDevices() {
     </div><div className="mt-5 flex gap-2"><button className="pill-accent px-4 py-2" disabled={create.isPending || !form.name} onClick={() => create.mutate()}>{create.isPending ? "Connecting…" : "Create device"}</button><button className="pill-secondary px-4 py-2" onClick={() => setShowAdd(false)}>Cancel</button></div></div>}
     {isLoading ? <div className="card p-6">Loading devices…</div> : <div className="grid gap-4 lg:grid-cols-2">{data.map(d => <div className="card p-5" key={d.id}><div className="flex items-start justify-between gap-3"><div><h3 className="font-semibold text-ink">{d.name}</h3><p className="mt-1 text-xs text-muted">{d.vendor}{d.model ? ` · ${d.model}` : ""}</p></div><span className={`flex items-center gap-1 text-xs font-medium ${d.lastSeenAt && Date.now()-new Date(d.lastSeenAt).getTime()<120000 ? "text-chip-green-fg" : "text-muted"}`}>{d.lastSeenAt && Date.now()-new Date(d.lastSeenAt).getTime()<120000 ? <><Wifi size={14}/> Online</> : <><WifiOff size={14}/> Offline</>}</span></div><div className="mt-4 grid grid-cols-2 gap-2 text-xs text-muted"><div>IP: <b className="text-ink">{d.ipAddress || "—"}</b></div><div>Port: <b className="text-ink">{d.port || "—"}</b></div><div>Mode: <b className="text-ink">{d.connectionMode}</b></div><div>Door: <b className="text-ink">{d.doorEnabled ? `${d.unlockSeconds}s` : "Off"}</b></div></div><div className="mt-4 border-t border-border pt-4">
   <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Employee mapping</p>
-  <div className="flex flex-wrap gap-2">
+  <div className="flex flex-wrap items-center gap-2">
     <select className="input min-w-[180px]" value={mapping[d.id]?.employeeId || ""} onChange={e => setMapping(m => ({...m, [d.id]: {...(m[d.id]||{}), employeeId:e.target.value}}))}>
       <option value="">Select employee</option>{employees.filter(e => e.status === "ACTIVE").map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
     </select>
     <input className="input min-w-[140px]" placeholder="Device User ID" value={mapping[d.id]?.externalUserId || ""} onChange={e => setMapping(m => ({...m, [d.id]: {...(m[d.id]||{}), externalUserId:e.target.value}}))}/>
-    <button className="pill-secondary px-3 py-2 text-xs" disabled={!mapping[d.id]?.employeeId || !mapping[d.id]?.externalUserId} onClick={() => mapEmployee.mutate({ id:d.id, ...mapping[d.id] })}>Save mapping</button>
+    <button
+      className="pill-secondary px-3 py-2 text-xs disabled:opacity-60"
+      disabled={!mapping[d.id]?.employeeId || !mapping[d.id]?.externalUserId || (mapEmployee.isPending && mapEmployee.variables?.id === d.id)}
+      onClick={() => mapEmployee.mutate({ id: d.id, ...mapping[d.id] })}
+    >
+      {mapEmployee.isPending && mapEmployee.variables?.id === d.id ? "Saving…" : "Save mapping"}
+    </button>
+    {mapEmployee.isSuccess && mapEmployee.variables?.id === d.id && (
+      <span className="text-xs text-chip-green-fg">Saved.</span>
+    )}
+    {mapEmployee.isError && mapEmployee.variables?.id === d.id && (
+      <span className="text-xs text-chip-pink-fg">{mapEmployee.error?.response?.data?.error || "Could not save mapping"}</span>
+    )}
   </div>
 </div>
 <div className="mt-4 flex flex-wrap gap-2"><button className="pill-secondary px-3 py-2 text-xs" onClick={() => rotate.mutate(d.id)}><RefreshCw size={13}/> Rotate token</button><button className="pill-secondary px-3 py-2 text-xs" onClick={() => navigator.clipboard.writeText(d.id)}><PlugZap size={13}/> Copy device ID</button>{d.doorEnabled && <span className="pill-secondary flex items-center gap-1 px-3 py-2 text-xs"><DoorOpen size={13}/> Door enabled</span>}<button className="ml-auto rounded-xl px-3 py-2 text-xs text-red-600 hover:bg-red-50" onClick={() => { if(confirm(`Remove ${d.name}?`)) remove.mutate(d.id) }}><Trash2 size={13}/></button></div></div>)}</div>}

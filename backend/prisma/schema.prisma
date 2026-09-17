@@ -44,6 +44,7 @@ model Organization {
   assets                    Asset[]
   AttendanceAnomaly         AttendanceAnomaly[]
   AttendanceCorrection      AttendanceCorrection[]
+  AttendancePermission      AttendancePermission[]
   AttendancePresenceEvent   AttendancePresenceEvent[]
   AttendanceSite            AttendanceSite[]
   AttendanceSyncEvent       AttendanceSyncEvent[]
@@ -831,6 +832,25 @@ model AttendanceSyncEvent {
 
   @@index([employeeId, status])
   @@index([organizationId, createdAt])
+}
+
+// Per-role, per-organization CRUD grant for the Attendance module, editable
+// by ADMIN/CEO/MANAGER from Settings. Roles with no row here fall back to a
+// hardcoded default (see backend/src/utils/permissions.js) — ADMIN/CEO/
+// MANAGER never get a row at all, since they're always full-access and
+// can't be downgraded through this table.
+model AttendancePermission {
+  id             String       @id @default(cuid())
+  organizationId String
+  role           UserRole
+  canCreate      Boolean      @default(false)
+  canRead        Boolean      @default(false)
+  canUpdate      Boolean      @default(false)
+  canDelete      Boolean      @default(false)
+  updatedAt      DateTime     @updatedAt
+  Organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, role])
 }
 
 model TimeEntry {

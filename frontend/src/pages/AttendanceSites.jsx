@@ -131,7 +131,7 @@ export default function AttendanceSites() {
     <div>
       <PageHeader title="Attendance Sites" subtitle="Draw real project boundaries, assign them through projects, and control site attendance." backTo="/attendance" />
 
-      <div className="grid gap-5 xl:grid-cols-[380px_1fr]">
+      <div className="space-y-5">
         <div className="card p-5">
           <div className="mb-4 flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
@@ -144,41 +144,48 @@ export default function AttendanceSites() {
               </button>
             )}
           </div>
-          <div className="space-y-3">
-            <label className="block">
-              <span className="mb-1 block text-xs font-semibold text-muted">Organization</span>
-              {isMainCompanyAdmin ? (
-                <select value={form.organizationId || organization?.id || ""} onChange={(e) => setForm((f) => ({ ...f, organizationId: e.target.value, projectId: "" }))} className="field w-full">
-                  {organizations.map((org) => <option key={org.id} value={org.id}>{org.isMain ? `${org.name} (Main)` : org.name}</option>)}
+          <div className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <label className="block">
+                <span className="mb-1 block text-xs font-semibold text-muted">Organization</span>
+                {isMainCompanyAdmin ? (
+                  <select value={form.organizationId || organization?.id || ""} onChange={(e) => setForm((f) => ({ ...f, organizationId: e.target.value, projectId: "" }))} className="field w-full">
+                    {organizations.map((org) => <option key={org.id} value={org.id}>{org.isMain ? `${org.name} (Main)` : org.name}</option>)}
+                  </select>
+                ) : (
+                  <div className="field w-full bg-surface-2 text-sm font-semibold text-ink">{organization?.name || "Current organization"}</div>
+                )}
+              </label>
+
+              <label className="block"><span className="mb-1 block text-xs font-semibold text-muted">Site name</span><input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} className="field w-full" placeholder="DHA Construction Site" /></label>
+              <label className="block"><span className="mb-1 block text-xs font-semibold text-muted">Address</span><input value={form.address} onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))} className="field w-full" placeholder="Project address" /></label>
+
+              <label className="block">
+                <span className="mb-1 block text-xs font-semibold text-muted">Linked project</span>
+                <select value={form.projectId} onChange={(e) => setForm((f) => ({ ...f, projectId: e.target.value }))} className="field w-full">
+                  <option value="">No project / permanent office</option>
+                  {projects.map((project) => <option key={project.id} value={project.id}>{project.name} · {project.status}</option>)}
                 </select>
-              ) : (
-                <div className="field w-full bg-surface-2 text-sm font-semibold text-ink">{organization?.name || "Current organization"}</div>
-              )}
-            </label>
+                {selectedProject && <span className="mt-1 block text-[10px] text-muted-2">Employees assigned to this project can automatically use this attendance site. Completed projects are excluded.</span>}
+              </label>
 
-            <label className="block"><span className="mb-1 block text-xs font-semibold text-muted">Site name</span><input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} className="field w-full" placeholder="DHA Construction Site" /></label>
-            <label className="block"><span className="mb-1 block text-xs font-semibold text-muted">Address</span><input value={form.address} onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))} className="field w-full" placeholder="Project address" /></label>
+              <label className="block">
+                <span className="mb-1 flex items-center gap-1 text-xs font-semibold text-muted"><Clock3 size={12} /> Site time zone</span>
+                <select value={form.timezone} onChange={(e) => setForm((f) => ({ ...f, timezone: e.target.value }))} className="field w-full">
+                  {TIMEZONE_GROUPS.map(([region, zones]) => (
+                    <optgroup key={region} label={region}>
+                      {zones.map((tz) => <option key={tz} value={tz}>{timezoneLabel(tz)}</option>)}
+                    </optgroup>
+                  ))}
+                </select>
+                <span className="mt-1 block text-[10px] text-muted-2">Attendance, breaks, late time and end-of-day calculations use this site's time zone.</span>
+              </label>
 
-            <label className="block">
-              <span className="mb-1 block text-xs font-semibold text-muted">Linked project</span>
-              <select value={form.projectId} onChange={(e) => setForm((f) => ({ ...f, projectId: e.target.value }))} className="field w-full">
-                <option value="">No project / permanent office</option>
-                {projects.map((project) => <option key={project.id} value={project.id}>{project.name} · {project.status}</option>)}
-              </select>
-              {selectedProject && <span className="mt-1 block text-[10px] text-muted-2">Employees assigned to this project can automatically use this attendance site. Completed projects are excluded.</span>}
-            </label>
+              <label className="block"><span className="mb-1 block text-xs font-semibold text-muted">Geofence mode</span><select value={form.geofenceMode} onChange={(e) => setForm((f) => ({ ...f, geofenceMode: e.target.value }))} className="field w-full"><option value="STRICT">Strict — block outside check-in</option><option value="WARNING">Warning — record anomaly</option><option value="DISABLED">Disabled</option></select></label>
 
-            <label className="block">
-              <span className="mb-1 flex items-center gap-1 text-xs font-semibold text-muted"><Clock3 size={12} /> Site time zone</span>
-              <select value={form.timezone} onChange={(e) => setForm((f) => ({ ...f, timezone: e.target.value }))} className="field w-full">
-                {TIMEZONE_GROUPS.map(([region, zones]) => (
-                  <optgroup key={region} label={region}>
-                    {zones.map((tz) => <option key={tz} value={tz}>{timezoneLabel(tz)}</option>)}
-                  </optgroup>
-                ))}
-              </select>
-              <span className="mt-1 block text-[10px] text-muted-2">Attendance, breaks, late time and end-of-day calculations use this site's time zone.</span>
-            </label>
+              <label className="block"><span className="mb-1 block text-xs font-semibold text-muted">Radius fallback (m)</span><input type="number" min="25" max="5000" value={form.radiusMeters} onChange={(e) => setForm((f) => ({ ...f, radiusMeters: e.target.value }))} className="field w-full" /></label>
+              <label className="block"><span className="mb-1 block text-xs font-semibold text-muted">Outside grace (min)</span><input type="number" min="5" max="720" value={form.outsideGraceMinutes} onChange={(e) => setForm((f) => ({ ...f, outsideGraceMinutes: e.target.value }))} className="field w-full" /></label>
+            </div>
 
             <div>
               <span className="mb-2 block text-xs font-semibold text-muted">Actual site boundary</span>
@@ -193,18 +200,11 @@ export default function AttendanceSites() {
               {form.geofenceType === "POLYGON" && form.boundary.length < 4 && <p className="mt-1 text-[10px] text-chip-yellow-fg">Draw at least 4 points around the actual construction property.</p>}
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <label className="block"><span className="mb-1 block text-xs font-semibold text-muted">Radius fallback (m)</span><input type="number" min="25" max="5000" value={form.radiusMeters} onChange={(e) => setForm((f) => ({ ...f, radiusMeters: e.target.value }))} className="field w-full" /></label>
-              <label className="block"><span className="mb-1 block text-xs font-semibold text-muted">Outside grace (min)</span><input type="number" min="5" max="720" value={form.outsideGraceMinutes} onChange={(e) => setForm((f) => ({ ...f, outsideGraceMinutes: e.target.value }))} className="field w-full" /></label>
-            </div>
-
-            <label className="block"><span className="mb-1 block text-xs font-semibold text-muted">Geofence mode</span><select value={form.geofenceMode} onChange={(e) => setForm((f) => ({ ...f, geofenceMode: e.target.value }))} className="field w-full"><option value="STRICT">Strict — block outside check-in</option><option value="WARNING">Warning — record anomaly</option><option value="DISABLED">Disabled</option></select></label>
-
             {error && <div className="rounded-2xl bg-chip-pink-bg px-3 py-2 text-xs text-chip-pink-fg">{error}</div>}
             {editingId ? (
-              <button onClick={() => update.mutate()} disabled={update.isPending || !form.name.trim() || !form.latitude || !form.longitude || (form.geofenceType === "POLYGON" && form.boundary.length < 4)} className="pill-accent flex w-full items-center justify-center gap-1.5 px-4 py-2.5 text-sm disabled:opacity-50"><Save size={14} /> {update.isPending ? "Saving…" : "Save changes"}</button>
+              <button onClick={() => update.mutate()} disabled={update.isPending || !form.name.trim() || !form.latitude || !form.longitude || (form.geofenceType === "POLYGON" && form.boundary.length < 4)} className="pill-accent flex w-full items-center justify-center gap-1.5 px-4 py-2.5 text-sm disabled:opacity-50 sm:w-auto"><Save size={14} /> {update.isPending ? "Saving…" : "Save changes"}</button>
             ) : (
-              <button onClick={() => create.mutate()} disabled={create.isPending || !form.name.trim() || !form.latitude || !form.longitude || (form.geofenceType === "POLYGON" && form.boundary.length < 4)} className="pill-accent flex w-full items-center justify-center gap-1.5 px-4 py-2.5 text-sm disabled:opacity-50"><Save size={14} /> {create.isPending ? "Creating…" : "Create site"}</button>
+              <button onClick={() => create.mutate()} disabled={create.isPending || !form.name.trim() || !form.latitude || !form.longitude || (form.geofenceType === "POLYGON" && form.boundary.length < 4)} className="pill-accent flex w-full items-center justify-center gap-1.5 px-4 py-2.5 text-sm disabled:opacity-50 sm:w-auto"><Save size={14} /> {create.isPending ? "Creating…" : "Create site"}</button>
             )}
           </div>
         </div>
