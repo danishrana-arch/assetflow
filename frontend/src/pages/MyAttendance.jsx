@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { CheckCircle2, XCircle, Palmtree, Send, Ban, MapPin, Wifi, WifiOff, RefreshCw, AlertTriangle } from "lucide-react"
+import { CheckCircle2, XCircle, Palmtree, Send, Ban, MapPin, Wifi, WifiOff, RefreshCw } from "lucide-react"
 import api from "../api/client"
 import { useAuth } from "../context/AuthContext"
 import PageHeader from "../components/ui/PageHeader"
@@ -43,7 +43,6 @@ export default function MyAttendance() {
   const [offlineVerification, setOfflineVerification] = useState(null)
   const [locating, setLocating] = useState(false)
   const [locationError, setLocationError] = useState("")
-  const [flagNotice, setFlagNotice] = useState(null)
   const [leaveForm, setLeaveForm] = useState({ startDate: "", endDate: "", reason: "", type: "CASUAL" })
   const [leaveError, setLeaveError] = useState("")
   const [locationMode, setLocationMode] = useState("OFFICE")
@@ -175,7 +174,6 @@ export default function MyAttendance() {
 
   async function handleMark(type) {
     setLocationError("")
-    setFlagNotice(null)
     const isWfh = type === "CHECK_IN" && effectiveLocationMode === "WFH"
     if (type === "CHECK_IN") startCheckInFill()
 
@@ -236,7 +234,7 @@ export default function MyAttendance() {
     if (navigator.onLine) {
       try {
         if (type === "CHECK_IN") {
-          const response = await api.post("/attendance/self/mark", {
+          await api.post("/attendance/self/mark", {
             status: "PRESENT",
             latitude: event.latitude,
             longitude: event.longitude,
@@ -245,9 +243,6 @@ export default function MyAttendance() {
             locationMode: event.locationMode,
             clientEventId: event.clientEventId,
           })
-          if (response.data?.autoFlagged) {
-            setFlagNotice("Your location was outside the configured office geofence and the server flagged the attendance for review.")
-          }
           finishCheckInFill()
         } else {
           // Checkout is intentionally queued through the offline-safe endpoint.
@@ -256,10 +251,17 @@ export default function MyAttendance() {
         }
         queryClient.invalidateQueries({ queryKey: ["attendance-self"] })
         return
-      } catch {
-        // Network/API failure — reset the fill rather than leave it stuck;
-        // the event still gets queued locally below.
+      } catch (err) {
         if (type === "CHECK_IN") resetCheckInFill()
+        // A geofence rejection (403) is a deliberate "not marked" outcome, not
+        // a connectivity failure — queuing it offline would just fail again
+        // the same way once it syncs. Show the reason and stop; anything
+        // else (network drop, server unreachable) still falls through to
+        // the offline queue below.
+        if (err?.response?.status === 403) {
+          setLocationError(err.response?.data?.error || "You are outside the allowed location. Attendance was not marked.")
+          return
+        }
       }
     } else if (type === "CHECK_IN") {
       resetCheckInFill()
@@ -405,7 +407,6 @@ export default function MyAttendance() {
               </p>
 
               {locationError && <div className="mt-3 rounded-2xl bg-chip-pink-bg px-3 py-2.5 text-xs font-medium text-chip-pink-fg">{locationError}</div>}
-              {flagNotice && <div className="mt-3 flex items-start gap-2 rounded-2xl bg-chip-yellow-bg px-3 py-2.5 text-xs text-chip-yellow-fg"><AlertTriangle size={14} />{flagNotice}</div>}
             </>
           )}
 

@@ -48,6 +48,11 @@ export default function Settings() {
   const [officeLongitude, setOfficeLongitude] = useState("")
   const [geofenceRadiusMeters, setGeofenceRadiusMeters] = useState(200)
   const [locatingOffice, setLocatingOffice] = useState(false)
+  const [brandingError, setBrandingError] = useState("")
+  const [policyError, setPolicyError] = useState("")
+  const [scheduleError, setScheduleError] = useState("")
+  const [geofenceError, setGeofenceError] = useState("")
+  const [payrollError, setPayrollError] = useState("")
 
   const { data: organization } = useQuery({
     queryKey: ["organization"],
@@ -75,25 +80,42 @@ export default function Settings() {
       setOfficeLatitude(organization.officeLatitude ?? "")
       setOfficeLongitude(organization.officeLongitude ?? "")
       setGeofenceRadiusMeters(organization.geofenceRadiusMeters ?? 200)
+      // Clear any error left over from a previous organization — otherwise a
+      // stale message from company A stays on screen after switching to B.
+      setBrandingError("")
+      setPolicyError("")
+      setScheduleError("")
+      setGeofenceError("")
+      setPayrollError("")
     }
   }, [organization])
 
   const save = useMutation({
     mutationFn: () => api.patch("/organization", { name, primaryColor }),
     onSuccess: (res) => {
+      setBrandingError("")
       queryClient.invalidateQueries({ queryKey: ["organization"] })
       applyAccent(res.data.primaryColor)
     },
+    onError: (err) => setBrandingError(err.response?.data?.error || "Could not save — please try again"),
   })
 
   const savePolicy = useMutation({
     mutationFn: () => api.patch("/organization", { sickLeaveAllowance, casualLeaveAllowance }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["organization"] }),
+    onSuccess: () => {
+      setPolicyError("")
+      queryClient.invalidateQueries({ queryKey: ["organization"] })
+    },
+    onError: (err) => setPolicyError(err.response?.data?.error || "Could not save — please try again"),
   })
 
   const saveWorkSchedule = useMutation({
     mutationFn: () => api.patch("/organization", { workingHoursPerDay, workingDaysPerWeek, shiftStartDefault, shiftEndDefault, lateThresholdMinutes, timezone, breakStart: breakStart || null, breakEnd: breakEnd || null }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["organization"] }),
+    onSuccess: () => {
+      setScheduleError("")
+      queryClient.invalidateQueries({ queryKey: ["organization"] })
+    },
+    onError: (err) => setScheduleError(err.response?.data?.error || "Could not save — please try again"),
   })
 
   const saveGeofence = useMutation({
@@ -104,7 +126,11 @@ export default function Settings() {
         officeLongitude: officeLongitude === "" ? null : Number(officeLongitude),
         geofenceRadiusMeters: Number(geofenceRadiusMeters),
       }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["organization"] }),
+    onSuccess: () => {
+      setGeofenceError("")
+      queryClient.invalidateQueries({ queryKey: ["organization"] })
+    },
+    onError: (err) => setGeofenceError(err.response?.data?.error || "Could not save — please try again"),
   })
 
   function useCurrentLocationAsOffice() {
@@ -123,7 +149,11 @@ export default function Settings() {
 
   const savePayrollAccount = useMutation({
     mutationFn: () => api.patch("/organization", { payrollBankName, payrollAccountNumber, lateDeductionAmount }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["organization"] }),
+    onSuccess: () => {
+      setPayrollError("")
+      queryClient.invalidateQueries({ queryKey: ["organization"] })
+    },
+    onError: (err) => setPayrollError(err.response?.data?.error || "Could not save — please try again"),
   })
 
   const createSubOrganization = useMutation({
@@ -206,9 +236,10 @@ export default function Settings() {
             >
               {save.isPending ? "Saving…" : "Save changes"}
             </button>
-            {save.isSuccess && !save.isPending && (
+            {save.isSuccess && !save.isPending && !brandingError && (
               <p className="text-xs text-chip-green-fg">Saved.</p>
             )}
+            {brandingError && <p className="text-xs text-chip-pink-fg">{brandingError}</p>}
           </div>
       </div>
 
@@ -245,9 +276,10 @@ export default function Settings() {
           >
             {savePolicy.isPending ? "Saving…" : "Save policy"}
           </button>
-          {savePolicy.isSuccess && !savePolicy.isPending && (
+          {savePolicy.isSuccess && !savePolicy.isPending && !policyError && (
             <p className="mt-2 text-xs text-chip-green-fg">Saved.</p>
           )}
+          {policyError && <p className="mt-2 text-xs text-chip-pink-fg">{policyError}</p>}
 
           <div className="mt-5 flex flex-wrap gap-2 border-t border-border pt-4">
             <Link to="/holidays" className="pill-secondary px-4 py-2 text-xs">Manage Holidays</Link>
@@ -413,9 +445,10 @@ export default function Settings() {
             >
               {saveWorkSchedule.isPending ? "Saving…" : "Save work schedule"}
             </button>
-            {saveWorkSchedule.isSuccess && !saveWorkSchedule.isPending && (
+            {saveWorkSchedule.isSuccess && !saveWorkSchedule.isPending && !scheduleError && (
               <p className="mt-2 text-xs text-chip-green-fg">Saved.</p>
             )}
+            {scheduleError && <p className="mt-2 text-xs text-chip-pink-fg">{scheduleError}</p>}
           </div>
         )}
 
@@ -480,9 +513,10 @@ export default function Settings() {
             >
               {saveGeofence.isPending ? "Saving…" : "Save geofence"}
             </button>
-            {saveGeofence.isSuccess && !saveGeofence.isPending && (
+            {saveGeofence.isSuccess && !saveGeofence.isPending && !geofenceError && (
               <p className="mt-2 text-xs text-chip-green-fg">Saved.</p>
             )}
+            {geofenceError && <p className="mt-2 text-xs text-chip-pink-fg">{geofenceError}</p>}
           </div>
         )}
 
@@ -521,9 +555,10 @@ export default function Settings() {
             >
               {savePayrollAccount.isPending ? "Saving…" : "Save payroll account"}
             </button>
-            {savePayrollAccount.isSuccess && !savePayrollAccount.isPending && (
+            {savePayrollAccount.isSuccess && !savePayrollAccount.isPending && !payrollError && (
               <p className="mt-2 text-xs text-chip-green-fg">Saved.</p>
             )}
+            {payrollError && <p className="mt-2 text-xs text-chip-pink-fg">{payrollError}</p>}
           </div>
 
         <div className="card p-6 lg:col-span-2">

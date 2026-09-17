@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Building2, Clock3, MapPin, Plus, Save, Trash2, Users } from "lucide-react"
+import { Building2, Clock3, MapPin, Pencil, Plus, Save, Trash2, Users, X } from "lucide-react"
 import api from "../api/client"
 import { useAuth } from "../context/AuthContext"
 import PageHeader from "../components/ui/PageHeader"
@@ -29,6 +29,34 @@ function initialForm(organizationId, organizationTimezone) {
   }
 }
 
+// listSites returns boundary as whatever Prisma's raw-query driver gives
+// back for a jsonb column — already-parsed in practice, but this stays
+// defensive since $queryRaw's exact JSON handling isn't part of any
+// documented contract.
+function siteToForm(site) {
+  const boundary = Array.isArray(site.boundary)
+    ? site.boundary
+    : typeof site.boundary === "string"
+      ? (() => { try { return JSON.parse(site.boundary) } catch { return [] } })()
+      : []
+  return {
+    name: site.name || "",
+    address: site.address || "",
+    latitude: site.latitude != null ? String(site.latitude) : "",
+    longitude: site.longitude != null ? String(site.longitude) : "",
+    radiusMeters: site.radiusMeters ?? 250,
+    outsideGraceMinutes: site.outsideGraceMinutes ?? 60,
+    geofenceMode: site.geofenceMode || "STRICT",
+    geofenceType: site.geofenceType || "RADIUS",
+    boundary,
+    areaSqMeters: Number(site.areaSqMeters || 0),
+    perimeterMeters: Number(site.perimeterMeters || 0),
+    timezone: site.timezone || DEFAULT_TZ,
+    projectId: site.projectId || "",
+    organizationId: site.organizationId || "",
+  }
+}
+
 export default function AttendanceSites() {
   const { user, organization, organizations } = useAuth()
   const queryClient = useQueryClient()
@@ -39,6 +67,7 @@ export default function AttendanceSites() {
   )
   const [form, setForm] = useState(() => initialForm(organization?.id, organization?.timezone))
   const [error, setError] = useState("")
+  const [editingId, setEditingId] = useState(null)
 
   const { data: projects = [] } = useQuery({
     queryKey: ["attendance-site-projects", form.organizationId],
@@ -71,6 +100,29 @@ export default function AttendanceSites() {
     onError: (err) => setError(err.response?.data?.error || "Could not create site"),
   })
 
+  const update = useMutation({
+    mutationFn: () => api.patch(`/attendance-sites/${editingId}`, form),
+    onSuccess: () => {
+      setEditingId(null)
+      setForm(initialForm(organization?.id, organization?.timezone))
+      setError("")
+      queryClient.invalidateQueries({ queryKey: ["attendance-sites"] })
+    },
+    onError: (err) => setError(err.response?.data?.error || "Could not update site"),
+  })
+
+  function startEditing(site) {
+    setEditingId(site.id)
+    setForm(siteToForm(site))
+    setError("")
+  }
+
+  function cancelEditing() {
+    setEditingId(null)
+    setForm(initialForm(organization?.id, organization?.timezone))
+    setError("")
+  }
+
   if (!canManage) return <EmptyState title="Site management is restricted" description="Contact your attendance administrator." />
 
   const selectedProject = projects.find((p) => p.id === form.projectId)
@@ -81,9 +133,16 @@ export default function AttendanceSites() {
 
       <div className="grid gap-5 xl:grid-cols-[380px_1fr]">
         <div className="card p-5">
-          <div className="mb-4 flex items-center gap-2">
-            <Plus size={17} className="text-accent" />
-            <h2 className="text-sm font-semibold text-ink">Add site</h2>
+          <div className="mb-4 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              {editingId ? <Pencil size={17} className="text-accent" /> : <Plus size={17} className="text-accent" />}
+              <h2 className="text-sm font-semibold text-ink">{editingId ? "Edit site" : "Add site"}</h2>
+            </div>
+            {editingId && (
+              <button type="button" onClick={cancelEditing} className="pill-secondary inline-flex items-center gap-1 px-2.5 py-1.5 text-xs">
+                <X size={12} /> Cancel
+              </button>
+            )}
           </div>
           <div className="space-y-3">
             <label className="block">
@@ -142,7 +201,11 @@ export default function AttendanceSites() {
             <label className="block"><span className="mb-1 block text-xs font-semibold text-muted">Geofence mode</span><select value={form.geofenceMode} onChange={(e) => setForm((f) => ({ ...f, geofenceMode: e.target.value }))} className="field w-full"><option value="STRICT">Strict — block outside check-in</option><option value="WARNING">Warning — record anomaly</option><option value="DISABLED">Disabled</option></select></label>
 
             {error && <div className="rounded-2xl bg-chip-pink-bg px-3 py-2 text-xs text-chip-pink-fg">{error}</div>}
-            <button onClick={() => create.mutate()} disabled={create.isPending || !form.name.trim() || !form.latitude || !form.longitude || (form.geofenceType === "POLYGON" && form.boundary.length < 4)} className="pill-accent flex w-full items-center justify-center gap-1.5 px-4 py-2.5 text-sm disabled:opacity-50"><Save size={14} /> {create.isPending ? "Creating…" : "Create site"}</button>
+            {editingId ? (
+              <button onClick={() => update.mutate()} disabled={update.isPending || !form.name.trim() || !form.latitude || !form.longitude || (form.geofenceType === "POLYGON" && form.boundary.length < 4)} className="pill-accent flex w-full items-center justify-center gap-1.5 px-4 py-2.5 text-sm disabled:opacity-50"><Save size={14} /> {update.isPending ? "Saving…" : "Save changes"}</button>
+            ) : (
+              <button onClick={() => create.mutate()} disabled={create.isPending || !form.name.trim() || !form.latitude || !form.longitude || (form.geofenceType === "POLYGON" && form.boundary.length < 4)} className="pill-accent flex w-full items-center justify-center gap-1.5 px-4 py-2.5 text-sm disabled:opacity-50"><Save size={14} /> {create.isPending ? "Creating…" : "Create site"}</button>
+            )}
           </div>
         </div>
 
@@ -160,6 +223,7 @@ export default function AttendanceSites() {
                   </div>
                   <div className="flex items-center gap-2">
                     <span className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase ${attendanceOpen ? "bg-chip-green-bg text-chip-green-fg" : "bg-surface-2 text-muted"}`}>{attendanceOpen ? "Attendance active" : projectCompleted ? "Project completed" : "Inactive"}</span>
+                    <button type="button" onClick={() => startEditing(site)} title="Edit site" className="inline-flex items-center justify-center rounded-xl border border-border px-2.5 py-1.5 text-muted transition hover:bg-surface-2 hover:text-ink"><Pencil size={14} /></button>
                     <button type="button" onClick={() => { if (!remove.isPending && window.confirm(`Delete "${site.name}"? Existing attendance history will be preserved.`)) remove.mutate(site.id) }} disabled={remove.isPending} title="Delete site" className="inline-flex items-center justify-center rounded-xl border border-chip-pink-bg px-2.5 py-1.5 text-chip-pink-fg transition hover:bg-chip-pink-bg disabled:opacity-50"><Trash2 size={14} /></button>
                   </div>
                 </div>

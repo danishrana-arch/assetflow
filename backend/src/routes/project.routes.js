@@ -1,7 +1,7 @@
 const express = require("express")
 const { requireAuth, requireManagement } = require("../middleware/auth.middleware")
 const { startProjectDeadlineNotificationJob } = require("../services/project-deadline-notification.service")
-const { listProjects, getProject, createProject, updateProject, updateMemberHours } = require("../controllers/project.controller")
+const { listProjects, getProject, createProject, updateProject, addProjectMembers, deleteProject, updateMemberHours } = require("../controllers/project.controller")
 const { listWorkCategories, createWorkCategory, updateWorkCategory, deleteWorkCategory } = require("../controllers/work-category.controller")
 
 const router = express.Router()
@@ -17,6 +17,8 @@ router.get("/", listProjects)
 router.get("/:id", getProject)
 router.post("/", requireManagement, createProject)
 router.patch("/:id", requireManagement, updateProject)
+router.delete("/:id", requireManagement, deleteProject)
+router.post("/:id/members", requireManagement, addProjectMembers)
 router.patch("/:id/members/:memberId", requireManagement, updateMemberHours)
 
 module.exports = router

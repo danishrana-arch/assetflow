@@ -13,10 +13,13 @@ const {
   listAttendanceCorrections,
 } = require("../controllers/attendance.controller")
 const { requireAuth, requireAttendanceAccess } = require("../middleware/auth.middleware")
+const { startAttendanceAutoAbsentJob } = require("../services/attendance-auto-absent.service")
 
 const router = express.Router()
 
 router.use(requireAuth)
+
+startAttendanceAutoAbsentJob()
 
 // Self-service — any authenticated employee, own record only.
 router.get("/self", getSelfAttendance)

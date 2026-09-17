@@ -240,6 +240,41 @@ async function updateProject(req, res, next) {
   }
 }
 
+async function addProjectMembers(req, res, next) {
+  try {
+    const { organizationId } = req.user
+    const existing = await prisma.project.findFirst({ where: { id: req.params.id, organizationId } })
+    if (!existing) return res.status(404).json({ error: "Project not found" })
+
+    const ids = [...new Set((Array.isArray(req.body.employeeIds) ? req.body.employeeIds : []).filter(Boolean))]
+    if (!ids.length) return res.status(400).json({ error: "Select at least one employee to add" })
+
+    const count = await prisma.user.count({ where: { organizationId, id: { in: ids } } })
+    if (count !== ids.length) return res.status(400).json({ error: "One or more employees are invalid" })
+
+    await prisma.projectMember.createMany({
+      data: ids.map(employeeId => ({ projectId: existing.id, employeeId })),
+      skipDuplicates: true,
+    })
+
+    const project = await prisma.project.findUnique({ where: { id: existing.id }, include: projectInclude })
+    res.status(201).json(project)
+  } catch (err) { next(err) }
+}
+
+async function deleteProject(req, res, next) {
+  try {
+    const { organizationId } = req.user
+    const existing = await prisma.project.findFirst({ where: { id: req.params.id, organizationId } })
+    if (!existing) return res.status(404).json({ error: "Project not found" })
+    if (existing.status !== "COMPLETED") {
+      return res.status(400).json({ error: "Only completed projects can be deleted" })
+    }
+    await prisma.project.delete({ where: { id: existing.id } })
+    res.status(204).end()
+  } catch (err) { next(err) }
+}
+
 async function updateMemberHours(req, res, next) {
   try {
     const { organizationId } = req.user
@@ -261,4 +296,4 @@ async function updateMemberHours(req, res, next) {
   } catch (err) { next(err) }
 }
 
-module.exports = { listProjects, getProject, createProject, updateProject, updateMemberHours }
+module.exports = { listProjects, getProject, createProject, updateProject, addProjectMembers, deleteProject, updateMemberHours }

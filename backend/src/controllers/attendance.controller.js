@@ -285,16 +285,21 @@ async function markSelfAttendance(req, res, next) {
     const officeGeofenceActive=organization.geofenceEnabled && organization.officeLatitude!=null && organization.officeLongitude!=null && employee.workLocationType!=='FIELD'
     const assignedSiteMode=assignedSites.length>0 && employee.workLocationType!=='FIELD'
     let finalStatus=status, autoFlagged=false
+    // Being outside the geofence blocks the check-in outright — it must
+    // never silently record the day as ABSENT. The employee stays
+    // unmarked and can simply move into range and try again.
     if (status==='PRESENT' && hasCoords && assignedSiteMode) {
       const eligible=assignedSites.some(site => site.geofenceMode === 'DISABLED' || siteDistance(site, Number(latitude), Number(longitude)).inside)
       const strictRequired=assignedSites.some(site => site.geofenceMode === 'STRICT')
       if (!eligible && strictRequired) {
-        finalStatus='ABSENT'; autoFlagged=true
+        return res.status(403).json({ error: 'You are outside the assigned site radius. Move within the site boundary and try again — attendance was not marked.' })
       }
     } else if (status==='PRESENT' && officeGeofenceActive && hasCoords) {
       const distance=distanceMeters(Number(latitude),Number(longitude),Number(organization.officeLatitude),Number(organization.officeLongitude))
       chosenDistance=distance
-      if (distance > Number(organization.geofenceRadiusMeters)) { finalStatus='ABSENT'; autoFlagged=true }
+      if (distance > Number(organization.geofenceRadiusMeters)) {
+        return res.status(403).json({ error: `You are ${Math.round(distance)}m from the office; the allowed radius is ${organization.geofenceRadiusMeters}m. Move closer and try again — attendance was not marked.` })
+      }
     }
 
     const now=new Date()

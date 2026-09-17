@@ -8,6 +8,8 @@ import {
   FolderKanban,
   Plus,
   Search,
+  Trash2,
+  UserPlus,
   Users,
   X,
 } from "lucide-react"
@@ -122,14 +124,38 @@ function ProjectCard({ project, onOpen }) {
   )
 }
 
-function ProjectDetails({ project, onClose, onRefresh, canEdit = true }) {
+function ProjectDetails({ project, onClose, onRefresh, onDeleted, canEdit = true }) {
   const [hours, setHours] = useState({})
   const [newDeadline, setNewDeadline] = useState(project.deadline ? project.deadline.slice(0, 10) : "")
   const [status, setStatus] = useState(project.status)
   const [projectUrl, setProjectUrl] = useState(project.projectUrl || "")
   const [technologies, setTechnologies] = useState(project.technologies || [])
   const [workCategoryId, setWorkCategoryId] = useState(project.workCategoryId || project.workCategory?.id || "")
+  const [addEmployeesOpen, setAddEmployeesOpen] = useState(false)
+  const [employeeSearch, setEmployeeSearch] = useState("")
+  const [selectedNewEmployees, setSelectedNewEmployees] = useState([])
+  const [confirmDelete, setConfirmDelete] = useState(false)
   const categoriesQuery = useQuery({ queryKey: ["project-work-categories"], queryFn: () => api.get("/projects/work-categories").then(r => r.data) })
+
+  const assignedEmployeeIds = useMemo(() => new Set((project.members || []).map(m => m.employee.id)), [project.members])
+  const employeesQuery = useQuery({
+    queryKey: ["project-employee-search", project.id, employeeSearch],
+    queryFn: () => api.get("/employees", { params: { search: employeeSearch || undefined, page: 1, pageSize: 25, status: "ACTIVE" } }).then(r => (r.data.data || []).filter(e => !assignedEmployeeIds.has(e.id))),
+    enabled: addEmployeesOpen,
+    staleTime: 30_000,
+  })
+
+  const toggleNewEmployee = employee => setSelectedNewEmployees(prev => prev.some(item => item.id === employee.id) ? prev.filter(item => item.id !== employee.id) : [...prev, employee])
+
+  const addEmployees = useMutation({
+    mutationFn: () => api.post(`/projects/${project.id}/members`, { employeeIds: selectedNewEmployees.map(e => e.id) }),
+    onSuccess: async () => { setSelectedNewEmployees([]); setEmployeeSearch(""); setAddEmployeesOpen(false); await onRefresh() },
+  })
+
+  const removeProject = useMutation({
+    mutationFn: () => api.delete(`/projects/${project.id}`),
+    onSuccess: () => onDeleted(),
+  })
 
   useEffect(() => {
     setHours(Object.fromEntries((project.members || []).map(m => [m.id, Number(m.hoursSpent || 0)])))
@@ -155,8 +181,22 @@ function ProjectDetails({ project, onClose, onRefresh, canEdit = true }) {
       <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-3xl bg-surface shadow-2xl">
         <div className="sticky top-0 z-10 flex items-start justify-between border-b border-border bg-surface/95 p-6 backdrop-blur">
           <div><p className="text-xl font-semibold text-ink">{project.name}</p><p className="mt-1 text-xs text-muted">{project.clientName || "Internal project"}</p></div>
-          <button onClick={onClose} className="rounded-full p-2 text-muted hover:bg-surface-2 hover:text-ink"><X size={18} /></button>
+          <div className="flex items-center gap-2">
+            {canEdit && project.status === "COMPLETED" && (
+              confirmDelete ? (
+                <div className="flex items-center gap-2 rounded-2xl bg-red-500/10 p-1.5 pl-3">
+                  <span className="text-[11px] font-medium text-red-700">Delete this project?</span>
+                  <button onClick={() => removeProject.mutate()} disabled={removeProject.isPending} className="rounded-xl bg-red-600 px-2.5 py-1.5 text-[11px] font-semibold text-white disabled:opacity-50">{removeProject.isPending ? "Deleting…" : "Yes, delete"}</button>
+                  <button onClick={() => setConfirmDelete(false)} className="rounded-xl px-2.5 py-1.5 text-[11px] font-medium text-muted hover:bg-surface-2">Cancel</button>
+                </div>
+              ) : (
+                <button onClick={() => setConfirmDelete(true)} title="Delete project" className="rounded-full p-2 text-muted hover:bg-red-500/10 hover:text-red-600"><Trash2 size={18} /></button>
+              )
+            )}
+            <button onClick={onClose} className="rounded-full p-2 text-muted hover:bg-surface-2 hover:text-ink"><X size={18} /></button>
+          </div>
         </div>
+        {removeProject.isError && <p className="px-6 pt-3 text-right text-xs font-medium text-red-600">{removeProject.error?.response?.data?.error || "Unable to delete the project."}</p>}
 
         <div className="grid gap-5 p-6 lg:grid-cols-3">
           <div className="card p-4 lg:col-span-2">
@@ -194,7 +234,31 @@ function ProjectDetails({ project, onClose, onRefresh, canEdit = true }) {
 
         <div className="px-6 pb-7">
           <div className="card overflow-hidden">
-            <div className="border-b border-border p-5"><p className="text-sm font-semibold text-ink">Employees working on this project</p><p className="mt-1 text-xs text-muted">{project.members?.length || 0} assigned employees</p></div>
+            <div className="flex items-center justify-between border-b border-border p-5">
+              <div><p className="text-sm font-semibold text-ink">Employees working on this project</p><p className="mt-1 text-xs text-muted">{project.members?.length || 0} assigned employees</p></div>
+              {canEdit && !addEmployeesOpen && <button onClick={() => setAddEmployeesOpen(true)} className="inline-flex items-center gap-1.5 rounded-xl bg-surface-2 px-3 py-2 text-xs font-semibold text-ink hover:bg-surface-3"><UserPlus size={14} /> Add employees</button>}
+            </div>
+
+            {canEdit && addEmployeesOpen && (
+              <div className="border-b border-border p-4">
+                <div className="flex items-center justify-between"><p className="text-xs font-semibold text-ink">Add employees to this project</p><button onClick={() => { setAddEmployeesOpen(false); setSelectedNewEmployees([]); setEmployeeSearch("") }} className="text-muted hover:text-ink"><X size={16} /></button></div>
+
+                {selectedNewEmployees.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {selectedNewEmployees.map(employee => <button key={employee.id} type="button" onClick={() => toggleNewEmployee(employee)} className="flex items-center gap-2 rounded-xl bg-accent/10 px-2.5 py-2 text-left"><Avatar name={employee.name} src={employee.photoUrl} size="xs" /><span className="max-w-[140px] truncate text-[10px] font-semibold text-ink">{employee.name}</span><X size={12} className="text-muted" /></button>)}
+                  </div>
+                )}
+
+                <div className="relative mt-3"><Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" /><input value={employeeSearch} onChange={e => setEmployeeSearch(e.target.value)} className="field w-full pl-9" placeholder="Search by name, email, or skill…" /></div>
+                <div className="mt-2 max-h-48 overflow-y-auto rounded-2xl border border-border">
+                  {employeesQuery.isLoading ? <div className="p-4 text-center text-xs text-muted">Searching employees…</div> : employeesQuery.data?.length ? employeesQuery.data.map(employee => <EmployeeOption key={employee.id} employee={employee} selected={selectedNewEmployees.some(item => item.id === employee.id)} onToggle={toggleNewEmployee} />) : <div className="p-4 text-center text-xs text-muted">No matching employees not already on this project.</div>}
+                </div>
+
+                <button onClick={() => addEmployees.mutate()} disabled={!selectedNewEmployees.length || addEmployees.isPending} className="pill-accent mt-3 px-4 py-2.5 text-xs disabled:opacity-50">{addEmployees.isPending ? "Adding…" : `Add ${selectedNewEmployees.length || ""} employee${selectedNewEmployees.length === 1 ? "" : "s"}`.trim()}</button>
+                {addEmployees.isError && <p className="mt-2 text-xs font-medium text-red-600">{addEmployees.error?.response?.data?.error || "Unable to add employees."}</p>}
+              </div>
+            )}
+
             <div className="divide-y divide-border">
               {(project.members || []).map(member => (
                 <div key={member.id} className="flex items-center gap-3 p-4">
@@ -283,6 +347,7 @@ function CreateProjectModal({ onClose, onCreated }) {
 
         <div className="mt-6">
           <div className="flex items-center justify-between"><p className="text-xs font-semibold text-ink">Assign employees</p><p className="text-[11px] text-muted">{selectedEmployees.length} selected</p></div>
+          <p className="mt-1 text-[10px] text-muted">Optional — you can create the project without employees and add them later from the project's details.</p>
 
           {selectedEmployees.length > 0 && (
             <div className="mt-2 rounded-2xl border border-accent/20 bg-accent/5 p-2">
@@ -380,7 +445,7 @@ export default function Projects() {
       <div className="mt-5"><div className="mb-3 flex items-center justify-between"><p className="text-sm font-semibold text-ink">{activeStatus ? STATUS[activeStatus].label : "All Projects"}</p><p className="text-xs text-muted">{visibleProjects.length} project{visibleProjects.length === 1 ? "" : "s"}</p></div>{isLoading ? <div className="card p-10 text-center text-sm text-muted">Loading projects…</div> : visibleProjects.length ? <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{visibleProjects.map(project => <ProjectCard key={project.id} project={project} onOpen={setSelected} />)}</div> : <div className="card p-12 text-center"><Users size={24} className="mx-auto text-muted" /><p className="mt-3 text-sm font-semibold text-ink">No projects found</p><p className="mt-1 text-xs text-muted">Try changing the status, deadline, or search filters.</p></div>}</div>
 
       {createOpen && isManagement && <CreateProjectModal onClose={() => setCreateOpen(false)} onCreated={async project => { setCreateOpen(false); await refresh(); setSelected(project) }} />}
-      {selected && <ProjectDetails project={selected} onClose={() => setSelected(null)} onRefresh={() => refresh(selected.id)} canEdit={isManagement} />}
+      {selected && <ProjectDetails project={selected} onClose={() => setSelected(null)} onRefresh={() => refresh(selected.id)} onDeleted={async () => { setSelected(null); await refresh() }} canEdit={isManagement} />}
       {workFieldsOpen && isManagement && <WorkFieldManager onClose={() => setWorkFieldsOpen(false)} />}
       {expired && <DeadlineModal project={expired} onClose={() => setExpired(null)} onCompleted={() => { setExpired(null); refresh() }} onExtended={() => { setExpired(null); refresh() }} />}
     </div>
