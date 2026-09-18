@@ -56,4 +56,19 @@ async function markRead(req, res, next) {
   }
 }
 
-module.exports = { listNotifications, unreadCount, markAllRead, markRead }
+async function markReadByType(req, res, next) {
+  try {
+    const { userId, organizationId } = req.user
+    const types = [].concat(req.body?.type || req.body?.types || []).filter(Boolean)
+    if (!types.length) return res.status(400).json({ error: "type is required" })
+    await prisma.notification.updateMany({
+      where: { organizationId, recipientId: userId, readAt: null, type: { in: types } },
+      data: { readAt: new Date() },
+    })
+    res.json({ success: true })
+  } catch (err) {
+    next(err)
+  }
+}
+
+module.exports = { listNotifications, unreadCount, markAllRead, markRead, markReadByType }

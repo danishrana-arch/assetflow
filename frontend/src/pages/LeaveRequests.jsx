@@ -7,6 +7,7 @@ import Avatar from "../components/ui/Avatar"
 import StatusPill from "../components/ui/StatusPill"
 import { SelectField } from "../components/ui/Field"
 import EmptyState from "../components/ui/EmptyState"
+import useMarkNotificationsRead from "../hooks/useMarkNotificationsRead"
 
 const LEAVE_TONE = { PENDING: "yellow", APPROVED: "green", REJECTED: "pink", CANCELLED: "slate" }
 const LEAVE_TYPE_LABELS = { SICK: "Sick", CASUAL: "Annual", UNPAID: "Unpaid" }
@@ -17,6 +18,7 @@ function fmt(dateStr) {
 }
 
 export default function LeaveRequests() {
+  useMarkNotificationsRead("LEAVE_REQUEST")
   const [statusFilter, setStatusFilter] = useState("PENDING")
   const [typeFilter, setTypeFilter] = useState("")
   const [conflictError, setConflictError] = useState(null) // { leaveId, message }

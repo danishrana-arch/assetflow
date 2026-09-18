@@ -7,6 +7,7 @@ import Avatar from "../components/ui/Avatar"
 import StatusPill from "../components/ui/StatusPill"
 import { SelectField } from "../components/ui/Field"
 import EmptyState from "../components/ui/EmptyState"
+import useMarkNotificationsRead from "../hooks/useMarkNotificationsRead"
 
 const STATUS_TONE = { PENDING: "yellow", APPROVED: "blue", REJECTED: "pink", FULFILLED: "green" }
 
@@ -15,6 +16,7 @@ function fmt(dateStr) {
 }
 
 export default function AssetRequests() {
+  useMarkNotificationsRead("ASSET_REQUEST")
   const [statusFilter, setStatusFilter] = useState("PENDING")
   const [fulfillingId, setFulfillingId] = useState(null)
   const [selectedAssetId, setSelectedAssetId] = useState("")

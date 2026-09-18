@@ -6,12 +6,14 @@ import PageHeader from "../components/ui/PageHeader"
 import Avatar from "../components/ui/Avatar"
 import { isManagement } from "../utils/roles"
 import { useAuth } from "../context/AuthContext"
+import useMarkNotificationsRead from "../hooks/useMarkNotificationsRead"
 
 const STATUSES = { TODO: "To do", IN_PROGRESS: "In progress", BLOCKED: "Blocked", DONE: "Done" }
 const PRIORITIES = { LOW: "Low", MEDIUM: "Medium", HIGH: "High", URGENT: "Urgent" }
 const blank = { projectId: "", title: "", description: "", priority: "MEDIUM", assignedToId: "", dueDate: "", estimatedHours: "" }
 
 export default function Tasks() {
+  useMarkNotificationsRead("TASK")
   const { user } = useAuth(); const management = isManagement(user?.role); const qc = useQueryClient()
   const [showForm, setShowForm] = useState(false); const [form, setForm] = useState(blank); const [search, setSearch] = useState("")
   const { data: tasks = [], isLoading } = useQuery({ queryKey: ["tasks", search], queryFn: () => api.get("/tasks", { params: { search: search || undefined } }).then(r => r.data) })

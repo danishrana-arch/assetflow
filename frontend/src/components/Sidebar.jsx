@@ -460,6 +460,10 @@ export default function Sidebar({ expanded, onMouseEnter, onMouseLeave }) {
             <RailItem to="/calendar" label="Company Calendar" icon={CalendarRange} isDark={isDark} expanded={expanded} />
             <RailItem to={`/employee-360/${user?.id}`} label="My Employee 360°" icon={BadgeCheck} isDark={isDark} expanded={expanded} />
 
+            <RailItem to="/tasks" label="My Tasks" icon={ListTodo} isDark={isDark} expanded={expanded} />
+            <RailItem to="/performance" label="My Performance" icon={Award} isDark={isDark} expanded={expanded} />
+            <RailItem to="/announcements" label="Announcements" icon={Megaphone} isDark={isDark} expanded={expanded} />
+
             <RailItem
               to="/payroll/me"
               label="My Payslips"

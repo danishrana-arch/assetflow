@@ -1,4 +1,6 @@
 import { NavLink } from "react-router-dom"
+import { useQuery } from "@tanstack/react-query"
+import api from "../api/client"
 import {
   LayoutDashboard,
   FolderKanban,
@@ -34,7 +36,7 @@ import { useAuth } from "../context/AuthContext"
 import { isManagement, canAccessPayroll } from "../utils/roles"
 import OrganizationSwitcher from "./OrganizationSwitcher"
 
-function Row({ to, icon: Icon, label, end, onClick }) {
+function Row({ to, icon: Icon, label, end, onClick, showDot = false }) {
   return (
     <NavLink
       to={to}
@@ -46,7 +48,12 @@ function Row({ to, icon: Icon, label, end, onClick }) {
         }`
       }
     >
-      <Icon size={17} />
+      <span className="relative flex">
+        <Icon size={17} />
+        {showDot && (
+          <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-danger ring-2 ring-surface" />
+        )}
+      </span>
       <span>{label}</span>
     </NavLink>
   )
@@ -57,6 +64,16 @@ export default function MobileNav({ open, onClose }) {
   const isAdmin = isManagement(user?.role)
   const isOwner = ["ADMIN", "CEO", "MANAGER"].includes(user?.role)
   const isIT = user?.role === "IT_MANAGER"
+
+  const { data: unreadNotifications } = useQuery({
+    queryKey: ["notifications-unread-count"],
+    queryFn: () => api.get("/notifications/unread-count").then((r) => r.data),
+    refetchInterval: 15000,
+    staleTime: 5000,
+    enabled: open,
+  })
+  const hasUnreadNotifications = Number(unreadNotifications?.count || 0) > 0
+
   if (!open) return null
 
   return (
@@ -101,7 +118,7 @@ export default function MobileNav({ open, onClose }) {
               <Row to="/audit-log" icon={ShieldCheck} label="Audit Log" onClick={onClose} />
               {canAccessPayroll(user?.role) && <Row to="/payroll" icon={Wallet} label="Payroll" onClick={onClose} />}
               <div className="my-2 divider" />
-              <Row to="/notifications" icon={BellRing} label="Notifications" onClick={onClose} />
+              <Row to="/notifications" icon={BellRing} label="Notifications" onClick={onClose} showDot={hasUnreadNotifications} />
               {isOwner && <Row to="/employee-forms" icon={FileText} label="Employee Forms" onClick={onClose} />}
               <Row to="/settings" icon={Settings} label="Settings" onClick={onClose} />
               <Row to="/holidays" icon={CalendarDays} label="Holidays" onClick={onClose} />
@@ -117,6 +134,8 @@ export default function MobileNav({ open, onClose }) {
               <Row to="/asset-requests" icon={PackageSearch} label="Asset Requests" onClick={onClose} />
               <Row to="/tickets" icon={Ticket} label="Requests / Tickets" onClick={onClose} />
               <Row to="/attendance/me" icon={CalendarCheck} label="My Attendance" onClick={onClose} />
+              <div className="my-2 divider" />
+              <Row to="/notifications" icon={BellRing} label="Notifications" onClick={onClose} showDot={hasUnreadNotifications} />
             </>
           ) : (
             <>
@@ -126,9 +145,12 @@ export default function MobileNav({ open, onClose }) {
               <Row to={`/employee-360/${user?.id}`} icon={BadgeCheck} label="My Employee 360°" onClick={onClose} />
               <Row to="/tasks" icon={ListTodo} label="My Tasks" onClick={onClose} />
               <Row to="/performance" icon={Award} label="My Performance" onClick={onClose} />
+              <Row to="/announcements" icon={Bell} label="Announcements" onClick={onClose} />
               <Row to="/attendance/me" icon={CalendarCheck} label="My Attendance" onClick={onClose} />
               <Row to="/payroll/me" icon={Wallet} label="My Payslips" onClick={onClose} />
               <Row to="/tickets" icon={Ticket} label="Tickets" onClick={onClose} />
+              <div className="my-2 divider" />
+              <Row to="/notifications" icon={BellRing} label="Notifications" onClick={onClose} showDot={hasUnreadNotifications} />
             </>
           )}
         </nav>

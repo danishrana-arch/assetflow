@@ -9,6 +9,7 @@ import IconChip from "../components/ui/IconChip"
 import StatusPill from "../components/ui/StatusPill"
 import { TextField, TextAreaField, SelectField } from "../components/ui/Field"
 import EmptyState from "../components/ui/EmptyState"
+import useMarkNotificationsRead from "../hooks/useMarkNotificationsRead"
 
 const PRIORITY_TONE = { LOW: "slate", MEDIUM: "blue", HIGH: "orange", URGENT: "pink" }
 const STATUS_TONE = { OPEN: "blue", IN_PROGRESS: "yellow", RESOLVED: "green", CLOSED: "slate" }
@@ -20,6 +21,7 @@ function humanize(s) {
 }
 
 export default function Tickets() {
+  useMarkNotificationsRead("TICKET")
   const { user } = useAuth()
   const isAdmin = isManagement(user?.role)
   const [showForm, setShowForm] = useState(false)
