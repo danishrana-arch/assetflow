@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
+import { createPortal } from "react-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   CalendarClock,
@@ -176,7 +177,7 @@ function ProjectDetails({ project, onClose, onRefresh, onDeleted, canEdit = true
   const saveHours = memberId => api.patch(`/projects/${project.id}/members/${memberId}`, { hoursSpent: hours[memberId] }).then(onRefresh)
   const completedNeedsLink = status === "COMPLETED" && !projectUrl.trim()
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
       <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-3xl bg-surface shadow-2xl">
         <div className="sticky top-0 z-10 flex items-start justify-between border-b border-border bg-surface/95 p-6 backdrop-blur">
@@ -272,7 +273,8 @@ function ProjectDetails({ project, onClose, onRefresh, onDeleted, canEdit = true
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }
 
@@ -285,7 +287,7 @@ function DeadlineModal({ project, onClose, onCompleted, onExtended }) {
   })
   const canComplete = Boolean(link.trim())
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
       <div className="w-full max-w-md rounded-3xl bg-surface p-6 shadow-2xl">
         <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-red-500/10 text-red-600"><CalendarClock size={20} /></div>
@@ -299,7 +301,8 @@ function DeadlineModal({ project, onClose, onCompleted, onExtended }) {
         </div>
         <button onClick={onClose} className="mt-3 w-full rounded-2xl px-4 py-2.5 text-xs font-medium text-muted hover:bg-surface-2">Decide later</button>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }
 
@@ -330,46 +333,70 @@ function CreateProjectModal({ onClose, onCreated }) {
   const toggleTechnology = tech => setForm(prev => ({ ...prev, technologies: prev.technologies.includes(tech) ? prev.technologies.filter(item => item !== tech) : [...prev.technologies, tech] }))
   const completedNeedsLink = form.status === "COMPLETED" && !form.projectUrl.trim()
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
-      <div className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-3xl bg-surface p-6 shadow-2xl">
-        <div className="flex items-start justify-between"><div><h3 className="text-lg font-semibold text-ink">Add project</h3><p className="mt-1 text-xs text-muted">Create the project, choose its technology stack, and assign its working team.</p></div><button onClick={onClose} className="rounded-full p-2 text-muted hover:bg-surface-2"><X size={18} /></button></div>
-
-        <div className="mt-6 grid gap-4 sm:grid-cols-2">
-          <label className="sm:col-span-2"><span className="text-xs font-medium text-muted">Project name</span><input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className="field mt-1 w-full" placeholder="Website redesign" /></label>
-          <label><span className="text-xs font-medium text-muted">Client</span><input value={form.clientName} onChange={e => setForm({ ...form, clientName: e.target.value })} className="field mt-1 w-full" placeholder="Client name" /></label>
-          <label><span className="text-xs font-medium text-muted">Deadline</span><input type="date" value={form.deadline} onChange={e => setForm({ ...form, deadline: e.target.value })} className="field mt-1 w-full" /></label>
-          <label className="sm:col-span-2"><span className="text-xs font-medium text-muted">Project link {form.status === "COMPLETED" ? "(required)" : "(optional)"}</span><input value={form.projectUrl} onChange={e => setForm({ ...form, projectUrl: e.target.value })} className="field mt-1 w-full" placeholder="https://..." /></label>
-          <label className="sm:col-span-2"><span className="text-xs font-medium text-muted">Status</span><select value={form.status} onChange={e => setForm({ ...form, status: e.target.value })} className="field mt-1 w-full">{Object.entries(STATUS).map(([value, meta]) => <option key={value} value={value}>{meta.label}</option>)}</select></label>
+      <div className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-3xl bg-surface shadow-2xl">
+        <div className="sticky top-0 z-10 flex items-start justify-between border-b border-border bg-surface/95 p-6 backdrop-blur">
+          <div><h3 className="text-lg font-semibold text-ink">Add project</h3><p className="mt-1 text-xs text-muted">Create the project, choose its technology stack, and assign its working team.</p></div>
+          <button onClick={onClose} className="rounded-full p-2 text-muted hover:bg-surface-2"><X size={18} /></button>
         </div>
 
-        <div className="mt-5"><p className="text-xs font-semibold text-ink">Work field</p><select value={form.workCategoryId} onChange={e => setForm(prev => ({ ...prev, workCategoryId: e.target.value, technologies: [] }))} className="field mt-2 w-full"><option value="">Select the type of work</option>{(categoriesQuery.data || []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select><p className="mt-4 text-xs font-semibold text-ink">Technologies / tools</p><p className="mt-1 text-[10px] text-muted">Options change according to the selected field of work.</p><div className="mt-2 flex flex-wrap gap-2">{((categoriesQuery.data || []).find(c => c.id === form.workCategoryId)?.technologies || []).map(tech => <button type="button" key={tech} onClick={() => toggleTechnology(tech)} className={`rounded-full px-3 py-1.5 text-[10px] font-semibold ${form.technologies.includes(tech) ? "bg-accent text-white" : "bg-surface-2 text-muted hover:text-ink"}`}>{tech}</button>)}</div></div>
-
-        <div className="mt-6">
-          <div className="flex items-center justify-between"><p className="text-xs font-semibold text-ink">Assign employees</p><p className="text-[11px] text-muted">{selectedEmployees.length} selected</p></div>
-          <p className="mt-1 text-[10px] text-muted">Optional — you can create the project without employees and add them later from the project's details.</p>
-
-          {selectedEmployees.length > 0 && (
-            <div className="mt-2 rounded-2xl border border-accent/20 bg-accent/5 p-2">
-              <p className="px-2 pb-2 text-[10px] font-semibold uppercase tracking-wide text-muted">Selected employees</p>
-              <div className="flex flex-wrap gap-2">
-                {selectedEmployees.map(employee => <button key={employee.id} type="button" onClick={() => toggleEmployee(employee)} className="flex items-center gap-2 rounded-xl bg-surface px-2.5 py-2 text-left shadow-sm"><Avatar name={employee.name} src={employee.photoUrl} size="xs" /><span className="min-w-0"><span className="block max-w-[160px] truncate text-[10px] font-semibold text-ink">{employee.name}</span><span className="block max-w-[160px] truncate text-[9px] text-muted">{employee.skill || employee.role || "Employee"}</span></span><X size={12} className="text-muted" /></button>)}
+        <div className="overflow-y-auto p-6">
+          <div className="space-y-5">
+            <div className="card p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted">Project details</p>
+              <div className="mt-3 grid gap-4 sm:grid-cols-2">
+                <label className="sm:col-span-2"><span className="text-xs font-medium text-muted">Project name</span><input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className="field mt-1 w-full" placeholder="Website redesign" /></label>
+                <label><span className="text-xs font-medium text-muted">Client</span><input value={form.clientName} onChange={e => setForm({ ...form, clientName: e.target.value })} className="field mt-1 w-full" placeholder="Client name" /></label>
+                <label><span className="text-xs font-medium text-muted">Deadline</span><input type="date" value={form.deadline} onChange={e => setForm({ ...form, deadline: e.target.value })} className="field mt-1 w-full" /></label>
+                <label className="sm:col-span-2"><span className="text-xs font-medium text-muted">Project link {form.status === "COMPLETED" ? "(required)" : "(optional)"}</span><input value={form.projectUrl} onChange={e => setForm({ ...form, projectUrl: e.target.value })} className="field mt-1 w-full" placeholder="https://..." /></label>
+                <label className="sm:col-span-2"><span className="text-xs font-medium text-muted">Status</span><select value={form.status} onChange={e => setForm({ ...form, status: e.target.value })} className="field mt-1 w-full">{Object.entries(STATUS).map(([value, meta]) => <option key={value} value={value}>{meta.label}</option>)}</select></label>
               </div>
             </div>
-          )}
 
-          <div className="relative mt-3"><Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" /><input value={employeeSearch} onChange={e => setEmployeeSearch(e.target.value)} className="field w-full pl-9" placeholder="Search by name, email, or skill…" /></div>
-          <div className="mt-2 max-h-56 overflow-y-auto rounded-2xl border border-border">
-            {employeesQuery.isLoading ? <div className="p-5 text-center text-xs text-muted">Searching employees…</div> : employeesQuery.data?.length ? employeesQuery.data.map(employee => <EmployeeOption key={employee.id} employee={employee} selected={selectedEmployees.some(item => item.id === employee.id)} onToggle={toggleEmployee} />) : <div className="p-5 text-center text-xs text-muted">No employees found.</div>}
+            <div className="card p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted">Work field & technologies</p>
+              <div className="mt-3">
+                <span className="text-xs font-medium text-muted">Work field</span>
+                <select value={form.workCategoryId} onChange={e => setForm(prev => ({ ...prev, workCategoryId: e.target.value, technologies: [] }))} className="field mt-1 w-full"><option value="">Select the type of work</option>{(categoriesQuery.data || []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
+              </div>
+              <div className="mt-4">
+                <p className="text-xs font-medium text-muted">Technologies / tools</p>
+                <p className="mt-1 text-[10px] text-muted">Options change according to the selected field of work.</p>
+                <div className="mt-2 flex flex-wrap gap-2">{((categoriesQuery.data || []).find(c => c.id === form.workCategoryId)?.technologies || []).map(tech => <button type="button" key={tech} onClick={() => toggleTechnology(tech)} className={`rounded-full px-3 py-1.5 text-[10px] font-semibold ${form.technologies.includes(tech) ? "bg-accent text-white" : "bg-surface-2 text-muted hover:text-ink"}`}>{tech}</button>)}</div>
+              </div>
+            </div>
+
+            <div className="card p-4">
+              <div className="flex items-center justify-between"><p className="text-xs font-semibold uppercase tracking-wide text-muted">Assign employees</p><p className="text-[11px] font-medium text-muted">{selectedEmployees.length} selected</p></div>
+              <p className="mt-1 text-[10px] text-muted">Optional — you can create the project without employees and add them later from the project's details.</p>
+
+              {selectedEmployees.length > 0 && (
+                <div className="mt-3 rounded-2xl border border-accent/20 bg-accent/5 p-2">
+                  <p className="px-2 pb-2 text-[10px] font-semibold uppercase tracking-wide text-muted">Selected employees</p>
+                  <div className="flex flex-wrap gap-2">
+                    {selectedEmployees.map(employee => <button key={employee.id} type="button" onClick={() => toggleEmployee(employee)} className="flex items-center gap-2 rounded-xl bg-surface px-2.5 py-2 text-left shadow-sm"><Avatar name={employee.name} src={employee.photoUrl} size="xs" /><span className="min-w-0"><span className="block max-w-[160px] truncate text-[10px] font-semibold text-ink">{employee.name}</span><span className="block max-w-[160px] truncate text-[9px] text-muted">{employee.skill || employee.role || "Employee"}</span></span><X size={12} className="text-muted" /></button>)}
+                  </div>
+                </div>
+              )}
+
+              <div className="relative mt-3"><Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" /><input value={employeeSearch} onChange={e => setEmployeeSearch(e.target.value)} className="field w-full pl-9" placeholder="Search by name, email, or skill…" /></div>
+              <div className="mt-2 max-h-56 overflow-y-auto rounded-2xl border border-border">
+                {employeesQuery.isLoading ? <div className="p-5 text-center text-xs text-muted">Searching employees…</div> : employeesQuery.data?.length ? employeesQuery.data.map(employee => <EmployeeOption key={employee.id} employee={employee} selected={selectedEmployees.some(item => item.id === employee.id)} onToggle={toggleEmployee} />) : <div className="p-5 text-center text-xs text-muted">No employees found.</div>}
+              </div>
+              <p className="mt-2 text-[10px] text-muted">Only 25 matching employees are loaded at a time, so the selector stays fast even with hundreds of employees.</p>
+            </div>
           </div>
-          <p className="mt-2 text-[10px] text-muted">Only 25 matching employees are loaded at a time, so the selector stays fast even with hundreds of employees.</p>
         </div>
 
-        {completedNeedsLink && <p className="mt-4 text-xs font-medium text-red-600">A project link is required when the project status is Completed.</p>}
-        <div className="mt-6 flex justify-end gap-2"><button onClick={onClose} className="rounded-2xl px-4 py-2.5 text-xs font-semibold text-muted hover:bg-surface-2">Cancel</button><button onClick={() => mutation.mutate()} disabled={!form.name.trim() || completedNeedsLink || mutation.isPending} className="pill-accent inline-flex items-center gap-2 px-4 py-2.5 text-xs disabled:opacity-50"><Plus size={14} />{mutation.isPending ? "adding…" : "Add project"}</button></div>
-        {mutation.isError && <p className="mt-3 text-right text-xs font-medium text-red-600">{mutation.error?.response?.data?.error || "Unable to create the project."}</p>}
+        <div className="sticky bottom-0 z-10 border-t border-border bg-surface/95 p-5 backdrop-blur">
+          {completedNeedsLink && <p className="mb-3 text-xs font-medium text-red-600">A project link is required when the project status is Completed.</p>}
+          {mutation.isError && <p className="mb-3 text-xs font-medium text-red-600">{mutation.error?.response?.data?.error || "Unable to create the project."}</p>}
+          <div className="flex justify-end gap-2"><button onClick={onClose} className="rounded-2xl px-4 py-2.5 text-xs font-semibold text-muted hover:bg-surface-2">Cancel</button><button onClick={() => mutation.mutate()} disabled={!form.name.trim() || completedNeedsLink || mutation.isPending} className="pill-accent inline-flex items-center gap-2 px-4 py-2.5 text-xs disabled:opacity-50"><Plus size={14} />{mutation.isPending ? "Adding…" : "Add project"}</button></div>
+        </div>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }
 
@@ -378,7 +405,7 @@ function WorkFieldManager({ onClose }) {
   const q=useQuery({queryKey:["project-work-categories"],queryFn:()=>api.get("/projects/work-categories").then(r=>r.data)})
   const create=useMutation({mutationFn:()=>api.post("/projects/work-categories",{name,technologies:techs.split(",").map(x=>x.trim()).filter(Boolean)}),onSuccess:()=>{setName("");setTechs("");qc.invalidateQueries({queryKey:["project-work-categories"]})}})
   const remove=useMutation({mutationFn:id=>api.delete(`/projects/work-categories/${id}`),onSuccess:()=>qc.invalidateQueries({queryKey:["project-work-categories"]})})
-  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"><div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-3xl bg-surface p-6 shadow-2xl"><div className="flex justify-between"><div><h3 className="text-lg font-semibold text-ink">Work fields & tools</h3><p className="mt-1 text-xs text-muted">Customize the fields of work and technology/tool options for this organization.</p></div><button onClick={onClose}><X size={18}/></button></div><div className="mt-5 space-y-3"><input className="field w-full" placeholder="Work field e.g. Quantity Takeoff" value={name} onChange={e=>setName(e.target.value)}/><input className="field w-full" placeholder="Tools, comma separated e.g. Bluebeam, PlanSwift" value={techs} onChange={e=>setTechs(e.target.value)}/><button disabled={!name.trim()||create.isPending} onClick={()=>create.mutate()} className="pill-accent w-full px-4 py-2.5 text-xs">{create.isPending?"Adding…":"Add work field"}</button></div><div className="mt-5 space-y-2">{(q.data||[]).map(c=><div key={c.id} className="flex items-center justify-between rounded-2xl bg-surface-2 p-3"><div><p className="text-xs font-semibold text-ink">{c.name}</p><p className="mt-1 text-[10px] text-muted">{c.technologies?.join(" · ")||"No tools configured"}</p></div>{!c.isDefault&&<button onClick={()=>remove.mutate(c.id)} className="text-[10px] font-semibold text-danger">Remove</button>}</div>)}</div></div></div>
+  return createPortal(<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"><div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-3xl bg-surface p-6 shadow-2xl"><div className="flex justify-between"><div><h3 className="text-lg font-semibold text-ink">Work fields & tools</h3><p className="mt-1 text-xs text-muted">Customize the fields of work and technology/tool options for this organization.</p></div><button onClick={onClose}><X size={18}/></button></div><div className="mt-5 space-y-3"><input className="field w-full" placeholder="Work field e.g. Quantity Takeoff" value={name} onChange={e=>setName(e.target.value)}/><input className="field w-full" placeholder="Tools, comma separated e.g. Bluebeam, PlanSwift" value={techs} onChange={e=>setTechs(e.target.value)}/><button disabled={!name.trim()||create.isPending} onClick={()=>create.mutate()} className="pill-accent w-full px-4 py-2.5 text-xs">{create.isPending?"Adding…":"Add work field"}</button></div><div className="mt-5 space-y-2">{(q.data||[]).map(c=><div key={c.id} className="flex items-center justify-between rounded-2xl bg-surface-2 p-3"><div><p className="text-xs font-semibold text-ink">{c.name}</p><p className="mt-1 text-[10px] text-muted">{c.technologies?.join(" · ")||"No tools configured"}</p></div>{!c.isDefault&&<button onClick={()=>remove.mutate(c.id)} className="text-[10px] font-semibold text-danger">Remove</button>}</div>)}</div></div></div>, document.body)
 }
 
 export default function Projects() {
