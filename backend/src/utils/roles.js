@@ -17,6 +17,7 @@ const ASSIGNABLE_ROLES = [
   "MANAGEMENT",
   "EMPLOYEE",
   "DEPARTMENT_HEAD",
+  "IT_MANAGER",
 ]
 
 // Roles allowed to open employee profiles and directory records.
