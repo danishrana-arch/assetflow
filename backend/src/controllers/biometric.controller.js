@@ -45,21 +45,54 @@ async function syncAttendanceFromPunches({ organizationId, employeeId, deviceId,
       occurredAt: { gte: punchRangeStart, lt: punchRangeEnd },
     },
     orderBy: { occurredAt: "asc" },
-    select: { occurredAt: true },
+    select: { occurredAt: true, direction: true },
   })
   const effectivePunches = punches.filter((p) => !isWithinBreak(p.occurredAt, timeZone, organization?.breakStart, organization?.breakEnd))
   if (!effectivePunches.length) return
 
-  const checkInAt = effectivePunches[0].occurredAt
-  const checkOutAt = effectivePunches.length > 1 ? effectivePunches[effectivePunches.length - 1].occurredAt : null
+  // Only meaningful when at least one punch this day actually carries a
+  // direction — today that's ADMS only; the PULL/connector path can't
+  // report a button press at all (node-zklib exposes no status byte), so
+  // every one of its punches has direction=null. If we required direction
+  // unconditionally, PULL-synced attendance would never be marked at all.
+  const directional = effectivePunches.filter((p) => p.direction === "IN" || p.direction === "OUT")
 
-  let workingMinutes = null
-  if (effectivePunches.length >= 2) {
-    let total = 0
-    for (let i = 0; i + 1 < effectivePunches.length; i += 2) {
-      total += Math.max(0, Math.round((effectivePunches[i + 1].occurredAt.getTime() - effectivePunches[i].occurredAt.getTime()) / 60000))
+  let checkInAt, checkOutAt, workingMinutes
+  if (directional.length) {
+    // A device that's actually reporting button presses this day: a bare
+    // scan with no IN/OUT (e.g. just unlocking a door) is excluded here,
+    // not guessed at from ordering.
+    checkInAt = directional.find((p) => p.direction === "IN")?.occurredAt || null
+    checkOutAt = [...directional].reverse().find((p) => p.direction === "OUT")?.occurredAt || null
+
+    workingMinutes = null
+    if (directional.some((p) => p.direction === "OUT")) {
+      let total = 0
+      let openInAt = null
+      for (const p of directional) {
+        if (p.direction === "IN") {
+          openInAt = p.occurredAt
+        } else if (p.direction === "OUT" && openInAt) {
+          total += Math.max(0, Math.round((p.occurredAt.getTime() - openInAt.getTime()) / 60000))
+          openInAt = null
+        }
+      }
+      workingMinutes = total
     }
-    workingMinutes = total
+  } else {
+    // No device involved today reports a direction at all — fall back to
+    // the original order-based guess (first punch = in, last = out) so
+    // attendance still gets marked for PULL-mode devices.
+    checkInAt = effectivePunches[0].occurredAt
+    checkOutAt = effectivePunches.length > 1 ? effectivePunches[effectivePunches.length - 1].occurredAt : null
+    workingMinutes = null
+    if (effectivePunches.length >= 2) {
+      let total = 0
+      for (let i = 0; i + 1 < effectivePunches.length; i += 2) {
+        total += Math.max(0, Math.round((effectivePunches[i + 1].occurredAt.getTime() - effectivePunches[i].occurredAt.getTime()) / 60000))
+      }
+      workingMinutes = total
+    }
   }
 
   await prisma.attendanceRecord.upsert({
@@ -103,7 +136,12 @@ async function createDevice(req, res, next) {
       },
     })
     res.status(201).json({ device: { ...device, relaySecret: undefined, communicationKey: undefined, connectorTokenHash: undefined }, connectorToken: token })
-  } catch (e) { next(e) }
+  } catch (e) {
+    if (e?.code === "P2002" && e?.meta?.target?.includes?.("serialNumber")) {
+      return res.status(400).json({ error: "That serial number is already registered to a device on this deployment" })
+    }
+    next(e)
+  }
 }
 
 async function rotateToken(req, res, next) {
@@ -133,7 +171,12 @@ async function updateDevice(req, res, next) {
     if (b.communicationKey !== undefined) data.communicationKey = b.communicationKey ? encryptField(b.communicationKey) : null
     const updated = await prisma.biometricDevice.update({ where: { id: device.id }, data })
     res.json({ ...updated, relaySecret: undefined, communicationKey: undefined, connectorTokenHash: undefined })
-  } catch (e) { next(e) }
+  } catch (e) {
+    if (e?.code === "P2002" && e?.meta?.target?.includes?.("serialNumber")) {
+      return res.status(400).json({ error: "That serial number is already registered to a device on this deployment" })
+    }
+    next(e)
+  }
 }
 
 async function deleteDevice(req, res, next) {
@@ -182,13 +225,26 @@ async function heartbeat(req, res, next) {
 // instead of N, and attendance recompute collapses to once per
 // (employee, calendar day) actually touched instead of once per punch.
 async function ingestPunchBatch(device, punches) {
+  // Only today's punches (in the organization's local time) are ever
+  // stored or processed — a first-ever connector sync, or a backlogged
+  // ADMS retry, can hand over months of history in one batch, and none of
+  // that should retroactively create or rewrite past days' attendance.
+  const organization = await prisma.organization.findUnique({ where: { id: device.organizationId }, select: { timezone: true } })
+  const timeZone = organization?.timezone || "UTC"
+  const todayKey = dateKeyInTimeZone(new Date(), timeZone)
+
   const candidates = []
   const batchFingerprints = new Set()
   let duplicates = 0
+  let skippedOld = 0
   for (const p of punches) {
     if (!p.externalUserId || !p.occurredAt) continue
     const occurredAt = new Date(p.occurredAt)
     if (Number.isNaN(occurredAt.getTime())) continue
+    if (dateKeyInTimeZone(occurredAt, timeZone) !== todayKey) {
+      skippedOld++
+      continue
+    }
 
     const fingerprint = punchFingerprint({ deviceId: device.id, externalUserId: p.externalUserId, occurredAt })
     if (batchFingerprints.has(fingerprint)) {
@@ -201,7 +257,7 @@ async function ingestPunchBatch(device, punches) {
 
   if (!candidates.length) {
     await prisma.biometricDevice.update({ where: { id: device.id }, data: { lastSeenAt: new Date(), lastSyncAt: new Date(), lastError: null } })
-    return { accepted: 0, duplicates, unmatched: 0 }
+    return { accepted: 0, duplicates, unmatched: 0, skippedOld }
   }
 
   const externalIds = candidates.map((c) => c.externalId).filter(Boolean)
@@ -237,6 +293,7 @@ async function ingestPunchBatch(device, punches) {
       externalUserId: String(c.p.externalUserId),
       occurredAt: c.occurredAt,
       verification: c.p.verification || null,
+      direction: c.p.direction === "IN" || c.p.direction === "OUT" ? c.p.direction : null,
       externalId: c.externalId,
       fingerprint: c.fingerprint,
       rawPayload: c.p.rawPayload || c.p,
@@ -248,8 +305,8 @@ async function ingestPunchBatch(device, punches) {
   if (toInsert.length) await prisma.biometricPunch.createMany({ data: toInsert, skipDuplicates: true })
   const accepted = toInsert.length
 
-  const organization = await prisma.organization.findUnique({ where: { id: device.organizationId }, select: { timezone: true } })
-  const timeZone = organization?.timezone || "UTC"
+  // Every row in toInsert already passed the today-only filter above, so
+  // this only ever recomputes today's attendance — never a backfilled past day.
   const seenEmployeeDays = new Set()
   for (const row of toInsert) {
     if (!row.employeeId) continue
@@ -260,7 +317,7 @@ async function ingestPunchBatch(device, punches) {
   }
 
   await prisma.biometricDevice.update({ where: { id: device.id }, data: { lastSeenAt: new Date(), lastSyncAt: new Date(), lastError: null } })
-  return { accepted, duplicates, unmatched }
+  return { accepted, duplicates, unmatched, skippedOld }
 }
 
 async function ingestPunches(req, res, next) {

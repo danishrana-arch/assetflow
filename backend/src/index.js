@@ -94,10 +94,15 @@ app.use(
 app.get("/health", (req, res) => res.json({ status: "ok" }))
 
 // Mounted at root, not under /api — ZKTeco (and compatible) devices in ADMS
-// push mode expect these exact paths (Comm > ADMS > Server URL just takes a
-// host, the device appends /iclock/... itself) and speak plain text, not
-// our normal JSON API.
-app.use("/iclock", admsRoutes)
+// push mode expect an "/iclock/..." suffix (Comm > ADMS > Server URL is
+// whatever base you give it, the device appends /iclock/... itself) and
+// speak plain text, not our normal JSON API. The org slug goes in the path
+// ahead of it — a device's configured Server URL is
+// "<this-host>/assetflow/<org-slug>", making its requests land on
+// "/assetflow/<org-slug>/iclock/cdata" etc. — so which organization a
+// request belongs to is resolved from the URL itself, before any
+// serial-number lookup happens.
+app.use("/assetflow/:orgSlug/iclock", admsRoutes)
 
 app.use("/api/auth", authRoutes)
 app.use("/api/employees", employeeRoutes)

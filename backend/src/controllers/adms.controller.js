@@ -7,27 +7,39 @@ const { localDateTimeToUtc } = require("../utils/timezone")
 // Server menu: the device becomes the client, POSTing each new punch here as
 // it happens, no polling required on our side at all. It is not JSON — it's
 // a plain-text, reverse-engineered-by-the-community protocol (ZKTeco never
-// published a formal spec), so unlike the token-authenticated connector
-// endpoints, identification is by the device's own serial number (SN query
-// param) rather than a bearer-style secret — that's an inherent protocol
-// limitation, not something this implementation can add on top of, since the
-// device firmware has no field to send a custom header/token.
-
-async function findDeviceBySerial(sn) {
-  if (!sn) return null
-  return prisma.biometricDevice.findFirst({ where: { serialNumber: String(sn), enabled: true } })
+// published a formal spec).
+//
+// Multi-tenancy: the device's "Server URL" field is just a base string that
+// the firmware appends its own fixed "/iclock/..." suffix onto, so a
+// customer's own organization slug goes in front of that as a path segment
+// — e.g. Server URL "yourdomain.com/assetflow/cloudnext360" makes the device
+// request ".../assetflow/cloudnext360/iclock/cdata". That resolves the
+// organization unambiguously before a device is even looked up, so unlike
+// serial-number-only matching, two organizations' devices can never be
+// confused with each other regardless of what serial numbers they carry.
+async function findOrgBySlug(slug) {
+  if (!slug) return null
+  return prisma.organization.findUnique({ where: { slug: String(slug) } })
 }
 
-// GET /iclock/cdata — handshake a device performs on boot/registration
-// (no `table` query param) to fetch its sync options. Realtime=1 is what
-// tells the device to push each punch immediately instead of only on its own
-// internal schedule; the rest are conservative defaults widely documented
-// across community ADMS implementations. The exact accepted format is
-// firmware-dependent and not officially published, so this is a best-effort
-// baseline to verify against the real device once it's pointed here.
+async function findDeviceBySerial(organizationId, sn) {
+  if (!sn) return null
+  return prisma.biometricDevice.findFirst({ where: { organizationId, serialNumber: String(sn), enabled: true } })
+}
+
+// GET /assetflow/:orgSlug/iclock/cdata — handshake a device performs on
+// boot/registration (no `table` query param) to fetch its sync options.
+// Realtime=1 is what tells the device to push each punch immediately instead
+// of only on its own internal schedule; the rest are conservative defaults
+// widely documented across community ADMS implementations. The exact
+// accepted format is firmware-dependent and not officially published, so
+// this is a best-effort baseline to verify against the real device once it's
+// pointed here.
 async function cdataHandshake(req, res) {
+  const org = await findOrgBySlug(req.params.orgSlug)
+  if (!org) return res.status(200).type("text/plain").send("ERROR: unknown organization")
   const sn = req.query.SN
-  const device = await findDeviceBySerial(sn)
+  const device = await findDeviceBySerial(org.id, sn)
   if (!device) return res.status(200).type("text/plain").send("ERROR: unregistered SN")
 
   const lines = [
@@ -55,9 +67,11 @@ async function cdataHandshake(req, res) {
 // server process's own OS timezone — using plain `new Date(str)` here would
 // silently produce wrong-by-hours timestamps on a cloud host set to UTC.
 async function cdataUpload(req, res) {
+  const org = await findOrgBySlug(req.params.orgSlug)
+  if (!org) return res.status(200).type("text/plain").send("ERROR: unknown organization")
   const sn = req.query.SN
   const table = req.query.table || ""
-  const device = await findDeviceBySerial(sn)
+  const device = await findDeviceBySerial(org.id, sn)
   if (!device) return res.status(200).type("text/plain").send("ERROR: unregistered SN")
 
   if (table.toUpperCase() !== "ATTLOG") {
@@ -79,10 +93,16 @@ async function cdataUpload(req, res) {
       if (!pin || !dateTime) return null
       const occurredAt = localDateTimeToUtc(dateTime, timeZone)
       if (Number.isNaN(occurredAt.getTime())) return null
+      // ATTLOG's Status is the device's own IN/OUT function-key press: the
+      // widely-used convention is 0=Check In, 1=Check Out (2-5 cover
+      // break/overtime keys some devices have, which this doesn't try to
+      // interpret as a primary in/out marker).
+      const direction = status === "0" ? "IN" : status === "1" ? "OUT" : null
       return {
         externalUserId: pin,
         occurredAt: occurredAt.toISOString(),
         verification: verify || null,
+        direction,
         externalId: `${pin}:${occurredAt.getTime()}:${status || ""}`,
         rawPayload: { pin, dateTime, status, verify, raw: line },
       }

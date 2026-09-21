@@ -534,6 +534,11 @@ model BiometricDevice {
   name                    String
   vendor                  BiometricVendor
   model                   String?
+  // Unique per organization, not globally: serial numbers can genuinely
+  // collide across different vendors/batches, so treating them as globally
+  // unique would be wrong. Multi-tenancy for ADMS is resolved by the
+  // organization slug in the URL path instead (see adms.controller.js) —
+  // the device is looked up by serialNumber only within that organization.
   serialNumber            String?
   ipAddress               String?
   port                    Int?
@@ -581,6 +586,11 @@ model BiometricPunch {
   externalUserId String
   occurredAt     DateTime
   verification   String?
+  // The device's own IN/OUT function-key press, when the protocol tells us
+  // (ADMS's ATTLOG Status field: "IN" or "OUT"). Null when a device/path
+  // doesn't report it — those punches fall back to ordering (first punch of
+  // the day = in, last = out) for check-in/check-out purposes.
+  direction      String?
   externalId     String?
   rawPayload     Json?
   createdAt      DateTime        @default(now())

@@ -693,16 +693,17 @@ export default function Dashboard() {
                   {executiveScope ===
                   "company"
                     ? `${
-                        executive
-                          .mainCompany
+                        executive.organizations?.find(
+                          (o) => !o.companyId || o.companyId === o.id
+                        )?.name ||
+                        executive.organizations?.[0]
                           ?.name ||
-                        "Main Company"
+                        "Main company"
                       } · All organizations`
                     : `${
-                        executive
-                          .organization
+                        executive.organizations?.[0]
                           ?.name ||
-                        "Current organization"
+                        "Your organization"
                       } · Current organization`}
                 </p>
               )}

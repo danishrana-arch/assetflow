@@ -1,6 +1,8 @@
 const express = require("express")
 const c = require("../controllers/adms.controller")
-const router = express.Router()
+// mergeParams: this router is mounted under "/assetflow/:orgSlug/iclock" —
+// without it, req.params.orgSlug wouldn't reach these handlers at all.
+const router = express.Router({ mergeParams: true })
 
 // ADMS devices POST plain text, not JSON — the app-wide express.json()
 // middleware silently no-ops for non-JSON content types, so this captures
