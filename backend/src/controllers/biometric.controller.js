@@ -335,8 +335,37 @@ async function mapEmployee(req, res, next) {
     const device = await prisma.biometricDevice.findFirst({ where: { id: req.params.id, organizationId: req.user.organizationId } })
     const employee = await prisma.user.findFirst({ where: { id: req.body.employeeId, organizationId: req.user.organizationId } })
     if (!device || !employee || !req.body.externalUserId) return res.status(404).json({ error: "Device or employee not found" })
-    const mapping = await prisma.biometricDeviceEmployee.upsert({ where: { deviceId_employeeId: { deviceId: device.id, employeeId: employee.id } }, update: { externalUserId: String(req.body.externalUserId) }, create: { deviceId: device.id, employeeId: employee.id, externalUserId: String(req.body.externalUserId) } })
-    res.json(mapping)
+    const externalUserId = String(req.body.externalUserId)
+    const mapping = await prisma.biometricDeviceEmployee.upsert({
+      where: { deviceId_employeeId: { deviceId: device.id, employeeId: employee.id } },
+      update: { externalUserId },
+      create: { deviceId: device.id, employeeId: employee.id, externalUserId },
+    })
+
+    // Punches for this device user ID may already have arrived and been
+    // stored unmatched (employeeId: null) before this mapping existed —
+    // that never resolves itself automatically (the connector's watermark
+    // means it won't re-send them, and the ingest dedup check would skip
+    // them as duplicates even if it did). Attach today's already-stored
+    // ones now and recompute attendance so mapping an employee actually
+    // takes effect immediately instead of only for punches from this point on.
+    const organization = await prisma.organization.findUnique({ where: { id: device.organizationId }, select: { timezone: true } })
+    const timeZone = organization?.timezone || "UTC"
+    const todayKey = dateKeyInTimeZone(new Date(), timeZone)
+    const punchRangeStart = localDateKeyToUtc(todayKey, timeZone)
+    const tomorrow = new Date(`${todayKey}T00:00:00.000Z`)
+    tomorrow.setUTCDate(tomorrow.getUTCDate() + 1)
+    const punchRangeEnd = localDateKeyToUtc(tomorrow.toISOString().slice(0, 10), timeZone)
+
+    const backfilled = await prisma.biometricPunch.updateMany({
+      where: { deviceId: device.id, externalUserId, employeeId: null, occurredAt: { gte: punchRangeStart, lt: punchRangeEnd } },
+      data: { employeeId: employee.id },
+    })
+    if (backfilled.count > 0) {
+      await syncAttendanceFromPunches({ organizationId: device.organizationId, employeeId: employee.id, deviceId: device.id, occurredAt: new Date() })
+    }
+
+    res.json({ ...mapping, backfilledPunches: backfilled.count })
   } catch (e) { next(e) }
 }
 
