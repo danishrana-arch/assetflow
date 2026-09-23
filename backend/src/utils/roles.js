@@ -2,7 +2,6 @@ const MANAGEMENT_ROLES = [
   "ADMIN",
   "CEO",
   "MANAGER",
-  "SALES_HEAD",
   "HR",
   "MANAGEMENT",
   "DEPARTMENT_HEAD",
@@ -12,7 +11,6 @@ const ASSIGNABLE_ROLES = [
   "ADMIN",
   "CEO",
   "MANAGER",
-  "SALES_HEAD",
   "HR",
   "MANAGEMENT",
   "EMPLOYEE",
@@ -36,12 +34,18 @@ const MAX_CEO_COUNT = 3
 // switch into other organizations in the company (see applyOrganizationScope
 // in auth.middleware.js), but within whichever org they're viewing, module
 // access is still governed by this map.
+// "sales", "salesTeam", and "salesReports" were removed 2026-09-23 along
+// with the SALES_HEAD role itself (see UserRole enum) — this deployment is
+// HR-only, no sales pipeline feature was ever going to be built.
+// "financialReports" was removed the same day. "hrReports" was removed and
+// then restored the same day at the user's request — HR Reports is a real
+// part of the app. "payrollReports" is kept (Payroll Reports page, still a
+// placeholder).
 const ROLE_MODULES = {
   CEO: ["*"],
   ADMIN: ["*"],
-  MANAGER: ["payroll", "payrollReports", "financialReports"],
+  MANAGER: ["payroll", "payrollReports"],
   HR: ["employees", "employeeForms", "certifications", "attendance", "leave", "hrReports"],
-  SALES_HEAD: ["sales", "salesTeam", "projects", "tasks", "salesReports"],
   MANAGEMENT: ["employees", "projects", "tasks", "attendance", "performance", "reports"],
   DEPARTMENT_HEAD: ["departments", "employees", "attendance", "projects", "tasks", "leave"],
   IT_MANAGER: ["inventory", "assets", "assetAssignments", "assetRequests", "tickets"],

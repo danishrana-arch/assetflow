@@ -301,7 +301,7 @@ async function main() {
         name: "Bilal Farooq",
         email: "saleshead@acme.test",
         password: hashed,
-        role: "SALES_HEAD",
+        role: "MANAGEMENT",
         departmentId: sales.id,
       },
     }),

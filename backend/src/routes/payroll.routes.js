@@ -2,6 +2,7 @@ const express = require("express")
 const {
   generatePayroll,
   listPayroll,
+  getPayrollSummary,
   myPayroll,
   updatePayroll,
   markPaid,
@@ -22,6 +23,7 @@ router.use(requireAuth)
 router.get("/me", noStore, myPayroll)
 
 router.get("/", requireModule("payroll"), noStore, listPayroll)
+router.get("/summary", requireModule("payrollReports"), noStore, getPayrollSummary)
 router.post("/generate", requireRole("ADMIN", "MANAGER"), generatePayroll)
 // An admin/Finance Manager's final step: send a generated month to the CEO.
 router.post("/submit", requireRole("ADMIN", "MANAGER"), submitForApproval)

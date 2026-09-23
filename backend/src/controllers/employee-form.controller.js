@@ -2,6 +2,7 @@ const crypto = require("crypto")
 const prisma = require("../lib/prisma")
 const { encryptField, decryptField } = require("../utils/crypto")
 const { logAudit } = require("../utils/audit")
+const { notifyUsers } = require("../utils/notifications")
 
 function hashToken(token) {
   return crypto.createHash("sha256").update(token).digest("hex")
@@ -75,6 +76,53 @@ async function createEmployeeForm(req, res, next) {
       recipients,
       recipient: recipients[0] || null,
     })
+  } catch (err) {
+    next(err)
+  }
+}
+
+async function sendEmployeeFormNotifications(req, res, next) {
+  try {
+    const { organizationId, userId } = req.user
+    const form = await prisma.employeeForm.findFirst({ where: { id: req.params.id, organizationId } })
+    if (!form) return res.status(404).json({ error: "Form not found" })
+    if (!form.active) return res.status(400).json({ error: "This form is inactive. Activate it before sending." })
+
+    const rawEmployeeIds = Array.isArray(req.body.employeeIds) ? req.body.employeeIds : []
+    const employeeIds = Array.from(
+      new Set(rawEmployeeIds.map((id) => clean(id, 100)).filter(Boolean))
+    )
+    if (!employeeIds.length) return res.status(400).json({ error: "Select at least one employee to notify" })
+
+    const recipients = await prisma.user.findMany({
+      where: { id: { in: employeeIds }, organizationId, status: "ACTIVE" },
+      select: { id: true, name: true, email: true },
+    })
+    if (!recipients.length) {
+      return res.status(404).json({ error: "None of the selected employees were found in your organization" })
+    }
+
+    const token = decryptField(form.tokenEncrypted)
+    await notifyUsers({
+      organizationId,
+      recipientIds: recipients.map((recipient) => recipient.id),
+      createdById: userId,
+      type: "EMPLOYEE_FORM",
+      title: `Please complete: ${form.title}`,
+      message: "You've been asked to fill out an employee information form.",
+      link: `/employee-form/${token}`,
+    })
+
+    logAudit({
+      organizationId,
+      actorId: userId,
+      action: "employee_form.notified",
+      targetType: "EmployeeForm",
+      targetId: form.id,
+      note: `Notified ${recipients.length} employee(s)`,
+    })
+
+    res.json({ notified: recipients.length })
   } catch (err) {
     next(err)
   }
@@ -212,6 +260,7 @@ async function submitPublicEmployeeForm(req, res, next) {
 
 module.exports = {
   createEmployeeForm,
+  sendEmployeeFormNotifications,
   listEmployeeForms,
   toggleEmployeeForm,
   getEmployeeFormSubmissions,

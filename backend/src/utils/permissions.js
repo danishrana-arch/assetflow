@@ -8,9 +8,9 @@ const prisma = require("../lib/prisma")
 // utils/roles.js.
 const ALWAYS_FULL_ATTENDANCE_ROLES = ["ADMIN", "CEO"]
 
-// Roles an ADMIN/CEO can actually configure from the matrix. SALES_HEAD and
-// MANAGER aren't listed — Attendance isn't one of their modules, so there's
-// nothing to configure; they stay NO_ACCESS unconditionally.
+// Roles an ADMIN/CEO can actually configure from the matrix. MANAGER isn't
+// listed — Attendance isn't one of its modules, so there's nothing to
+// configure; it stays NO_ACCESS unconditionally.
 const CONFIGURABLE_ATTENDANCE_ROLES = [
   "HR",
   "MANAGEMENT",

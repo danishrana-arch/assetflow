@@ -31,12 +31,8 @@ import {
   MapPin,
   CalendarRange,
   BadgeCheck,
-  TrendingUp,
-  Handshake,
-  PieChart,
-  FileBarChart,
-  Receipt,
   FileSpreadsheet,
+  FileBarChart,
 } from "lucide-react"
 import { useAuth } from "../context/AuthContext"
 import { isManagement, hasModuleAccess } from "../utils/roles"
@@ -104,8 +100,6 @@ export default function MobileNav({ open, onClose }) {
               {hasModuleAccess(user?.role, "inventory") && <Row to="/inventory" icon={Boxes} label="Inventory" onClick={onClose} />}
               {hasModuleAccess(user?.role, "employees") && <Row to="/employees" icon={Users} label="Employees" onClick={onClose} />}
               {hasModuleAccess(user?.role, "assetAssignments") && <Row to="/assignments" icon={ClipboardCheck} label="Asset Assignment" onClick={onClose} />}
-              {hasModuleAccess(user?.role, "sales") && <Row to="/sales" icon={TrendingUp} label="Sales" onClick={onClose} />}
-              {hasModuleAccess(user?.role, "salesTeam") && <Row to="/sales-team" icon={Handshake} label="Sales Team" onClick={onClose} />}
               {hasModuleAccess(user?.role, "projects") && <Row to="/projects" icon={FolderKanban} label="Projects" onClick={onClose} />}
               <Row to="/calendar" icon={CalendarRange} label="Company Calendar" onClick={onClose} />
               {hasModuleAccess(user?.role, "tasks") && <Row to="/tasks" icon={ListTodo} label="Tasks" onClick={onClose} />}
@@ -127,15 +121,13 @@ export default function MobileNav({ open, onClose }) {
                   <Row to="/export" icon={Download} label="Export" onClick={onClose} />
                 </>
               )}
-              {hasModuleAccess(user?.role, "salesReports") && <Row to="/reports/sales" icon={PieChart} label="Sales Reports" onClick={onClose} />}
               {hasModuleAccess(user?.role, "hrReports") && <Row to="/reports/hr" icon={FileBarChart} label="HR Reports" onClick={onClose} />}
-              {hasModuleAccess(user?.role, "financialReports") && <Row to="/reports/financial" icon={Receipt} label="Financial Reports" onClick={onClose} />}
               {isOwner && <Row to="/audit-log" icon={ShieldCheck} label="Audit Log" onClick={onClose} />}
               {hasModuleAccess(user?.role, "payroll") && (
-                <>
-                  <Row to="/payroll" icon={Wallet} label="Payroll" onClick={onClose} />
-                  <Row to="/payroll/reports" icon={FileSpreadsheet} label="Payroll Reports" onClick={onClose} />
-                </>
+                <Row to="/payroll" icon={Wallet} label="Payroll" onClick={onClose} />
+              )}
+              {hasModuleAccess(user?.role, "payrollReports") && (
+                <Row to="/payroll/reports" icon={FileSpreadsheet} label="Payroll Reports" onClick={onClose} />
               )}
               <div className="my-2 divider" />
               <Row to="/notifications" icon={BellRing} label="Notifications" onClick={onClose} showDot={hasUnreadNotifications} />

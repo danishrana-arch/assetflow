@@ -14,58 +14,91 @@ role **not** listed in "Roles with access" → `403`/redirect, not a silent
 200.
 
 **2026-09-23 rewrite**: the app moved from one flat `MANAGEMENT_ROLES`
-bucket (ADMIN, CEO, MANAGER, SALES_HEAD, HR, MANAGEMENT, DEPARTMENT_HEAD
-all functionally identical almost everywhere) to a real per-role
-**module map** — `ROLE_MODULES` + `hasModuleAccess(role, moduleKey)` in
-both `backend/src/utils/roles.js` and `frontend/src/utils/roles.js` (hand-
-mirrored, no shared package — check both stay in sync on future changes).
-Every section below has been re-verified against the new map; anything
-still gated by the old broad bucket (a handful of things deliberately were
-not narrowed — see §0) is called out explicitly per row.
+bucket (originally ADMIN, CEO, MANAGER, SALES_HEAD, HR, MANAGEMENT,
+DEPARTMENT_HEAD, all functionally identical almost everywhere — `SALES_HEAD`
+was removed entirely later the same day, see §0, so it's 6 roles now) to
+a real per-role **module map** — `ROLE_MODULES` + `hasModuleAccess(role,
+moduleKey)` in both `backend/src/utils/roles.js` and
+`frontend/src/utils/roles.js` (hand-mirrored, no shared package — check
+both stay in sync on future changes). Every section below has been
+re-verified against the new map; anything still gated by the old broad
+bucket (a handful of things deliberately were not narrowed — see §0) is
+called out explicitly per row.
 
 ## 0. Roles in the system
+
+**`SALES_HEAD` was removed entirely on 2026-09-23** — not just its
+placeholder pages, the *role itself*: dropped from `UserRole` in
+`schema.prisma` (migration `20260923190000_remove_sales_head_role`, a
+Postgres enum-type rebuild since Postgres can't drop a single enum value
+directly), and from every role list in `backend/src/utils/roles.js` and
+`frontend/src/utils/roles.js`. One real active user had this role (Ali
+Sher Farooqi, CostBidding org) and was reassigned before the migration
+ran; a `prisma/seed.js` test fixture using this role was changed to
+`MANAGEMENT`. **A role list that still shows 7 management-tier roles
+anywhere below is describing pre-2026-09-23 history, not something you can
+still reproduce by logging in as `SALES_HEAD` — that login no longer
+exists.** Table below has 7 roles total, not 8.
 
 | Role | Label in UI | Modules (`ROLE_MODULES`) |
 |---|---|---|
 | `ADMIN` | "Admin" (was "Owner / Admin") | `*` (everything) |
 | `CEO` | "CEO" | `*` (everything); sole role for payroll approve/reject/mark-paid/bulk-delete and `set-main` company; max 3 users per org (`MAX_CEO_COUNT = 3`) |
-| `MANAGER` | **"Finance Manager"** (was "Manager") | `payroll`, `payrollReports`, `financialReports` — **only**. No Employees, Inventory, Attendance, Leave, Departments, Settings, Audit Log, or Org Comparison. |
+| `MANAGER` | **"Finance Manager"** (was "Manager") | `payroll`, `payrollReports` — **only**. No Employees, Inventory, Attendance, Leave, Departments, Settings, Audit Log, or Org Comparison. |
 | `HR` | "HR" | `employees`, `employeeForms`, `certifications`, `attendance`, `leave`, `hrReports` |
-| `SALES_HEAD` | "Sales Head" | `sales`, `salesTeam`, `projects`, `tasks`, `salesReports` |
 | `MANAGEMENT` | "Management" | `employees`, `projects`, `tasks`, `attendance`, `performance`, `reports` |
 | `DEPARTMENT_HEAD` | "Department Head" | `departments`, `employees`, `attendance`, `projects`, `tasks`, `leave` — **and** these six are scoped to the department head's own department at the data layer, not just hidden in nav (see §4/§6/§9/§6d) |
 | `IT_MANAGER` | "IT Manager" | `inventory`, `assets`, `assetAssignments`, `assetRequests`, `tickets` — **only**. No employee directory page (though the API still lets it call `GET /employees` for the redacted asset-assignment picker — see EMP-02), no payroll, no attendance grid, no settings. |
 | `EMPLOYEE` | "Employee" | none — baseline self-service: own profile, own attendance, own payroll link (see gap #2), tickets, announcements, calendar |
+
+**2026-09-23, same day, two rounds of changes**: first, `sales`,
+`salesTeam`, `salesReports`, `hrReports`, and `financialReports` were all
+removed (module keys, pages, routes, nav links) — this deployment is
+HR-only, no sales-pipeline feature was ever going to be built. Then, per a
+follow-up request, **HR Reports was restored** (it's a real part of the
+app) and the `SALES_HEAD` role was removed outright rather than just its
+placeholder pages (see banner above). Net state: `HR` has `hrReports`
+back; `financialReports` and everything sales-related stay gone.
+**Payroll Reports is the other placeholder kept** — still "Coming soon",
+no backend behind it yet, but the module/page/nav entry all still exist
+(`ADMIN,CEO,MANAGER`).
 
 Role groups referenced repeatedly below:
 - **Owner** = `ADMIN, CEO` **only** (was `ADMIN, CEO, MANAGER` — narrowed
   when `MANAGER` became Finance Manager; `RequireOwner` in `App.jsx` and
   the org-settings/attendance-matrix routes in `organization.routes.js`
   both changed accordingly).
-- **Management (7)** = `ADMIN, CEO, MANAGER, SALES_HEAD, HR, MANAGEMENT,
-  DEPARTMENT_HEAD` — this is the **old, still-in-use-in-places** broad
-  bucket (`isManagement()` / `MANAGEMENT_ROLES` / backend `requireManagement`
-  middleware). Deliberately **not** narrowed everywhere — it's still the
-  gate for announcements, calendar events, work-categories read/write
-  visibility of dashboard widgets, and the leave/holiday/project-adjacent
-  bits that aren't one of the specific tree modules. Don't assume every
-  row using "Management (7)" got the module treatment — check the
-  specific row.
+- **Management (6)** = `ADMIN, CEO, MANAGER, HR, MANAGEMENT,
+  DEPARTMENT_HEAD` (was "Management (6)" — `SALES_HEAD` removed, see
+  banner above; rows below written before 2026-09-23 may still say
+  "Management (6)" or list `SALES_HEAD` in a "these roles lost X" sentence
+  — read that as historical, the count is 6 now). This is the **old,
+  still-in-use-in-places** broad bucket (`isManagement()` / `MANAGEMENT_ROLES`
+  / backend `requireManagement` middleware). Deliberately **not** narrowed
+  everywhere — it's still the gate for announcements, calendar events,
+  work-categories read/write visibility of dashboard widgets, and the
+  leave/holiday/project-adjacent bits that aren't one of the specific tree
+  modules. Don't assume every row using "Management (6)"/"Management (6)"
+  got the module treatment — check the specific row.
 - **Payroll module** = `ADMIN, CEO, MANAGER` (was `ADMIN,CEO,MANAGER,HR,
   MANAGEMENT` — HR and MANAGEMENT lost payroll access entirely).
 - **Inventory module** = `ADMIN, CEO, IT_MANAGER` (was `ADMIN,CEO,MANAGER,
   IT_MANAGER` — MANAGER lost inventory entirely, including Assignments and
   Asset Requests review/fulfill).
 - **Employees module** = `ADMIN, CEO, HR, MANAGEMENT, DEPARTMENT_HEAD`
-  (was Management-7 + `IT_MANAGER`; `MANAGER`, `SALES_HEAD` and
-  `IT_MANAGER` all lost the **directory page** — `IT_MANAGER` still gets
-  the underlying `GET /employees` API call for its own picker, see EMP-02).
+  (was Management-6 + `IT_MANAGER`; `MANAGER` and `SALES_HEAD` lost the
+  directory page/module entirely). `IT_MANAGER` is **not** in this module
+  list either, but keeps its own separate exception for the `/employees`
+  page and `GET /employees` API — it's IT's "Employees & Assets"
+  asset-assignment view, redacted server-side, not the HR directory (see
+  EMP-01/EMP-02; this exception was briefly and mistakenly removed on
+  2026-09-23, then restored the same day).
 - **Attendance module** = `ADMIN, CEO, HR, MANAGEMENT, DEPARTMENT_HEAD`
   (was `ADMIN,CEO,MANAGER` always-full + everyone else configurable via
   the matrix; `MANAGER` lost Attendance entirely — not even a configurable
   row — and `MANAGEMENT`/`DEPARTMENT_HEAD` now default to full access
   instead of falling through to no-access).
-- **Leave module** = `ADMIN, CEO, HR, DEPARTMENT_HEAD` (was Management-7).
+- **Leave module** = `ADMIN, CEO, HR, DEPARTMENT_HEAD` (was Management-6).
 
 ---
 
@@ -76,7 +109,7 @@ Role groups referenced repeatedly below:
 | AUTH-01 | `POST /api/auth/register` | Creates first org/user; rate-limited to 20 req/15min per IP | Public (no auth) |
 | AUTH-02 | `POST /api/auth/login` | Valid creds → token + user; wrong creds → 401; rate-limited 20/15min | Public |
 | AUTH-03 | `GET /api/auth/me` | Returns current user/org; this is the **only** call that logs the user out on 401 (per module-02 fix) — confirm a 401 from any *other* endpoint does NOT clear localStorage/redirect to login | Any authenticated |
-| AUTH-04 | `POST /api/auth/invite` | Invite a new employee by email | Management (7) — **unchanged**, not narrowed to a specific module |
+| AUTH-04 | `POST /api/auth/invite` | Invite a new employee by email | Management (6) — **unchanged**, not narrowed to a specific module |
 | AUTH-05 | `PATCH /api/auth/password` | Self password change; verifies `currentPassword` server-side; wrong current password rejected | Self (any authenticated) |
 | AUTH-06 | Logout | Purely client-side — clears `assetflow_token`, `assetflow_user_cache`, `assetflow_active_organization`; confirm no server call is needed/made | Any authenticated |
 | AUTH-07 | Session bootstrap from cache | On reload with a cached token, UI shows cached user instantly while `GET /me` runs in background | Any authenticated |
@@ -101,23 +134,23 @@ The Sidebar/MobileNav "management" branch (everyone except plain
 `EMPLOYEE` and `IT_MANAGER`) is no longer one flat nav list — every link
 is now individually gated by `hasModuleAccess(role, moduleKey)`, so **the
 actual link set differs per role**. Test each role separately rather than
-treating "Management (7)" as one nav profile.
+treating "Management (6)" as one nav profile.
 
 | ID | Feature | What to verify | Roles with access |
 |---|---|---|---|
-| NAV-01a | Sidebar — ADMIN/CEO | Sees every link: Dashboard, Inventory, Employees, Attendance(+Sites), My Attendance, Company Calendar, Org Comparison, Sales, Sales Team, Projects, Tasks, Performance, Announcements, Departments, Asset Requests, Assignments, Tickets, Leave Requests, Reports, Export, Sales/HR/Financial Reports, Audit Log, Notifications, Employee Forms, Settings, Payroll, Payroll Reports | `ADMIN`, `CEO` |
-| NAV-01b | Sidebar — Finance Manager (`MANAGER`) | Sees **only**: Dashboard, My Attendance, Company Calendar, Tickets (self-scoped), Notifications, Payroll, Payroll Reports, Financial Reports. Confirm Inventory/Employees/Attendance-grid/Departments/Reports/Audit Log/Settings/Sales-anything are **absent**, not just disabled | `MANAGER` |
-| NAV-01c | Sidebar — HR | Sees: Dashboard, Employees, Attendance(+Sites), My Attendance, Company Calendar, Announcements, Tickets, Leave Requests, HR Reports, Notifications, Employee Forms. Confirm Inventory, Payroll, Projects, Tasks, Performance, Departments, Sales-anything, Reports/Export, Audit Log, Settings are **absent** | `HR` |
-| NAV-01d | Sidebar — Sales Head | Sees: Dashboard, My Attendance, Company Calendar, Sales, Sales Team, Projects, Tasks, Announcements, Tickets, Sales Reports, Notifications. Confirm Employees, Inventory, Payroll, Attendance-grid, Departments, Leave Requests, generic Reports/Export, Audit Log, Settings are **absent** | `SALES_HEAD` |
+| NAV-01a | Sidebar — ADMIN/CEO | Sees every link: Dashboard, Inventory, Employees, Attendance(+Sites), My Attendance, Company Calendar, Org Comparison, Projects, Tasks, Performance, Announcements, Departments, Asset Requests, Assignments, Tickets, Leave Requests, Reports, Export, Audit Log, Notifications, Employee Forms, Settings, Payroll, Payroll Reports | `ADMIN`, `CEO` |
+| NAV-01b | Sidebar — Finance Manager (`MANAGER`) | Sees **only**: Dashboard, My Attendance, Company Calendar, Tickets (self-scoped), Notifications, Payroll, Payroll Reports. Confirm Inventory/Employees/Attendance-grid/Departments/Reports/Audit Log/Settings are **absent**, not just disabled | `MANAGER` |
+| NAV-01c | Sidebar — HR | Sees: Dashboard, Employees, Attendance(+Sites), My Attendance, Company Calendar, Announcements, Tickets, Leave Requests, Notifications, Employee Forms. Confirm Inventory, Payroll, Projects, Tasks, Performance, Departments, Reports/Export, Audit Log, Settings are **absent** | `HR` |
+| NAV-01d | **REMOVED 2026-09-23** — Sidebar — Sales Head | The `SALES_HEAD` role itself no longer exists (dropped from the `UserRole` enum, not just its module list) — there is nothing left to test here; a login with this role can't be created. Historical note only: it briefly had just `projects`/`tasks` after the Sales pages were deleted, before being removed outright | N/A — role removed |
 | NAV-01e | Sidebar — Management | Sees: Dashboard, Employees, Attendance(+Sites), My Attendance, Company Calendar, Projects, Tasks, Performance, Announcements, Tickets, Reports, Export, Notifications. Confirm Inventory, Payroll, Departments, Leave Requests, Sales-anything, Audit Log, Settings, Employee Forms are **absent** | `MANAGEMENT` |
 | NAV-01f | Sidebar — Department Head | Sees: Dashboard, Employees, Attendance(+Sites), My Attendance, Company Calendar, Departments, Projects, Tasks, Announcements, Tickets, Leave Requests, Notifications. **All of Employees/Attendance/Departments/Projects/Tasks/Leave are scoped to their own department's data** (see §4/§6/§9/§6d) — confirm this is a real data filter, not just the same org-wide data with a narrower nav. Confirm Inventory, Payroll, Reports/Export, Sales-anything, Audit Log, Settings are **absent** | `DEPARTMENT_HEAD` |
 | NAV-02 | Sidebar — Attendance links (`ADMIN/CEO/HR/MANAGEMENT/DEPARTMENT_HEAD`) | "Attendance" + "Attendance Sites" appear if `hasModuleAccess(role,"attendance")` **or** the user's legacy `canManageAttendance` flag is set. `MANAGER`/`SALES_HEAD`/`IT_MANAGER` never see these regardless of the flag's underlying permission-matrix state (they're not in `CONFIGURABLE_ATTENDANCE_ROLES` either) | `ADMIN,CEO,HR,MANAGEMENT,DEPARTMENT_HEAD` (+ flag override for others) |
 | NAV-03 | Sidebar — Organization Comparison link | Only visible to Owner (`ADMIN,CEO` — narrowed, was `ADMIN,CEO,MANAGER`) | Owner |
 | NAV-04 | Sidebar — Employee Forms link | Now gated by the `employeeForms` module (`ADMIN,CEO,HR`) — **not** Owner anymore; HR gained this, `MANAGER` lost it | `ADMIN,CEO,HR` |
 | NAV-04b | Sidebar — Settings link | Still Owner-only (`ADMIN,CEO` — narrowed from `ADMIN,CEO,MANAGER`) | Owner |
-| NAV-05 | Sidebar — Payroll + Payroll Reports links | Payroll module (`ADMIN,CEO,MANAGER`) — HR/MANAGEMENT lost Payroll entirely; new "Payroll Reports" link (placeholder page) appears alongside it for the same 3 roles | `ADMIN,CEO,MANAGER` |
-| NAV-05b | Sidebar — Sales / Sales Team / Sales Reports links | New — `sales`/`salesTeam`/`salesReports` modules | `ADMIN,CEO,SALES_HEAD` |
-| NAV-05c | Sidebar — HR Reports / Financial Reports links | New — `hrReports`/`financialReports` modules | `ADMIN,CEO,HR` (HR Reports); `ADMIN,CEO,MANAGER` (Financial Reports) |
+| NAV-05 | Sidebar — Payroll + Payroll Reports links | Payroll module (`ADMIN,CEO,MANAGER`) — HR/MANAGEMENT lost Payroll entirely; "Payroll Reports" link (placeholder page) appears alongside it for the same 3 roles | `ADMIN,CEO,MANAGER` |
+| NAV-05b | **REMOVED 2026-09-23** — Sales / Sales Team / Sales Reports / Financial Reports links | These 4 nav links, pages, routes, and module keys were all deleted (HR-only deployment, no sales pipeline was ever going to be built). Confirm none of them appear in any role's nav anymore, and `/sales`, `/sales-team`, `/reports/sales`, `/reports/financial` all 404 via the SPA catch-all (redirect to `/`) rather than rendering anything | N/A — feature removed |
+| NAV-05c | **RESTORED 2026-09-23** — HR Reports link | Briefly removed alongside the other 4, then restored the same day at the user's request — "it's a real part of the app," unlike Sales/Financial. Still a "Coming soon" placeholder page (`HrReports.jsx`, no backend behind it), gated by the `hrReports` module | `ADMIN,CEO,HR` |
 | NAV-06 | Sidebar — IT nav set | Shows: Dashboard, Inventory, "Employees & Assets", "Asset Assignments", Asset Requests, "Requests / Tickets", Company Calendar, My Attendance, Notifications only — confirm Payroll/Settings/Departments/Reports/Audit are absent | `IT_MANAGER` |
 | NAV-07 | Sidebar — Employee nav set | Shows: My Profile, My Projects, My Attendance, Company Calendar, My Employee 360°, My Tasks, My Performance, Announcements, My Payslips, Tickets, Notifications | `EMPLOYEE` |
 | NAV-08 | Sidebar — "My Payslips" link for EMPLOYEE | **Known contradiction, unchanged (gap #2)**: link is shown, but `/payroll/me`'s `RequirePayrollAccess` guard checks `hasModuleAccess(role,"payroll")`, which `EMPLOYEE` never has — clicking it should redirect away; confirm actual behavior | `EMPLOYEE` (expect redirect, not payslip data) |
@@ -125,14 +158,14 @@ treating "Management (7)" as one nav profile.
 | NAV-10 | Theme toggle / Logout / My Account | Present for every role at bottom of sidebar | All roles |
 | NAV-11 | MobileNav parity | Confirm MobileNav's per-role link sets now **match** the desktop Sidebar's module-by-module gating from NAV-01a–f (previously MobileNav had its own drifted checks — e.g. it showed "Settings" unconditionally to every management role, and "Holidays" unconditionally; both are now gated the same as desktop: Settings → Owner only, Holidays → `leave` module) | All roles (mobile viewport) |
 | NAV-12 | Desktop Org Switcher | Appears inline in `DashboardLayout` only for `{ADMIN,CEO,IT_MANAGER}`; switching updates all page data without full reload | `ADMIN`, `CEO`, `IT_MANAGER` (and only if authorized per AUTH-10/AUTH-11b) |
-| NAV-13 | Global Search bar | Results appear for a ≥2-char query; employee/asset/project/ticket search is self-scoped for non-management/IT, org-wide for management/IT (per `search.controller.js`, unaffected by this rewrite); each result type links correctly | All roles (self-scoped); Management (7) + `IT_MANAGER` see org-wide results |
+| NAV-13 | Global Search bar | Results appear for a ≥2-char query; employee/asset/project/ticket search is self-scoped for non-management/IT, org-wide for management/IT (per `search.controller.js`, unaffected by this rewrite); each result type links correctly | All roles (self-scoped); Management (6) + `IT_MANAGER` see org-wide results |
 | NAV-14 | Notification bell (mobile Topbar) | Bell + unread badge + dropdown works; desktop has no separate header, only the search bar + org switcher | All roles |
 
 ---
 
 ## 3. Dashboard (`/` and `/dashboard`)
 
-Route guard: only reachable by `isManager` (Management-7 union check used
+Route guard: only reachable by `isManager` (Management-6 union check used
 in `App.jsx`, **unchanged** by this rewrite) or `IT_MANAGER`; a plain
 `EMPLOYEE` hitting `/` or `/dashboard` is redirected to their own
 `/employees/:id` profile.
@@ -160,14 +193,14 @@ they still use their own local, narrower buckets, independent of
 | DASH-04 | Executive tiles: Employees / Present today / Projects / Total assets | Values correct for selected scope (`organization` vs `company`) | `GET /dashboard/executive?scope=` — `requireManagement` (still the broad 7-role bucket) |
 | DASH-05 | Project status breakdown | Not started / In progress / Completed counts correct | same endpoint |
 | DASH-06 | "Attendance watch" (late today / missing checkout) | Counts correct; links through to `/attendance` | same endpoint |
-| DASH-07 | Latest announcements (4 items) | Matches `GET /dashboard/announcements` | Management (7) can also POST/DELETE announcements from Dashboard section |
+| DASH-07 | Latest announcements (4 items) | Matches `GET /dashboard/announcements` | Management (6) can also POST/DELETE announcements from Dashboard section |
 | DASH-08 | Inventory Activity line chart | Date range filter updates chart; disabled/absent for IT (moot — IT never reaches this branch) | `GET /dashboard/inventory-activity?start&end` — `requireInventoryAccess`, now `ADMIN,CEO,IT_MANAGER` (narrowed — `MANAGER` dropped) |
-| DASH-09 | Utilization radial gauge | Percentage matches assigned/total from `stats` (computed client-side, no separate call) | Management (7) |
+| DASH-09 | Utilization radial gauge | Percentage matches assigned/total from `stats` (computed client-side, no separate call) | Management (6) |
 | DASH-10 | Upcoming events / mini calendar | Week/month range toggle; leave events filtered into a separate list | `GET /dashboard/events?range=` — `requireAuth` |
-| DASH-11 | "Add event" | Dashboard.jsx's own local `isManager = ["ADMIN","CEO","MANAGER","HR"]` gates the button (distinct from both `isManagement` above and the shared module map) — confirm only these 4 roles see it, even though the backend route (`requireManagement`) would actually accept the call from `SALES_HEAD`/`MANAGEMENT`/`DEPARTMENT_HEAD` too if they hit the API directly | UI: `ADMIN,CEO,MANAGER,HR`; API: Management (7) |
-| DASH-12 | Recent Activities (4 items) | Matches `GET /dashboard/activity` | Management (7) |
-| DASH-13 | Top Assigned Assets (3 items) | Matches `GET /dashboard/latest-assets` | Management (7) |
-| DASH-14 | Alerts & Notifications widget | **`GET /api/alerts` is still not mounted on the backend (404)** — confirm widget shows "All clear"/empty state rather than crashing; this is a broken feature, not a config issue (gap #1, unchanged) | Management (7) — polled every 30s |
+| DASH-11 | "Add event" | Dashboard.jsx's own local `isManager = ["ADMIN","CEO","MANAGER","HR"]` gates the button (distinct from both `isManagement` above and the shared module map) — confirm only these 4 roles see it, even though the backend route (`requireManagement`) would actually accept the call from `SALES_HEAD`/`MANAGEMENT`/`DEPARTMENT_HEAD` too if they hit the API directly | UI: `ADMIN,CEO,MANAGER,HR`; API: Management (6) |
+| DASH-12 | Recent Activities (4 items) | Matches `GET /dashboard/activity` | Management (6) |
+| DASH-13 | Top Assigned Assets (3 items) | Matches `GET /dashboard/latest-assets` | Management (6) |
+| DASH-14 | Alerts & Notifications widget | **`GET /api/alerts` is still not mounted on the backend (404)** — confirm widget shows "All clear"/empty state rather than crashing; this is a broken feature, not a config issue (gap #1, unchanged) | Management (6) — polled every 30s |
 | DASH-15 | Decorative company-name banner | Renders the current organization's name; no API dependency; purely cosmetic | All roles that reach the dashboard |
 
 ---
@@ -192,7 +225,7 @@ they still use their own local, narrower buckets, independent of
 | EMP-12 | `/employee-forms` builder | Create/toggle custom onboarding forms, view submissions. Route guard is now the `employeeForms` module (`ADMIN,CEO,HR`), not Owner — HR gained this, `MANAGER` lost it. **Also fixed**: the page component itself had its own hardcoded `if (!["ADMIN","CEO","MANAGER"].includes(role)) return null` gate that would have shown a blank page to HR even after the route let them in — now uses `hasModuleAccess(role,"employeeForms")` | `ADMIN,CEO,HR` |
 | EMP-13 | Public form fill (`/employee-form/:token`) | Prospective employee fills form with no login | Public |
 | EMP-14 | CEO role assignment cap | Role dropdown blocks assigning a 4th CEO (`MAX_CEO_COUNT=3`) in both `EmployeeProfile.jsx` and `Employees.jsx` role selects | Owner (only they can reassign roles) |
-| EMP-15 | Finance Manager (`MANAGER`) role, re-scoped | **Behavior changed from the old MANAGER-regression test**: `MANAGER` used to be "Owner-tier" everywhere `isOwner`/Management was checked. It no longer is — confirm a `MANAGER` user has **only** Payroll/Payroll Reports/Financial Reports access and is correctly blocked (redirect/403) from Inventory, Employees, Certifications, Employee Forms, Organization Comparison, Settings, Attendance, Departments, Leave, and the Attendance permission matrix | `MANAGER` (expect narrow access — this replaces the old "confirm broad access" test) |
+| EMP-15 | Finance Manager (`MANAGER`) role, re-scoped | **Behavior changed from the old MANAGER-regression test**: `MANAGER` used to be "Owner-tier" everywhere `isOwner`/Management was checked. It no longer is — confirm a `MANAGER` user has **only** Payroll/Payroll Reports access (Financial Reports was removed entirely, see §0) and is correctly blocked (redirect/403) from Inventory, Employees, Certifications, Employee Forms, Organization Comparison, Settings, Attendance, Departments, Leave, and the Attendance permission matrix | `MANAGER` (expect narrow access — this replaces the old "confirm broad access" test) |
 
 ---
 
@@ -211,7 +244,7 @@ they still use their own local, narrower buckets, independent of
 | INV-09 | `GET /api/assets/import/template`, `POST /api/assets/import` | CSV bulk import | `ADMIN,CEO,IT_MANAGER` |
 | INV-10 | `/assignments` page | Cross-employee assignment overview | `ADMIN,CEO,IT_MANAGER` |
 | INV-11 | `/asset-requests` page + `POST/GET /api/asset-requests` | Any authenticated user can **request** an asset and see their own requests | Any authenticated (self-scoped for non-review roles) |
-| INV-12 | `PATCH /api/asset-requests/:id/review`, `POST .../fulfill` | Approve/reject/fulfill a request. **Fixed a real gap**: this used to be `requireManagement` (Management-7), which never included `IT_MANAGER` — so IT could see "Asset Requests" prominently in its own nav but got a 403 actually reviewing/fulfilling one. Now gated by the `assetRequests` module (`ADMIN,CEO,IT_MANAGER`); `HR/SALES_HEAD/MANAGEMENT/DEPARTMENT_HEAD/MANAGER` **lost** this action entirely (it's not in their tree modules) | `ADMIN,CEO,IT_MANAGER` (changed from Management-7) |
+| INV-12 | `PATCH /api/asset-requests/:id/review`, `POST .../fulfill` | Approve/reject/fulfill a request. **Fixed a real gap**: this used to be `requireManagement` (Management-6), which never included `IT_MANAGER` — so IT could see "Asset Requests" prominently in its own nav but got a 403 actually reviewing/fulfilling one. Now gated by the `assetRequests` module (`ADMIN,CEO,IT_MANAGER`); `HR/SALES_HEAD/MANAGEMENT/DEPARTMENT_HEAD/MANAGER` **lost** this action entirely (it's not in their tree modules) | `ADMIN,CEO,IT_MANAGER` (changed from Management-6) |
 | INV-13 | `DELETE /api/asset-requests/:id` | Cancel own pending request | Self (owner of the request) |
 
 ---
@@ -240,7 +273,7 @@ Unchanged by this rewrite — included for completeness.
 
 | ID | Feature / Endpoint | What to verify | Roles with access |
 |---|---|---|---|
-| ATT-12 | `/attendance` grid page | Route guard changed from `RequireManagement` (Management-7) to the `attendance` module (`ADMIN,CEO,HR,MANAGEMENT,DEPARTMENT_HEAD`) — **`SALES_HEAD` and `MANAGER` (Finance Manager) can no longer reach this page at all**, confirm redirect. Actual data-action visibility (Mark/Save/Resolve) is still gated by the **Attendance permission matrix**, not just the route | `ADMIN,CEO,HR,MANAGEMENT,DEPARTMENT_HEAD` reach the page; matrix decides what they can do |
+| ATT-12 | `/attendance` grid page | Route guard changed from `RequireManagement` (Management-6) to the `attendance` module (`ADMIN,CEO,HR,MANAGEMENT,DEPARTMENT_HEAD`) — **`SALES_HEAD` and `MANAGER` (Finance Manager) can no longer reach this page at all**, confirm redirect. Actual data-action visibility (Mark/Save/Resolve) is still gated by the **Attendance permission matrix**, not just the route | `ADMIN,CEO,HR,MANAGEMENT,DEPARTMENT_HEAD` reach the page; matrix decides what they can do |
 | ATT-12b | `DEPARTMENT_HEAD` grid scoping | The daily attendance grid (`GET /api/attendance`) for a `DEPARTMENT_HEAD` only lists employees from **their own department** — confirm a department head cannot see other departments' rows even by paging/searching | `DEPARTMENT_HEAD` |
 | ATT-13 | `GET /api/attendance` (daily grid data) | Requires `canRead` per the matrix | Per matrix (§6c) |
 | ATT-14 | `POST /api/attendance/mark`, `POST /api/attendance/save` | Requires `canCreate` **or** `canUpdate` | Per matrix |
@@ -277,12 +310,12 @@ Unchanged by this rewrite — included for completeness.
 | LV-01 | `/leave-requests` page + `POST /api/leaves` | Submit a leave request | Any authenticated (self) |
 | LV-02 | `GET /api/leaves` | Non-`leave`-module roles see only own requests; `leave` module roles see all, **except `DEPARTMENT_HEAD` which is scoped to their own department's employees only** (an `employeeId` query param combined with the department filter, not a full override) | Self-scoped (default) / `ADMIN,CEO,HR` (all) / `DEPARTMENT_HEAD` (own dept only) |
 | LV-03 | `GET /api/leaves/balance` | `employeeId` query param usable only by `leave`-module roles — verify a non-management user passing another employee's ID is rejected | Self (own) / `ADMIN,CEO,HR,DEPARTMENT_HEAD` (any) |
-| LV-04 | `GET /api/leaves/calendar` | Leave calendar view. Route guard now the `leave` module (`ADMIN,CEO,HR,DEPARTMENT_HEAD` — was Management-7, so `SALES_HEAD`/`MANAGEMENT`/`MANAGER` lost this). `DEPARTMENT_HEAD` sees only their own department's approved leave | `ADMIN,CEO,HR,DEPARTMENT_HEAD` (dept-scoped for the latter) |
+| LV-04 | `GET /api/leaves/calendar` | Leave calendar view. Route guard now the `leave` module (`ADMIN,CEO,HR,DEPARTMENT_HEAD` — was Management-6, so `SALES_HEAD`/`MANAGEMENT`/`MANAGER` lost this). `DEPARTMENT_HEAD` sees only their own department's approved leave | `ADMIN,CEO,HR,DEPARTMENT_HEAD` (dept-scoped for the latter) |
 | LV-05 | `PATCH /api/leaves/:id/review` | Approve/reject. Route guard now the `leave` module. **A `DEPARTMENT_HEAD` reviewing a leave application outside their own department now gets a 404** (new scoping check) — confirm this, not just that the route itself is reachable | `ADMIN,CEO,HR,DEPARTMENT_HEAD` (dept-scoped for the latter) |
 | LV-06 | `DELETE /api/leaves/:id` | Cancel own pending leave | Self |
 | LV-07 | `/leave-calendar` route | Confirm it redirects to `/calendar` | All roles |
 | HOL-01 | `/holidays` page + `GET /api/holidays` | View org holiday list | Any authenticated (view) |
-| HOL-02 | `POST/DELETE /api/holidays` | Add/remove holidays. Route guard now the `leave` module (was Management-7) — `SALES_HEAD`/`MANAGEMENT`/`MANAGER` lost this | `ADMIN,CEO,HR,DEPARTMENT_HEAD` |
+| HOL-02 | `POST/DELETE /api/holidays` | Add/remove holidays. Route guard now the `leave` module (was Management-6) — `SALES_HEAD`/`MANAGEMENT`/`MANAGER` lost this | `ADMIN,CEO,HR,DEPARTMENT_HEAD` |
 | BIO-01 | `/settings/attendance-devices` | Configure biometric devices | Owner (`ADMIN,CEO` — narrowed) |
 | BIO-02 | `GET/POST/PATCH/DELETE /api/biometric/devices*`, `.../rotate-token`, `.../mappings` | Router-level gate is still `requireAuth` only, but the controller's own `management()` helper **does** enforce role — confirmed not just assumed (was previously flagged as "verify, don't assume" — now verified: `["ADMIN","CEO"].includes(role) || canManageAttendance` flag). Narrowed from `+MANAGER` to match Settings being Owner-only now | `ADMIN, CEO` (+ legacy flag override) |
 | BIO-03 | `GET /api/biometric/connector/config`, `POST .../heartbeat`, `POST .../punches` | Device-token auth (`connectorAuth`), not user JWT | Device token only |
@@ -300,7 +333,7 @@ exactly the role listed, and confirm every *other* role gets a 403.
 | ID | Feature / Endpoint | What to verify | Roles with access |
 |---|---|---|---|
 | PAY-01 | `/payroll` page | Payroll dashboard/list. Route guard `canAccessPayroll` narrowed to `ADMIN,CEO,MANAGER` (was `+HR,MANAGEMENT`) | `ADMIN,CEO,MANAGER` |
-| PAY-02 | `GET /api/payroll` (noStore) | List all payslips. Route guard changed from `requireManagement` (Management-7) to the `payroll` module — `HR`/`MANAGEMENT`/`SALES_HEAD`/`DEPARTMENT_HEAD` **lost** list access entirely, closing the previous contradiction where they could reach the page but the list gate was broader than intended | `ADMIN,CEO,MANAGER` only |
+| PAY-02 | `GET /api/payroll` (noStore) | List all payslips. Route guard changed from `requireManagement` (Management-6) to the `payroll` module — `HR`/`MANAGEMENT`/`SALES_HEAD`/`DEPARTMENT_HEAD` **lost** list access entirely, closing the previous contradiction where they could reach the page but the list gate was broader than intended | `ADMIN,CEO,MANAGER` only |
 | PAY-03 | `GET /api/payroll/me` (noStore) | Own payslips only | Any authenticated (self) — but see PAY-11 re: route guard |
 | PAY-04 | `POST /api/payroll/generate` | Generate a payroll run. **Now also `MANAGER`** (was `ADMIN` only) — Finance Manager can generate payroll, matching the role's whole purpose | `ADMIN, MANAGER` |
 | PAY-05 | `POST /api/payroll/submit` | Submit for approval to the CEO. **Now also `MANAGER`** (was `ADMIN` only) | `ADMIN, MANAGER` |
@@ -324,7 +357,7 @@ exactly the role listed, and confirm every *other* role gets a 403.
 | ORG-03 | `POST /api/organization/suborganizations`, `DELETE .../suborganizations/:id` | Create/delete a sub-org. Route guard **and** the controller's own internal role check both narrowed from `ADMIN,CEO,MANAGER` to `ADMIN,CEO` (the internal check's error message also updated, was previously stale/misleading) | `ADMIN, CEO` |
 | ORG-04 | `PATCH /api/organization` | Edit org settings (name, primary color, working hours/day, timezone). Narrowed from `ADMIN,CEO,MANAGER` to `ADMIN,CEO` | `ADMIN, CEO` |
 | ORG-05 | `PATCH /api/organization/company/set-main` | Designate the main company org — unchanged | `CEO` only |
-| ORG-06 | `/departments` page + CRUD | **Split for the first time**: reading the list is open to any authenticated user (unchanged, needed for filter dropdowns elsewhere), but create/rename/reassign-manager is now `ADMIN,CEO` only (narrowed from Management-7 via `requireManagement`) — confirm `HR`/`SALES_HEAD`/`MANAGEMENT` can no longer create or edit a department, only view. `DEPARTMENT_HEAD` gets a **read-only** view of just their own department (page hides Add/Delete/manager-reassign controls for them — `canEdit = ["ADMIN","CEO"].includes(role)` in `Departments.jsx`) | View: any authenticated (dept-scoped for `DEPARTMENT_HEAD`); Write: `ADMIN, CEO` only |
+| ORG-06 | `/departments` page + CRUD | **Split for the first time**: reading the list is open to any authenticated user (unchanged, needed for filter dropdowns elsewhere), but create/rename/reassign-manager is now `ADMIN,CEO` only (narrowed from Management-6 via `requireManagement`) — confirm `HR`/`SALES_HEAD`/`MANAGEMENT` can no longer create or edit a department, only view. `DEPARTMENT_HEAD` gets a **read-only** view of just their own department (page hides Add/Delete/manager-reassign controls for them — `canEdit = ["ADMIN","CEO"].includes(role)` in `Departments.jsx`) | View: any authenticated (dept-scoped for `DEPARTMENT_HEAD`); Write: `ADMIN, CEO` only |
 | ORG-06b | `GET /api/departments` — `DEPARTMENT_HEAD` scoping | A `DEPARTMENT_HEAD` only ever gets their own department back (`where: { id: departmentId }`), not the full org list — a department head with no `departmentId` set gets an empty array | `DEPARTMENT_HEAD` |
 | ORG-07 | Timezone picker (Settings) | All 6 GCC zones labeled with country names, plus Karachi/Kolkata; ~400 remaining IANA zones show a live "City (UTC offset)" label; grouped into `<optgroup>`s by region | Owner (Settings access) |
 | ORG-08 | Shared `timezones.js` | `AttendanceSites.jsx` timezone dropdown matches `Settings.jsx` | `ADMIN,CEO,HR,MANAGEMENT,DEPARTMENT_HEAD` on AttendanceSites (attendance module), Owner on Settings |
@@ -338,13 +371,13 @@ exactly the role listed, and confirm every *other* role gets a 403.
 |---|---|---|---|
 | PRJ-01 | `/projects` page | For `IT_MANAGER`, App.jsx redirects this route to `/inventory` | `IT_MANAGER` → redirected |
 | PRJ-02 | `/projects` for everyone else | Open to all other roles (self-scoped "My Projects" for non-`projects`-module roles) | All roles except IT |
-| PRJ-03 | `GET /api/projects`, `GET /api/projects/:id` | Read access; management view (all org projects) is now gated by `hasModuleAccess(role,"projects")` = `ADMIN,CEO,SALES_HEAD,MANAGEMENT,DEPARTMENT_HEAD` — **`HR` and `MANAGER` lost the org-wide view**, falling back to member-scoped "my projects" like a regular employee (was `+HR`, missing `MANAGER` already by accident before this rewrite — now correct on purpose) | Any authenticated (read, self-scoped by default) |
+| PRJ-03 | `GET /api/projects`, `GET /api/projects/:id` | Read access; management view (all org projects) is gated by `hasModuleAccess(role,"projects")` = `ADMIN,CEO,MANAGEMENT,DEPARTMENT_HEAD` (`SALES_HEAD` had this too until its removal 2026-09-23, see §0 — no replacement role picked it up) — **`HR` and `MANAGER` have no org-wide view**, falling back to member-scoped "my projects" like a regular employee | Any authenticated (read, self-scoped by default) |
 | PRJ-03b | `DEPARTMENT_HEAD` project scoping | A `DEPARTMENT_HEAD`'s "all projects" view (and single-project `GET`) is further scoped to projects that have **at least one member from their own department** — not the whole org | `DEPARTMENT_HEAD` |
 | PRJ-04 | `POST/PATCH/DELETE /api/projects`, `.../members`, `.../members/:memberId` | Create/edit/delete project + manage members. Route guard changed from `requireManagement` to the `projects` module (`ADMIN,CEO,SALES_HEAD,MANAGEMENT,DEPARTMENT_HEAD`) — `HR` and `MANAGER` lost this. **New**: a `DEPARTMENT_HEAD` acting on a project outside their department scope (guessing an id, not just what's listed) now gets a 404 via `isProjectInDepartmentScope()`, on update/delete/add-members/update-member-hours | `ADMIN,CEO,SALES_HEAD,MANAGEMENT,DEPARTMENT_HEAD` (latter scoped to own dept's projects) |
 | PRJ-05 | `GET /api/projects/work-categories` | Read | Any authenticated |
-| PRJ-06 | `POST/PATCH/DELETE /api/projects/work-categories(/:id)` | Manage categories — still `requireManagement` (Management-7, **not** narrowed to the `projects` module — deliberate, work categories are org-wide taxonomy, not per-project) | Management (7) |
+| PRJ-06 | `POST/PATCH/DELETE /api/projects/work-categories(/:id)` | Manage categories — still `requireManagement` (Management-6, **not** narrowed to the `projects` module — deliberate, work categories are org-wide taxonomy, not per-project) | Management (6) |
 | TASK-01 | `/tasks` page ("Tasks" / "My Tasks") | **FIXED 2026-09-23**: `task.routes.js` is now mounted at `/api/tasks` in `backend/src/index.js` (previously never required, so every call 404'd for every role). Re-test end-to-end: list/create/update/delete now actually work, not just render an empty state | All roles reach the page; API now works |
-| TASK-02 | Task management actions | Create/update-others'-fields/delete now gated by the `tasks` module (`ADMIN,CEO,SALES_HEAD,MANAGEMENT,DEPARTMENT_HEAD`) instead of a local hardcoded array — `HR`/`MANAGER` cannot create/delete tasks or reassign/reschedule someone else's, but can still update the `status`/`actualHours` of a task assigned to them (self-update path, unchanged) | `ADMIN,CEO,SALES_HEAD,MANAGEMENT,DEPARTMENT_HEAD` (management actions); assignee (status/hours on own task) |
+| TASK-02 | Task management actions | Create/update-others'-fields/delete gated by the `tasks` module (`ADMIN,CEO,MANAGEMENT,DEPARTMENT_HEAD` — `SALES_HEAD` had this too until its removal 2026-09-23) instead of a local hardcoded array — `HR`/`MANAGER` cannot create/delete tasks or reassign/reschedule someone else's, but can still update the `status`/`actualHours` of a task assigned to them (self-update path, unchanged) | `ADMIN,CEO,MANAGEMENT,DEPARTMENT_HEAD` (management actions); assignee (status/hours on own task) |
 | TASK-03 | `DEPARTMENT_HEAD` task scoping | Task list/create/update/delete for a `DEPARTMENT_HEAD` is scoped to tasks assigned to someone in their department **or** belonging to a project with a member from their department — creating a task also validates the assignee is in-department and the project is in-scope; acting on an out-of-scope task/project returns 404, not just omitted from lists | `DEPARTMENT_HEAD` |
 | PERF-01 | `/performance` page ("Performance" / "My Performance") | **FIXED 2026-09-23**: `performance.routes.js` is now mounted at `/api/performance/:employeeId` (previously never required, 404 for everyone). Re-test end-to-end | All roles reach the page; API now works |
 | PERF-02 | Performance review create/list-others | Gated by the `performance` module (`ADMIN,CEO,MANAGEMENT` — was the broad `isManagement()` bucket, which wrongly included `HR,SALES_HEAD,MANAGER,DEPARTMENT_HEAD`) — confirm only `MANAGEMENT` (plus ADMIN/CEO) can create a review or view someone else's; everyone else can still see their **own** performance history | `ADMIN,CEO,MANAGEMENT` (create/view-any); self (view own) |
@@ -356,10 +389,10 @@ exactly the role listed, and confirm every *other* role gets a 403.
 | ID | Feature / Endpoint | What to verify | Roles with access |
 |---|---|---|---|
 | TKT-01 | `/tickets` page | File and view tickets | All roles |
-| TKT-02 | `GET /api/tickets`, `POST /api/tickets` | Any authenticated user can file a ticket; **the "see everyone's tickets" list scope changed** from the broad Management-7 bucket to the `tickets` module (`ADMIN,CEO,IT_MANAGER`) — `HR/SALES_HEAD/MANAGEMENT/DEPARTMENT_HEAD/MANAGER` now only see their **own** filed tickets, same as a regular employee | Any authenticated (own); `ADMIN,CEO,IT_MANAGER` (all) |
-| TKT-03 | `PATCH /api/tickets/:id/status`, `DELETE /api/tickets/:id` | Update status / delete. **Fixed a real gap**: was `requireManagement`, which never included `IT_MANAGER` despite Support/Tickets being IT's own module — IT could see and file tickets but not resolve them. Now gated by the `tickets` module (`ADMIN,CEO,IT_MANAGER`) | `ADMIN,CEO,IT_MANAGER` (changed from Management-7) |
+| TKT-02 | `GET /api/tickets`, `POST /api/tickets` | Any authenticated user can file a ticket; **the "see everyone's tickets" list scope changed** from the broad Management-6 bucket to the `tickets` module (`ADMIN,CEO,IT_MANAGER`) — `HR/SALES_HEAD/MANAGEMENT/DEPARTMENT_HEAD/MANAGER` now only see their **own** filed tickets, same as a regular employee | Any authenticated (own); `ADMIN,CEO,IT_MANAGER` (all) |
+| TKT-03 | `PATCH /api/tickets/:id/status`, `DELETE /api/tickets/:id` | Update status / delete. **Fixed a real gap**: was `requireManagement`, which never included `IT_MANAGER` despite Support/Tickets being IT's own module — IT could see and file tickets but not resolve them. Now gated by the `tickets` module (`ADMIN,CEO,IT_MANAGER`) | `ADMIN,CEO,IT_MANAGER` (changed from Management-6) |
 | TKT-04 | Open-ticket count on Dashboard | IT dashboard's stat-card sublabel and the management dashboard's underlying fetch both consume `GET /tickets` — confirm counts match the Tickets page for whichever scope that viewer sees (all vs. own, per TKT-02) | Roles that reach a dashboard |
-| TKT-05 | Frontend Tickets.jsx management gate | The page's own `isAdmin` control-visibility variable (status dropdown, delete button) was `isManagement(role)` (Management-7); now `hasModuleAccess(role,"tickets")` — confirm `HR/SALES_HEAD/MANAGEMENT/DEPARTMENT_HEAD` no longer see those controls (they'd have 403'd anyway per TKT-03, this closes the UI/API mismatch) | `ADMIN,CEO,IT_MANAGER` |
+| TKT-05 | Frontend Tickets.jsx management gate | The page's own `isAdmin` control-visibility variable (status dropdown, delete button) was `isManagement(role)` (Management-6); now `hasModuleAccess(role,"tickets")` — confirm `HR/SALES_HEAD/MANAGEMENT/DEPARTMENT_HEAD` no longer see those controls (they'd have 403'd anyway per TKT-03, this closes the UI/API mismatch) | `ADMIN,CEO,IT_MANAGER` |
 
 ---
 
@@ -367,14 +400,13 @@ exactly the role listed, and confirm every *other* role gets a 403.
 
 | ID | Feature / Endpoint | What to verify | Roles with access |
 |---|---|---|---|
-| RPT-01 | `/reports` page (generic, inventory-flavored report) | Route guard changed from `RequireManagement` (Management-7) to the `reports` module (`ADMIN,CEO,MANAGEMENT`) — `HR/SALES_HEAD/DEPARTMENT_HEAD/MANAGER` lost this (they have their own report pages instead — see RPT-02/03/04) | `ADMIN,CEO,MANAGEMENT` |
-| RPT-02 | `GET /dashboard/repair-spend`, `.../attendance-anomalies` | Reporting data endpoints — still `requireManagement` (Management-7, unchanged) | Management (7) |
-| RPT-03 | **New**: `/reports/sales` (Sales Reports) | Placeholder "Coming soon" page | `ADMIN,CEO,SALES_HEAD` |
-| RPT-04 | **New**: `/reports/hr` (HR Reports) | Placeholder "Coming soon" page | `ADMIN,CEO,HR` |
-| RPT-05 | **New**: `/reports/financial` (Financial Reports) | Placeholder "Coming soon" page | `ADMIN,CEO,MANAGER` |
+| RPT-01 | `/reports` page (generic, inventory-flavored report) | Route guard changed from `RequireManagement` (Management-6) to the `reports` module (`ADMIN,CEO,MANAGEMENT`) — `DEPARTMENT_HEAD/MANAGER` have no replacement report page; `HR` has its own (HR Reports, restored — see RPT-03) | `ADMIN,CEO,MANAGEMENT` |
+| RPT-02 | `GET /dashboard/repair-spend`, `.../attendance-anomalies` | Reporting data endpoints — still `requireManagement` (Management-6, unchanged) | Management (6) |
+| RPT-03 | `/reports/hr` (HR Reports) | Placeholder "Coming soon" page, no backend behind it — removed 2026-09-23 then restored the same day at the user's request | `ADMIN,CEO,HR` |
+| RPT-04 | **REMOVED 2026-09-23**: `/reports/sales`, `/reports/financial` | These 2 placeholder pages were deleted along with their routes/nav links/module keys — confirm each URL now hits the SPA catch-all (redirects to `/`) rather than a blank/error page | N/A — feature removed |
 | EXP-01 | `/export` page | Route guard changed from `RequireManagement` to the `reports` module (`ADMIN,CEO,MANAGEMENT`) — narrower than before | `ADMIN,CEO,MANAGEMENT` |
 | EXP-02 | `GET /api/export/employees`, `/inventory`, `/departments`, `/tickets` | **Each of the 4 is now gated by its own matching module** instead of one blanket `requireManagement` check: `employees` → `ADMIN,CEO,HR,MANAGEMENT,DEPARTMENT_HEAD`; `inventory` → `ADMIN,CEO,IT_MANAGER`; `departments` → `ADMIN,CEO,DEPARTMENT_HEAD`; `tickets` → `ADMIN,CEO,IT_MANAGER`. Confirm a role that can reach `/export` (`MANAGEMENT`) can actually download the employees/inventory/departments/tickets exports it has modules for, and gets 403 on ones it doesn't (e.g. `MANAGEMENT` has no `inventory` module, so its inventory export call should 403 even though it can reach the page) | Per-module, see left |
-| AUD-01 | `/audit-log` page + `GET /api/audit-log` | View system audit trail. **Narrowed from Management-7 to `ADMIN,CEO` only** — the audit log isn't a per-role tree module, so it's kept Owner-only rather than reopened broadly | `ADMIN, CEO` |
+| AUD-01 | `/audit-log` page + `GET /api/audit-log` | View system audit trail. **Narrowed from Management-6 to `ADMIN,CEO` only** — the audit log isn't a per-role tree module, so it's kept Owner-only rather than reopened broadly | `ADMIN, CEO` |
 
 ---
 
@@ -387,8 +419,8 @@ exactly the role listed, and confirm every *other* role gets a 403.
 | NOT-03 | `POST /api/notifications/read-all`, `.../read-by-type`, `.../:id/read` | Mark-as-read actions | Any authenticated (own notifications) |
 | ANN-01 | `/announcements` page | View org announcements | Any authenticated |
 | ANN-02 | `GET /dashboard/announcements` | Read | Any authenticated |
-| ANN-03 | `POST /dashboard/announcements`, `DELETE .../:id` | Create/delete an announcement — still `requireManagement` (Management-7, unchanged). **Fixed a frontend drift**: `Announcements.jsx`'s own `management` gate was hardcoded to `["ADMIN","CEO","MANAGER"]`, missing `SALES_HEAD/HR/MANAGEMENT/DEPARTMENT_HEAD` entirely — those roles could actually create/delete via the API but never saw the controls. Now uses the shared `isManagement()` util; confirm all 7 Management roles see the create/delete controls | Management (7) |
-| ALR-01 | Dashboard "Alerts & Notifications" widget | **`GET /api/alerts` is still never mounted — always 404s** (gap #1, unchanged) | Management (7) — widget polls every 30s regardless |
+| ANN-03 | `POST /dashboard/announcements`, `DELETE .../:id` | Create/delete an announcement — still `requireManagement` (Management-6, unchanged). **Fixed a frontend drift**: `Announcements.jsx`'s own `management` gate was hardcoded to `["ADMIN","CEO","MANAGER"]`, missing `SALES_HEAD/HR/MANAGEMENT/DEPARTMENT_HEAD` entirely — those roles could actually create/delete via the API but never saw the controls. Now uses the shared `isManagement()` util; confirm all 7 Management roles see the create/delete controls | Management (6) |
+| ALR-01 | Dashboard "Alerts & Notifications" widget | **`GET /api/alerts` is still never mounted — always 404s** (gap #1, unchanged) | Management (6) — widget polls every 30s regardless |
 
 ---
 
@@ -396,7 +428,7 @@ exactly the role listed, and confirm every *other* role gets a 403.
 
 | ID | Feature / Endpoint | What to verify | Roles with access |
 |---|---|---|---|
-| CAL-01 | `/calendar` (AdvancedCalendar) | Full calendar view, merges events + leave + holidays. **Fixed a frontend drift**: the "Add event" button's `management` gate was hardcoded `["ADMIN","CEO","SALES_HEAD","HR","MANAGEMENT","DEPARTMENT_HEAD"]` (missing `MANAGER`) — now uses the shared `isManagement()` util, so `MANAGER` (Finance Manager) also sees the button, matching what the backend (`requireManagement`) always accepted from it anyway | All roles reach the page; Management (7) see "Add event" |
+| CAL-01 | `/calendar` (AdvancedCalendar) | Full calendar view, merges events + leave + holidays. **Fixed a frontend drift**: the "Add event" button's `management` gate was hardcoded `["ADMIN","CEO","SALES_HEAD","HR","MANAGEMENT","DEPARTMENT_HEAD"]` (missing `MANAGER`) — now uses the shared `isManagement()` util, so `MANAGER` (Finance Manager) also sees the button, matching what the backend (`requireManagement`) always accepted from it anyway | All roles reach the page; Management (6) see "Add event" |
 | CAL-02 | `/leave-calendar` redirect | Confirm it lands on `/calendar`, doesn't 404 or show a stale page | All roles |
 
 ---
@@ -457,9 +489,9 @@ Run these as a dedicated pass after the module-by-module tests above:
     Employees (list/directory/certifications/forms), Organization
     Comparison, Settings, the Attendance permission matrix, Attendance
     (grid/sites), Departments, and Leave — while still having full
-    Payroll/Payroll Reports/Financial Reports access. This is the opposite
-    assertion from before the rewrite; don't reuse old expected-pass
-    results.
+    Payroll/Payroll Reports access (Financial Reports no longer exists at
+    all). This is the opposite assertion from before the rewrite; don't
+    reuse old expected-pass results.
 13. **IT_MANAGER capability gaps, now fixed**: re-test that `IT_MANAGER`
     can actually review/fulfill an asset request (INV-12) and
     update/delete a ticket (TKT-03) — previously visible in nav but 403'd
@@ -506,8 +538,8 @@ new findings:
   `DEPARTMENT_HEAD`'s own department against the target employee (item 15
   above) — a real, currently-open gap, not fully closed like the read-side
   scoping.
-- **New from this rewrite**: the 6 new report/sales placeholder pages
-  (Sales, Sales Team, Sales Reports, HR Reports, Financial Reports,
-  Payroll Reports) have no backend data behind them — they're
-  intentionally "Coming soon" pages reserved for a role's module, not
-  broken features to file bugs against.
+- **Payroll Reports** (the one placeholder page kept after the
+  2026-09-23 cleanup, see §0) has no backend data behind it — it's
+  intentionally a "Coming soon" page reserved for the `MANAGER`/`ADMIN`/
+  `CEO` payroll module, not a broken feature to file a bug against.
+

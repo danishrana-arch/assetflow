@@ -20,8 +20,10 @@ export default function EmployeeForms() {
   const [title, setTitle] = useState("Employee Information Form")
   const [expiresInDays, setExpiresInDays] = useState("30")
   const [createdLink, setCreatedLink] = useState("")
+  const [createdFormId, setCreatedFormId] = useState("")
   const [selectedForm, setSelectedForm] = useState(null)
   const [error, setError] = useState("")
+  const [sendResult, setSendResult] = useState(null)
   const [recipientEmployeeIds, setRecipientEmployeeIds] = useState([])
   const [employeeSearch, setEmployeeSearch] = useState("")
 
@@ -58,8 +60,10 @@ export default function EmployeeForms() {
       queryClient.invalidateQueries({ queryKey: ["employee-forms"] })
       const link = `${window.location.origin}/employee-form/${res.data.token}`
       setCreatedLink(link)
+      setCreatedFormId(res.data.id)
       setShowCreate(false)
       setError("")
+      setSendResult(null)
       setEmployeeSearch("")
     },
     onError: (err) => setError(err.response?.data?.error || "Could not create form"),
@@ -68,6 +72,12 @@ export default function EmployeeForms() {
   const toggleForm = useMutation({
     mutationFn: (id) => api.patch(`/employee-forms/${id}/toggle`),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["employee-forms"] }),
+  })
+
+  const sendForm = useMutation({
+    mutationFn: () => api.post(`/employee-forms/${createdFormId}/send`, { employeeIds: recipientEmployeeIds }),
+    onSuccess: (res) => setSendResult({ ok: true, message: `Notified ${res.data.notified} employee${res.data.notified === 1 ? "" : "s"} in-app.` }),
+    onError: (err) => setSendResult({ ok: false, message: err.response?.data?.error || "Could not send notifications" }),
   })
 
   const toggleRecipient = (employeeId) => {
@@ -113,20 +123,24 @@ export default function EmployeeForms() {
             <button onClick={() => navigator.clipboard.writeText(createdLink)} className="pill-secondary flex items-center justify-center gap-1.5 px-4 py-2.5 text-xs">
               <Copy size={13} /> Copy link
             </button>
-            {selectedRecipients.length > 0 && selectedRecipients.some((employee) => employee.email) && (
-              <a
-                href={`mailto:${selectedRecipients.filter((employee) => employee.email).map((employee) => employee.email).join(",")}?subject=${encodeURIComponent(title)}&body=${encodeURIComponent(`Hello,\n\nPlease complete your employee information form using this secure link:\n${createdLink}`)}`}
-                className="pill-accent flex items-center justify-center gap-1.5 px-4 py-2.5 text-xs"
+            {selectedRecipients.length > 0 && (
+              <button
+                type="button"
+                onClick={() => sendForm.mutate()}
+                disabled={sendForm.isPending}
+                className="pill-accent flex items-center justify-center gap-1.5 px-4 py-2.5 text-xs disabled:opacity-60"
               >
-                <Send size={13} /> Send to {selectedRecipients.filter((employee) => employee.email).length} selected
-              </a>
+                <Send size={13} /> {sendForm.isPending ? "Sending…" : `Send to ${selectedRecipients.length} selected`}
+              </button>
             )}
           </div>
           {selectedRecipients.length > 0 && (
             <p className="mt-2 text-[11px] text-muted">
               Recipients: <span className="font-semibold text-ink">{selectedRecipients.map((employee) => employee.name).join(", ")}</span>
-              {selectedRecipients.some((employee) => !employee.email) ? " · Some selected employees have no email address" : ""}
             </p>
+          )}
+          {sendResult && (
+            <p className={`mt-2 text-xs ${sendResult.ok ? "text-chip-green-fg" : "text-danger"}`}>{sendResult.message}</p>
           )}
         </div>
       )}
@@ -180,7 +194,7 @@ export default function EmployeeForms() {
             </SelectField>
           </div>
           <div className="rounded-2xl bg-surface-2 p-4 text-xs text-muted">
-            The form collects name, father name, personal/company email, phone, address, CNIC, date of birth, education, current university, employee type and LinkedIn ID. Select one or multiple existing employees; after the form is created you can send the same secure link directly to all selected employees with one email action.
+            The form collects name, father name, personal/company email, phone, address, CNIC, date of birth, education, current university, employee type and LinkedIn ID. Select one or multiple existing employees; after the form is created you can notify all of them in-app with the secure link in one click.
           </div>
           {error && <p className="text-sm text-danger">{error}</p>}
           <button type="submit" disabled={createForm.isPending} className="pill-accent px-5 py-2.5 text-sm disabled:opacity-60">

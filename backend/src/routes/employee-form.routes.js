@@ -1,6 +1,7 @@
 const express = require("express")
 const {
   createEmployeeForm,
+  sendEmployeeFormNotifications,
   listEmployeeForms,
   toggleEmployeeForm,
   getEmployeeFormSubmissions,
@@ -11,6 +12,7 @@ const router = express.Router()
 router.use(requireAuth, requireModule("employeeForms"))
 router.get("/", listEmployeeForms)
 router.post("/", createEmployeeForm)
+router.post("/:id/send", sendEmployeeFormNotifications)
 router.patch("/:id/toggle", toggleEmployeeForm)
 router.get("/:id/submissions", getEmployeeFormSubmissions)
 module.exports = router

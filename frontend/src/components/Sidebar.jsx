@@ -35,12 +35,8 @@ import {
   Mic,
   Speaker,
   Megaphone,
-  TrendingUp,
-  Handshake,
-  PieChart,
-  FileBarChart,
-  Receipt,
   FileSpreadsheet,
+  FileBarChart,
 } from "lucide-react"
 import { useAuth } from "../context/AuthContext"
 import { useTheme } from "../context/ThemeContext"
@@ -291,13 +287,6 @@ export default function Sidebar({ expanded, onMouseEnter, onMouseLeave }) {
  <RailItem to="/calendar" label="Company Calendar" icon={CalendarRange} isDark={isDark} expanded={expanded} />
             {isOwner && <RailItem to="/organization-comparison" label="Organization Comparison" icon={Landmark} isDark={isDark} expanded={expanded} />}
 
-            {hasModuleAccess(user?.role, "sales") && (
-              <RailItem to="/sales" label="Sales" icon={TrendingUp} isDark={isDark} expanded={expanded} />
-            )}
-            {hasModuleAccess(user?.role, "salesTeam") && (
-              <RailItem to="/sales-team" label="Sales Team" icon={Handshake} isDark={isDark} expanded={expanded} />
-            )}
-
             {hasModuleAccess(user?.role, "projects") && (
               <RailItem to="/projects" label="Projects" icon={FolderKanban} isDark={isDark} expanded={expanded} />
             )}
@@ -348,14 +337,8 @@ export default function Sidebar({ expanded, onMouseEnter, onMouseLeave }) {
               </>
             )}
 
-            {hasModuleAccess(user?.role, "salesReports") && (
-              <RailItem to="/reports/sales" label="Sales Reports" icon={PieChart} isDark={isDark} expanded={expanded} />
-            )}
             {hasModuleAccess(user?.role, "hrReports") && (
               <RailItem to="/reports/hr" label="HR Reports" icon={FileBarChart} isDark={isDark} expanded={expanded} />
-            )}
-            {hasModuleAccess(user?.role, "financialReports") && (
-              <RailItem to="/reports/financial" label="Financial Reports" icon={Receipt} isDark={isDark} expanded={expanded} />
             )}
 
             {isOwner && (
@@ -399,10 +382,10 @@ export default function Sidebar({ expanded, onMouseEnter, onMouseLeave }) {
             )}
 
             {hasModuleAccess(user?.role, "payroll") && (
-              <>
-                <RailItem to="/payroll" label="Payroll" icon={Wallet} isDark={isDark} expanded={expanded} />
-                <RailItem to="/payroll/reports" label="Payroll Reports" icon={FileSpreadsheet} isDark={isDark} expanded={expanded} />
-              </>
+              <RailItem to="/payroll" label="Payroll" icon={Wallet} isDark={isDark} expanded={expanded} />
+            )}
+            {hasModuleAccess(user?.role, "payrollReports") && (
+              <RailItem to="/payroll/reports" label="Payroll Reports" icon={FileSpreadsheet} isDark={isDark} expanded={expanded} />
             )}
           </>
         ) : isIT ? (

@@ -921,7 +921,7 @@ export default function EmployeeProfile() {
                   </SelectField>
                   <SelectField label="Role" value={editForm.role} onChange={(e) => setEditForm((f) => ({ ...f, role: e.target.value }))}>
                     {Object.entries(ROLE_LABELS)
-                      .filter(([value]) => ["ADMIN", "CEO", "MANAGER", "SALES_HEAD", "HR", "MANAGEMENT", "DEPARTMENT_HEAD", "IT_MANAGER", "EMPLOYEE"].includes(value))
+                      .filter(([value]) => ["ADMIN", "CEO", "MANAGER", "HR", "MANAGEMENT", "DEPARTMENT_HEAD", "IT_MANAGER", "EMPLOYEE"].includes(value))
                       .filter(([value]) => value !== "CEO" || employee.role === "CEO" || (managerOptions || []).filter((m) => m.role === "CEO").length < 3)
                       .map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                   </SelectField>

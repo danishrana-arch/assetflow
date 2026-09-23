@@ -183,6 +183,72 @@ async function listPayroll(req, res, next) {
   }
 }
 
+// GET /api/payroll/summary?year=
+// Aggregates a full year's payroll records for the reporting page: totals
+// by month (for a trend chart), totals by department, and a status
+// breakdown (draft/pending/paid counts). No per-employee bank details are
+// included, so this is safe to show without the CEO-only account-number
+// restriction that applies to listPayroll.
+async function getPayrollSummary(req, res, next) {
+  try {
+    const { organizationId } = req.user
+    const year = Number(req.query.year) || new Date().getFullYear()
+
+    const records = await prisma.payrollRecord.findMany({
+      where: { organizationId, year },
+      select: {
+        month: true,
+        baseSalary: true,
+        bonus: true,
+        deductions: true,
+        netPay: true,
+        status: true,
+        employee: { select: { department: { select: { name: true } } } },
+      },
+    })
+
+    const byMonth = Array.from({ length: 12 }, (_, i) => ({
+      month: i + 1, baseSalary: 0, bonus: 0, deductions: 0, netPay: 0, count: 0,
+    }))
+    const byDepartment = new Map()
+    const byStatus = { DRAFT: 0, PENDING_APPROVAL: 0, PAID: 0 }
+    let totalNetPay = 0
+
+    for (const r of records) {
+      const bucket = byMonth[r.month - 1]
+      bucket.baseSalary += toNumber(r.baseSalary)
+      bucket.bonus += toNumber(r.bonus)
+      bucket.deductions += toNumber(r.deductions)
+      bucket.netPay += toNumber(r.netPay)
+      bucket.count += 1
+      totalNetPay += toNumber(r.netPay)
+      byStatus[r.status] = (byStatus[r.status] || 0) + 1
+
+      const deptName = r.employee?.department?.name || "Unassigned"
+      const dept = byDepartment.get(deptName) || { department: deptName, netPay: 0, count: 0 }
+      dept.netPay += toNumber(r.netPay)
+      dept.count += 1
+      byDepartment.set(deptName, dept)
+    }
+
+    const round = (n) => Math.round(n * 100) / 100
+
+    res.json({
+      year,
+      totalNetPay: round(totalNetPay),
+      byMonth: byMonth.map((m) => ({
+        ...m, baseSalary: round(m.baseSalary), bonus: round(m.bonus), deductions: round(m.deductions), netPay: round(m.netPay),
+      })),
+      byDepartment: Array.from(byDepartment.values())
+        .sort((a, b) => b.netPay - a.netPay)
+        .map((d) => ({ ...d, netPay: round(d.netPay) })),
+      byStatus,
+    })
+  } catch (err) {
+    next(err)
+  }
+}
+
 // GET /api/payroll/me — the logged-in employee's own payslips.
 async function myPayroll(req, res, next) {
   try {
@@ -380,6 +446,7 @@ async function deleteAllForMonth(req, res, next) {
 module.exports = {
   generatePayroll,
   listPayroll,
+  getPayrollSummary,
   myPayroll,
   updatePayroll,
   markPaid,

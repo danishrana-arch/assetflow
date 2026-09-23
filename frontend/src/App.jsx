@@ -50,12 +50,8 @@ const Projects = lazy(() => import("./pages/Projects"))
 const Announcements = lazy(() => import("./pages/Announcements"))
 const EmployeeForms = lazy(() => import("./pages/EmployeeForms"))
 const PublicEmployeeForm = lazy(() => import("./pages/PublicEmployeeForm"))
-const Sales = lazy(() => import("./pages/Sales"))
-const SalesTeam = lazy(() => import("./pages/SalesTeam"))
-const SalesReports = lazy(() => import("./pages/SalesReports"))
-const HrReports = lazy(() => import("./pages/HrReports"))
-const FinancialReports = lazy(() => import("./pages/FinancialReports"))
 const PayrollReports = lazy(() => import("./pages/PayrollReports"))
+const HrReports = lazy(() => import("./pages/HrReports"))
 
 function PageFallback() {
   return (
@@ -160,11 +156,7 @@ function ProtectedShell() {
           <Route path="/payroll/reports" element={<RequireModule moduleKey="payrollReports"><PayrollReports /></RequireModule>} />
           <Route path="/tickets" element={<Tickets />} />
           <Route path="/reports" element={<RequireModule moduleKey="reports"><Reports /></RequireModule>} />
-          <Route path="/reports/sales" element={<RequireModule moduleKey="salesReports"><SalesReports /></RequireModule>} />
           <Route path="/reports/hr" element={<RequireModule moduleKey="hrReports"><HrReports /></RequireModule>} />
-          <Route path="/reports/financial" element={<RequireModule moduleKey="financialReports"><FinancialReports /></RequireModule>} />
-          <Route path="/sales" element={<RequireModule moduleKey="sales"><Sales /></RequireModule>} />
-          <Route path="/sales-team" element={<RequireModule moduleKey="salesTeam"><SalesTeam /></RequireModule>} />
           <Route path="/export" element={<RequireModule moduleKey="reports"><Export /></RequireModule>} />
           <Route path="/notifications" element={<Notifications />} />
           <Route path="/announcements" element={<Announcements />} />

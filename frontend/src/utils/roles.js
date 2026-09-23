@@ -2,7 +2,6 @@ export const MANAGEMENT_ROLES = [
   "ADMIN",
   "CEO",
   "MANAGER",
-  "SALES_HEAD",
   "HR",
   "MANAGEMENT",
   "DEPARTMENT_HEAD",
@@ -13,7 +12,6 @@ export const ROLE_LABELS = {
   ADMIN: "Admin",
   HR: "HR",
   MANAGER: "Finance Manager",
-  SALES_HEAD: "Sales Head",
   MANAGEMENT: "Management",
   DEPARTMENT_HEAD: "Department Head",
   IT_MANAGER: "IT Manager",
@@ -27,12 +25,19 @@ export const ROLE_LABELS = {
 //
 // IT_MANAGER is deliberately inventory-only: no employee directory, no
 // payroll, no leave/attendance admin, nothing outside these five modules.
+//
+// "sales", "salesTeam", and "salesReports" were removed 2026-09-23 along
+// with the SALES_HEAD role itself (see UserRole enum in schema.prisma) —
+// this deployment is HR-only, no sales pipeline feature was ever going to
+// be built. "financialReports" was removed the same day. "hrReports" was
+// removed and then restored the same day at the user's request — HR
+// Reports is a real part of the app. "payrollReports" is kept (Payroll
+// Reports page, still a placeholder).
 export const ROLE_MODULES = {
   CEO: ["*"],
   ADMIN: ["*"],
-  MANAGER: ["payroll", "payrollReports", "financialReports"],
+  MANAGER: ["payroll", "payrollReports"],
   HR: ["employees", "employeeForms", "certifications", "attendance", "leave", "hrReports"],
-  SALES_HEAD: ["sales", "salesTeam", "projects", "tasks", "salesReports"],
   MANAGEMENT: ["employees", "projects", "tasks", "attendance", "performance", "reports"],
   DEPARTMENT_HEAD: ["departments", "employees", "attendance", "projects", "tasks", "leave"],
   IT_MANAGER: ["inventory", "assets", "assetAssignments", "assetRequests", "tickets"],

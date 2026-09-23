@@ -370,12 +370,9 @@ functionally identical almost everywhere) with a real per-role module map.
   the two apps, so the two must be kept in sync by hand going forward).
   `"*"` means unrestricted. CEO and ADMIN both get `"*"`. Everyone else gets
   a fixed list:
-  - `MANAGER` ("Finance Manager"): `payroll`, `payrollReports`,
-    `financialReports`.
+  - `MANAGER` ("Finance Manager"): `payroll`, `payrollReports`.
   - `HR`: `employees`, `employeeForms`, `certifications`, `attendance`,
     `leave`, `hrReports`.
-  - `SALES_HEAD`: `sales`, `salesTeam`, `projects`, `tasks`,
-    `salesReports`.
   - `MANAGEMENT`: `employees`, `projects`, `tasks`, `attendance`,
     `performance`, `reports`.
   - `DEPARTMENT_HEAD`: `departments`, `employees`, `attendance`,
@@ -442,12 +439,13 @@ functionally identical almost everywhere) with a real per-role module map.
   `require`d in `backend/src/index.js`, so `/api/tasks` and
   `/api/performance/:employeeId` 404'd for every role regardless of
   permissions. Both are now mounted and gated by the module map above.
-- **New placeholder pages/nav entries** for modules with no underlying
-  feature yet: `Sales.jsx`, `SalesTeam.jsx`, `SalesReports.jsx`,
-  `HrReports.jsx`, `FinancialReports.jsx`, `PayrollReports.jsx` — all thin
-  wrappers around a shared `components/ui/ComingSoonPage.jsx`, routed and
-  nav-gated by their module key like everything else. No backend routes
-  behind them; swap in a real page + API when each one gets built.
+- **New placeholder page/nav entry** for the one module with no underlying
+  feature yet: `PayrollReports.jsx` — a thin wrapper around
+  `components/ui/ComingSoonPage.jsx`, routed and nav-gated by the
+  `payrollReports` module. No backend route behind it; swap in a real page
+  + API when it gets built. (`Sales.jsx`/`SalesTeam.jsx`/`SalesReports.jsx`/
+  `HrReports.jsx`/`FinancialReports.jsx` were also added this way
+  initially, then deleted the same day — see "Post-module removal" below.)
 - **Fixed pre-existing drift** between several independently-maintained
   "management role list" copies that had already diverged from each other
   (`Projects.jsx`, `AdvancedCalendar.jsx`, `AttendanceSites.jsx`,
@@ -525,6 +523,177 @@ found and fixed several real inconsistencies the original rewrite missed
   `DEPARTMENT_HEAD`'s own department against the target employee (unlike
   the read side, which does) — left open since fixing write-side scoping
   wasn't part of the original ask and deserves its own confirmation pass.
+
+## Post-module fix: IT_MANAGER profile view showed "ASSETFLOW" instead of the real org name
+
+Found while investigating a report that the decorative particle-text
+banner on `/employees/:id` showed the "ASSETFLOW" placeholder instead of
+the real company name — but only when opened from an `IT_MANAGER`
+account (every other role saw the correct name). Root cause:
+`getEmployee`'s `IT_MANAGER` branch in `employee.controller.js` redacts
+the response down to an explicit allowlist of fields, and `organization`
+was simply missing from that list — so `employee.organization` came back
+`undefined` for every profile IT opened, and the frontend's fallback
+(`employee?.organization?.name || "ASSETFLOW"`, which is correct,
+working-as-designed logic) kicked in every time. Fixed by adding
+`organization: { name }` (name only, nothing else) to the redacted
+response.
+
+## Post-module removal: Sales/HR/Financial Reports placeholder pages deleted
+
+Per user direction — this deployment is HR-only, no sales-pipeline feature
+was ever going to be built, so the 5 non-payroll placeholder pages added
+during the permission-matrix rewrite were removed entirely rather than
+left as permanent "Coming soon" stubs:
+
+- Deleted `frontend/src/pages/Sales.jsx`, `SalesTeam.jsx`,
+  `SalesReports.jsx`, `HrReports.jsx`, `FinancialReports.jsx`.
+- Removed their imports/routes from `App.jsx` (`/sales`, `/sales-team`,
+  `/reports/sales`, `/reports/hr`, `/reports/financial`) and their nav
+  entries from `Sidebar.jsx`/`MobileNav.jsx` (including the now-unused
+  `TrendingUp`/`Handshake`/`PieChart`/`FileBarChart`/`Receipt` icon
+  imports).
+- Removed the `sales`, `salesTeam`, `salesReports`, `hrReports`, and
+  `financialReports` keys from `ROLE_MODULES` in both
+  `backend/src/utils/roles.js` and `frontend/src/utils/roles.js`.
+  `SALES_HEAD` is now `["projects", "tasks"]` only; `HR` lost `hrReports`;
+  `MANAGER` (Finance Manager) lost `financialReports` (keeps `payroll` +
+  `payrollReports`).
+- **`PayrollReports.jsx` was kept** — still a "Coming soon" placeholder,
+  no backend behind it, but explicitly asked to remain and eventually get
+  built out for real.
+- `TESTPLAN.md` and this file updated to match — the removed pages are
+  documented as "REMOVED 2026-09-23" rather than deleted from the test
+  plan outright, so a future run doesn't have to rediscover they're gone
+  on its own.
+
+## Post-module follow-up: HR Reports restored, SALES_HEAD role removed entirely
+
+Same-day follow-up to the removal above, per a further user request: "HR
+Reports is a real part of the app, keep it — and remove the Sales Head
+role, not just its pages."
+
+- **HR Reports restored**: recreated `frontend/src/pages/HrReports.jsx`
+  (same placeholder content as before), re-added the `/reports/hr` route
+  in `App.jsx` (`RequireModule moduleKey="hrReports"`), re-added the nav
+  link in `Sidebar.jsx`/`MobileNav.jsx` (`FileBarChart` icon), and put
+  `hrReports` back on `HR`'s module list in both `backend/src/utils/roles.js`
+  and `frontend/src/utils/roles.js`. Still a "Coming soon" placeholder — no
+  backend behind it.
+- **`SALES_HEAD` removed as a role, not just a module list**: before
+  touching the schema, checked the live Neon DB for anyone still holding
+  this role — found exactly one active user (Ali Sher Farooqi,
+  `alex@costbidding.com`, CostBidding org). Asked the user how to handle
+  it (soft-remove and leave the enum alone, vs. reassign-then-remove); the
+  user reassigned that account's role themselves and confirmed removal.
+  Re-checked: 0 `User` rows on `SALES_HEAD` before proceeding.
+  - Also found 7 stale `AttendancePermission` rows with `role=SALES_HEAD`
+    (leftover config rows from before `SALES_HEAD` was dropped from
+    `CONFIGURABLE_ATTENDANCE_ROLES` in the original permission rewrite —
+    never read by the app since, but still present in the table).
+  - New migration `backend/prisma/migrations/20260923190000_remove_sales_head_role/migration.sql`:
+    deletes those 7 stale rows, then rebuilds the `UserRole` Postgres enum
+    without `SALES_HEAD` (Postgres can't drop a single enum value directly
+    — standard Prisma pattern: create `UserRole_new`, repoint both
+    `User.role` and `AttendancePermission.role` to it via a `USING`
+    cast, rename types, drop the old one). Applied via
+    `npx prisma migrate deploy` against the live Neon DB — succeeded.
+  - `npx prisma generate` afterward hit the same Windows EPERM file-lock
+    issue as the earlier WFH migration (module 07) — several backend dev
+    processes were running and holding the query-engine `.dll.node` open.
+    Auto-mode's workload-protection classifier correctly refused to let
+    those be force-stopped automatically (they're the user's live dev
+    servers, not stray processes) — unlike the unrelated stuck
+    `git repack` process from earlier the same day, which *was* safe to
+    kill since it was a detached, already-orphaned background job with no
+    live owner. **Still outstanding**: run `npx prisma generate` after
+    stopping the backend dev server, same as module 07's note. Verified in
+    the meantime that the DB enum itself is correctly updated (raw
+    `enum_range` query) and that the generated JS/TS client already
+    rejects `"SALES_HEAD"` as an invalid `UserRole` value (Prisma writes
+    those files before the final engine-binary rename, so this part
+    completed even though the command exited non-zero) — low risk either
+    way, but the binary should still be regenerated cleanly when
+    convenient.
+  - Removed `SALES_HEAD` from `MANAGEMENT_ROLES`/`ASSIGNABLE_ROLES` in
+    both `utils/roles.js` files, from the role-select filter in
+    `EmployeeProfile.jsx`, and from a hardcoded local role array gating
+    "Add performance review" in `Employee360.jsx` (replaced with
+    `hasModuleAccess(role,"performance")`, consistent with the rest of the
+    module rewrite). Changed the `prisma/seed.js` fixture that used this
+    role to `MANAGEMENT` instead (seed data, never applied to the live DB
+    automatically).
+  - `TESTPLAN.md` updated throughout: role table now lists 6 roles, not 7;
+    the several places that said "Management (7)" now say "Management
+    (6)"; rows describing SALES_HEAD-specific behavior are marked REMOVED
+    with a pointer back to §0 rather than left as testable-but-wrong.
+
+## Post-module addition: HR Reports / Payroll Reports built out for real, Payroll Reports nav-gating bug fixed, Employee Forms "Send" fixed
+
+Per a live chat request — "don't add coming soon, make them proper."
+`HrReports.jsx` and `PayrollReports.jsx` were `ComingSoonPage` placeholders
+(added during the module-permission-matrix rewrite); both are now real
+pages built from existing backend data:
+
+- **HR Reports** (`frontend/src/pages/HrReports.jsx`): wires up
+  `GET /dashboard/executive` (headcount, present/late today, attendance
+  rate, project status breakdown — already existed, `requireManagement`,
+  but wasn't consumed by any page before this) and
+  `GET /dashboard/attendance-anomalies` (today's location-mismatch/
+  missing-checkout/long-day flags — same, previously unused) plus
+  `GET /leave/calendar` for the current month's approved leave. ADMIN/CEO
+  get an "This org / Whole company" scope toggle, matching the `?scope=`
+  param `getExecutiveOverview` already supported. No new backend work was
+  needed for this page.
+- **Payroll Reports** (`frontend/src/pages/PayrollReports.jsx`): needed a
+  new backend endpoint since none existed — `GET /payroll/summary?year=`
+  (`backend/src/controllers/payroll.controller.js` `getPayrollSummary`,
+  routed in `payroll.routes.js` behind `requireModule("payrollReports")` +
+  `noStore`). Aggregates a year's `PayrollRecord`s by month (net pay trend
+  bar chart), by department, and by status (draft/pending/paid), with a
+  year picker (last 5 years). Bank account numbers are never included, so
+  no CEO-only masking rule is needed here (unlike `listPayroll`).
+- **Payroll Reports nav-gating bug** (found while confirming both pages'
+  wiring): `Sidebar.jsx` and `MobileNav.jsx` gated the "Payroll Reports"
+  nav link on the `"payroll"` module key instead of `"payrollReports"` —
+  harmless today only because MANAGER (the one role with `payroll`) also
+  has `payrollReports`, but inconsistent with how HR Reports was wired and
+  a latent trap if that ever changes. Both files now gate the link on its
+  own `"payrollReports"` key, independent of the `"payroll"` link above it.
+- Confirmed CEO/ADMIN access is **not** broken anywhere — both already
+  resolve to `"*"` in `ROLE_MODULES` on both frontend/backend, every route
+  guard in `App.jsx` (`RequireModule`/`RequireOwner`/etc.) and every nav
+  gate in `Sidebar.jsx`/`MobileNav.jsx` honors that wildcard with no
+  exceptions found. Nothing to fix there.
+
+**Employee Forms "Send" was fake — actually just a `mailto:` link**: found
+while investigating a report that clicking Send after creating a form
+"didn't show any operation" and the employee never received anything.
+Root cause: the Send button in `EmployeeForms.jsx` was a plain `<a
+href="mailto:...">`, not a real API call — nothing ever happened
+server-side, so if the browser had no default mail client configured the
+click was a silent no-op, and even when a mail client did open it only
+pre-filled a draft the HR user still had to send manually themselves.
+Fixed:
+- New endpoint `POST /employee-forms/:id/send` (`employee-form.controller.js`
+  `sendEmployeeFormNotifications`, routed in `employee-form.routes.js`)
+  validates the selected employees belong to the org, then creates real
+  in-app notifications via the existing `notifyUsers` utility (same
+  mechanism already used for tickets/tasks/leave/asset requests) linking
+  to the public fill-out form.
+  Recipients still aren't persisted on the `EmployeeForm` row itself (no
+  schema change made) — the dead `EmployeeFormInvitation` model noticed
+  during this pass is a candidate for that if per-recipient
+  sent/opened/submitted tracking is wanted later, but that's out of scope
+  for this fix.
+- `EmployeeForms.jsx`: the mailto anchor is now a real button wired to a
+  `useMutation` against that endpoint, with a disabled/"Sending…" state
+  while in flight and an inline success/error message shown after —
+  actual visible feedback either way, unlike the mailto version.
+- Still only reachable from the create-form success banner in the same
+  page session (pre-existing limitation, not touched by this fix) — there
+  is still no "(re)send" action on an already-created form once that
+  banner is gone (e.g. after a page refresh).
 
 ## Known gaps flagged by whoever prepared these patches
 
