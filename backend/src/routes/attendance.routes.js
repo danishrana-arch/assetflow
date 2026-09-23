@@ -29,8 +29,9 @@ router.post("/self/offline-sync", syncOfflineAttendance)
 router.post("/self/corrections", createAttendanceCorrection)
 
 // Full attendance grid — gated by the per-role Attendance permission matrix
-// (Settings), not a fixed role list. ADMIN/CEO/MANAGER are always full
-// access; everyone else is whatever's configured (HR defaults to read-only).
+// (Settings), not a fixed role list. ADMIN/CEO are always full access;
+// everyone else is whatever's configured (HR defaults to read-only,
+// MANAGEMENT/DEPARTMENT_HEAD default to full — see utils/permissions.js).
 router.get("/", requireAttendancePermission("canRead"), getDailyAttendance)
 router.post("/mark", requireAttendancePermission("canCreate", "canUpdate"), markAttendance)
 router.post("/save", requireAttendancePermission("canCreate", "canUpdate"), saveDayAttendance)

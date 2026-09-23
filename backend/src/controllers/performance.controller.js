@@ -1,11 +1,11 @@
 const prisma = require("../lib/prisma")
-const { isManagement } = require("../utils/roles")
+const { hasModuleAccess } = require("../utils/roles")
 
 async function listPerformanceReviews(req, res, next) {
   try {
     const { organizationId, userId, role } = req.user
     const employeeId = req.params.employeeId
-    if (!isManagement(role) && employeeId !== userId) return res.status(403).json({ error: "You can only view your own performance history" })
+    if (!hasModuleAccess(role, "performance") && employeeId !== userId) return res.status(403).json({ error: "You can only view your own performance history" })
     const employee = await prisma.user.findFirst({ where: { id: employeeId, organizationId }, select: { id: true } })
     if (!employee) return res.status(404).json({ error: "Employee not found" })
     const reviews = await prisma.performanceReview.findMany({
@@ -20,7 +20,7 @@ async function listPerformanceReviews(req, res, next) {
 async function createPerformanceReview(req, res, next) {
   try {
     const { organizationId, userId, role } = req.user
-    if (!isManagement(role)) return res.status(403).json({ error: "Only management can create performance reviews" })
+    if (!hasModuleAccess(role, "performance")) return res.status(403).json({ error: "Only management can create performance reviews" })
     const employeeId = req.params.employeeId
     const employee = await prisma.user.findFirst({ where: { id: employeeId, organizationId }, select: { id: true, name: true } })
     if (!employee) return res.status(404).json({ error: "Employee not found" })

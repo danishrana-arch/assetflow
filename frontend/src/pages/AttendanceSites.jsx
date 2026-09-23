@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Building2, Clock3, MapPin, Pencil, Plus, Save, Trash2, Users, X } from "lucide-react"
 import api from "../api/client"
 import { useAuth } from "../context/AuthContext"
+import { hasModuleAccess } from "../utils/roles"
 import PageHeader from "../components/ui/PageHeader"
 import EmptyState from "../components/ui/EmptyState"
 import AttendanceSiteMap from "../components/AttendanceSiteMap"
@@ -60,7 +61,7 @@ function siteToForm(site) {
 export default function AttendanceSites() {
   const { user, organization, organizations } = useAuth()
   const queryClient = useQueryClient()
-  const canManage = ["ADMIN", "CEO", "HR", "MANAGEMENT", "DEPARTMENT_HEAD", "MANAGER"].includes(user?.role)
+  const canManage = hasModuleAccess(user?.role, "attendance")
   const isMainCompanyAdmin = user?.role === "ADMIN" && (
     !organization?.parentOrganizationId &&
     (!organization?.companyId || organization?.companyId === organization?.id)

@@ -2,13 +2,17 @@ const prisma = require("../lib/prisma")
 
 // These roles are always full-access on Attendance and can never be
 // downgraded through the AttendancePermission table — the Settings matrix
-// only ever shows/edits the other, configurable roles.
-const ALWAYS_FULL_ATTENDANCE_ROLES = ["ADMIN", "CEO", "MANAGER"]
+// only ever shows/edits the other, configurable roles. MANAGER (Finance
+// Manager) is deliberately excluded: Attendance isn't one of its modules
+// at all, not even a configurable/no-access row — see ROLE_MODULES in
+// utils/roles.js.
+const ALWAYS_FULL_ATTENDANCE_ROLES = ["ADMIN", "CEO"]
 
-// Roles an ADMIN/CEO/MANAGER can actually configure from the matrix.
+// Roles an ADMIN/CEO can actually configure from the matrix. SALES_HEAD and
+// MANAGER aren't listed — Attendance isn't one of their modules, so there's
+// nothing to configure; they stay NO_ACCESS unconditionally.
 const CONFIGURABLE_ATTENDANCE_ROLES = [
   "HR",
-  "SALES_HEAD",
   "MANAGEMENT",
   "DEPARTMENT_HEAD",
   "IT_MANAGER",
@@ -21,12 +25,16 @@ const NO_ACCESS = { canCreate: false, canRead: false, canUpdate: false, canDelet
 // Preserves current behavior for any role with no explicit row yet: HR
 // could always at least see attendance before this table existed, so it
 // keeps that by default now — just read-only instead of full access,
-// matching the "HR should default to read-only" requirement. Everyone else
-// defaults to no access, unless the legacy per-user canManageAttendance
-// override (the only permission flag that existed before this table) says
-// otherwise.
+// matching the "HR should default to read-only" requirement. MANAGEMENT
+// and DEPARTMENT_HEAD both have Attendance in their module list (the
+// latter further scoped to their own department elsewhere in the
+// attendance controller), so they default to full access rather than the
+// generic no-access fallback. Everyone else defaults to no access, unless
+// the legacy per-user canManageAttendance override (the only permission
+// flag that existed before this table) says otherwise.
 async function defaultAttendancePermission(role, userId) {
   if (role === "HR") return { ...NO_ACCESS, canRead: true }
+  if (role === "MANAGEMENT" || role === "DEPARTMENT_HEAD") return { ...FULL_ACCESS }
 
   if (userId) {
     const user = await prisma.user.findUnique({ where: { id: userId }, select: { canManageAttendance: true } })

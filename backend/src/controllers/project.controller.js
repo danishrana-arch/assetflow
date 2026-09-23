@@ -1,5 +1,6 @@
 const prisma = require("../lib/prisma")
 const { ProjectStatus } = require("@prisma/client")
+const { hasModuleAccess } = require("../utils/roles")
 
 const projectInclude = {
   manager: { select: { id: true, name: true, email: true } },
@@ -43,13 +44,29 @@ function validateCompletedLink(status, projectUrl) {
   return null
 }
 
+// A DEPARTMENT_HEAD can only mutate a project that already has at least one
+// member from their own department — otherwise they could reach an
+// unrelated project just by guessing its id, even though the route-level
+// requireModule("projects") gate only checks their role, not this project.
+async function isProjectInDepartmentScope(projectId, departmentId) {
+  const member = await prisma.projectMember.findFirst({
+    where: { projectId, employee: { departmentId: departmentId || "__none__" } },
+    select: { id: true },
+  })
+  return !!member
+}
+
 async function listProjects(req, res, next) {
   try {
-    const { organizationId, userId, role } = req.user
+    const { organizationId, userId, role, departmentId } = req.user
     const { status, search } = req.query
-    const management = ["ADMIN", "CEO", "MANAGER", "SALES_HEAD", "HR", "MANAGEMENT", "DEPARTMENT_HEAD"].includes(role)
+    const management = hasModuleAccess(role, "projects")
     const where = management
-      ? { organizationId }
+      ? role === "DEPARTMENT_HEAD"
+        // Own-department scoping: only projects that have at least one
+        // member from the department head's own department.
+        ? { organizationId, members: { some: { employee: { departmentId: departmentId || "__none__" } } } }
+        : { organizationId }
       : { organizationId, members: { some: { employeeId: userId } } }
     if (status && Object.values(ProjectStatus).includes(status)) where.status = status
     if (search) {
@@ -70,12 +87,17 @@ async function listProjects(req, res, next) {
 
 async function getProject(req, res, next) {
   try {
-    const management = ["ADMIN", "CEO", "MANAGER", "SALES_HEAD", "HR", "MANAGEMENT", "DEPARTMENT_HEAD"].includes(req.user.role)
+    const { role, userId, departmentId, organizationId } = req.user
+    const management = hasModuleAccess(role, "projects")
     const project = await prisma.project.findFirst({
       where: {
         id: req.params.id,
-        organizationId: req.user.organizationId,
-        ...(management ? {} : { members: { some: { employeeId: req.user.userId } } }),
+        organizationId,
+        ...(management
+          ? role === "DEPARTMENT_HEAD"
+            ? { members: { some: { employee: { departmentId: departmentId || "__none__" } } } }
+            : {}
+          : { members: { some: { employeeId: userId } } }),
       },
       include: projectInclude,
     })
@@ -150,9 +172,12 @@ async function createProject(req, res, next) {
 
 async function updateProject(req, res, next) {
   try {
-    const { organizationId } = req.user
+    const { organizationId, role, departmentId } = req.user
     const existing = await prisma.project.findFirst({ where: { id: req.params.id, organizationId } })
     if (!existing) return res.status(404).json({ error: "Project not found" })
+    if (role === "DEPARTMENT_HEAD" && !(await isProjectInDepartmentScope(existing.id, departmentId))) {
+      return res.status(404).json({ error: "Project not found" })
+    }
 
     const {
       name,
@@ -242,9 +267,12 @@ async function updateProject(req, res, next) {
 
 async function addProjectMembers(req, res, next) {
   try {
-    const { organizationId } = req.user
+    const { organizationId, role, departmentId } = req.user
     const existing = await prisma.project.findFirst({ where: { id: req.params.id, organizationId } })
     if (!existing) return res.status(404).json({ error: "Project not found" })
+    if (role === "DEPARTMENT_HEAD" && !(await isProjectInDepartmentScope(existing.id, departmentId))) {
+      return res.status(404).json({ error: "Project not found" })
+    }
 
     const ids = [...new Set((Array.isArray(req.body.employeeIds) ? req.body.employeeIds : []).filter(Boolean))]
     if (!ids.length) return res.status(400).json({ error: "Select at least one employee to add" })
@@ -264,9 +292,12 @@ async function addProjectMembers(req, res, next) {
 
 async function deleteProject(req, res, next) {
   try {
-    const { organizationId } = req.user
+    const { organizationId, role, departmentId } = req.user
     const existing = await prisma.project.findFirst({ where: { id: req.params.id, organizationId } })
     if (!existing) return res.status(404).json({ error: "Project not found" })
+    if (role === "DEPARTMENT_HEAD" && !(await isProjectInDepartmentScope(existing.id, departmentId))) {
+      return res.status(404).json({ error: "Project not found" })
+    }
     if (existing.status !== "COMPLETED") {
       return res.status(400).json({ error: "Only completed projects can be deleted" })
     }
@@ -277,7 +308,10 @@ async function deleteProject(req, res, next) {
 
 async function updateMemberHours(req, res, next) {
   try {
-    const { organizationId } = req.user
+    const { organizationId, role, departmentId } = req.user
+    if (role === "DEPARTMENT_HEAD" && !(await isProjectInDepartmentScope(req.params.id, departmentId))) {
+      return res.status(404).json({ error: "Project member not found" })
+    }
     const member = await prisma.projectMember.findFirst({
       where: { id: req.params.memberId, project: { id: req.params.id, organizationId } },
     })

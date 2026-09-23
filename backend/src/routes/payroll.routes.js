@@ -11,7 +11,7 @@ const {
   rejectBatch,
   deleteAllForMonth,
 } = require("../controllers/payroll.controller")
-const { requireAuth, requireManagement, requireRole } = require("../middleware/auth.middleware")
+const { requireAuth, requireRole, requireModule } = require("../middleware/auth.middleware")
 const { noStore } = require("../middleware/cache.middleware")
 
 const router = express.Router()
@@ -21,10 +21,10 @@ router.use(requireAuth)
 // Self-service — any authenticated employee sees only their own payslips.
 router.get("/me", noStore, myPayroll)
 
-router.get("/", requireManagement, noStore, listPayroll)
-router.post("/generate", requireRole("ADMIN"), generatePayroll)
-// An admin/owner's final step: send a generated month to the CEO.
-router.post("/submit", requireRole("ADMIN"), submitForApproval)
+router.get("/", requireModule("payroll"), noStore, listPayroll)
+router.post("/generate", requireRole("ADMIN", "MANAGER"), generatePayroll)
+// An admin/Finance Manager's final step: send a generated month to the CEO.
+router.post("/submit", requireRole("ADMIN", "MANAGER"), submitForApproval)
 
 // CEO-only: salaries are paid from the CEO's own account, so approval,
 // payout, and bulk cleanup are exclusively theirs.
@@ -32,8 +32,8 @@ router.post("/approve", requireRole("CEO"), approveAndPayAll)
 router.post("/reject", requireRole("CEO"), rejectBatch)
 router.delete("/bulk", requireRole("CEO"), deleteAllForMonth)
 
-router.patch("/:id", requireRole("ADMIN"), updatePayroll)
+router.patch("/:id", requireRole("ADMIN", "MANAGER"), updatePayroll)
 router.post("/:id/mark-paid", requireRole("CEO"), markPaid)
-router.delete("/:id", requireRole("ADMIN", "CEO"), deletePayroll)
+router.delete("/:id", requireRole("ADMIN", "CEO", "MANAGER"), deletePayroll)
 
 module.exports = router

@@ -20,21 +20,55 @@ const ASSIGNABLE_ROLES = [
   "IT_MANAGER",
 ]
 
+// The CEO is capped at three per organization.
+const MAX_CEO_COUNT = 3
+
+// Canonical role -> module map. This is the single source of truth for what
+// each role can reach, both in the frontend nav/route guards (see the
+// mirrored copy in frontend/src/utils/roles.js — the two must be kept in
+// sync by hand, there's no shared package between the two apps) and in the
+// backend's requireModule()/requireModuleOrSelf() middleware below.
+// "*" means unrestricted — every module, every role-gated action.
+//
+// IT_MANAGER is deliberately inventory-only: no employee directory, no
+// payroll, no leave/attendance admin, nothing outside these five. ADMIN and
+// CEO always get "*" — a main-company ADMIN/IT_MANAGER can additionally
+// switch into other organizations in the company (see applyOrganizationScope
+// in auth.middleware.js), but within whichever org they're viewing, module
+// access is still governed by this map.
+const ROLE_MODULES = {
+  CEO: ["*"],
+  ADMIN: ["*"],
+  MANAGER: ["payroll", "payrollReports", "financialReports"],
+  HR: ["employees", "employeeForms", "certifications", "attendance", "leave", "hrReports"],
+  SALES_HEAD: ["sales", "salesTeam", "projects", "tasks", "salesReports"],
+  MANAGEMENT: ["employees", "projects", "tasks", "attendance", "performance", "reports"],
+  DEPARTMENT_HEAD: ["departments", "employees", "attendance", "projects", "tasks", "leave"],
+  IT_MANAGER: ["inventory", "assets", "assetAssignments", "assetRequests", "tickets"],
+  EMPLOYEE: [],
+}
+
 // Roles allowed to open employee profiles and directory records.
-// Regular employees can still open only their own profile.
+// Regular employees can still open only their own profile. IT_MANAGER is
+// included here even though it has no "employees" module: it needs a
+// picker of who an asset can be assigned to, and getEmployee/listEmployees
+// already redact everything but name/email/phone/role/status/photo/
+// designation/department/assignedAssets for that role — this is an
+// asset-assignment concern, not directory/HR access.
 const EMPLOYEE_DIRECTORY_ROLES = [
-  "ADMIN",
-  "CEO",
-  "MANAGER",
-  "SALES_HEAD",
-  "HR",
-  "MANAGEMENT",
-  "DEPARTMENT_HEAD",
+  ...Object.keys(ROLE_MODULES).filter((role) => hasModuleAccessImpl(role, "employees")),
   "IT_MANAGER",
 ]
 
-// The CEO is capped at three per organization.
-const MAX_CEO_COUNT = 3
+function hasModuleAccessImpl(role, moduleKey) {
+  const modules = ROLE_MODULES[role]
+  if (!modules) return false
+  return modules.includes("*") || modules.includes(moduleKey)
+}
+
+function hasModuleAccess(role, moduleKey) {
+  return hasModuleAccessImpl(role, moduleKey)
+}
 
 function isManagement(role) {
   return MANAGEMENT_ROLES.includes(role)
@@ -45,5 +79,7 @@ module.exports = {
   ASSIGNABLE_ROLES,
   EMPLOYEE_DIRECTORY_ROLES,
   MAX_CEO_COUNT,
+  ROLE_MODULES,
+  hasModuleAccess,
   isManagement,
 }

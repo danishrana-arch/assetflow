@@ -21,14 +21,18 @@ router.use(requireAuth)
 
 router.get("/", getOrganization)
 router.get("/company", listCompanyOrganizations)
-router.get("/comparison", requireRole("ADMIN", "CEO", "MANAGER"), getOrganizationComparison)
-router.post("/suborganizations", requireRole("ADMIN", "CEO", "MANAGER"), createSubOrganization)
-router.delete("/suborganizations/:id", requireRole("ADMIN", "CEO", "MANAGER"), archiveSubOrganization)
-router.patch("/", requireRole("ADMIN", "CEO", "MANAGER"), updateOrganization)
+// ADMIN/CEO only — matches the frontend's RequireOwner, which no longer
+// includes MANAGER (Finance Manager's module list is payroll-only; it has
+// no more claim on org settings/structure or the attendance matrix than
+// HR or any other non-owner role does).
+router.get("/comparison", requireRole("ADMIN", "CEO"), getOrganizationComparison)
+router.post("/suborganizations", requireRole("ADMIN", "CEO"), createSubOrganization)
+router.delete("/suborganizations/:id", requireRole("ADMIN", "CEO"), archiveSubOrganization)
+router.patch("/", requireRole("ADMIN", "CEO"), updateOrganization)
 router.patch("/company/set-main", requireRole("CEO"), setMainCompany)
 
 router.get("/attendance-permissions/me", getMyAttendancePermission)
-router.get("/attendance-permissions", requireRole("ADMIN", "CEO", "MANAGER"), getAttendancePermissions)
-router.put("/attendance-permissions", requireRole("ADMIN", "CEO", "MANAGER"), updateAttendancePermissions)
+router.get("/attendance-permissions", requireRole("ADMIN", "CEO"), getAttendancePermissions)
+router.put("/attendance-permissions", requireRole("ADMIN", "CEO"), updateAttendancePermissions)
 
 module.exports = router

@@ -4,7 +4,7 @@ import { CheckCircle2, Clock3, ListTodo, Plus, Search, Trash2, X } from "lucide-
 import api from "../api/client"
 import PageHeader from "../components/ui/PageHeader"
 import Avatar from "../components/ui/Avatar"
-import { isManagement } from "../utils/roles"
+import { hasModuleAccess } from "../utils/roles"
 import { useAuth } from "../context/AuthContext"
 import useMarkNotificationsRead from "../hooks/useMarkNotificationsRead"
 
@@ -14,7 +14,7 @@ const blank = { projectId: "", title: "", description: "", priority: "MEDIUM", a
 
 export default function Tasks() {
   useMarkNotificationsRead("TASK")
-  const { user } = useAuth(); const management = isManagement(user?.role); const qc = useQueryClient()
+  const { user } = useAuth(); const management = hasModuleAccess(user?.role, "tasks"); const qc = useQueryClient()
   const [showForm, setShowForm] = useState(false); const [form, setForm] = useState(blank); const [search, setSearch] = useState("")
   const { data: tasks = [], isLoading } = useQuery({ queryKey: ["tasks", search], queryFn: () => api.get("/tasks", { params: { search: search || undefined } }).then(r => r.data) })
   const { data: projects = [] } = useQuery({ queryKey: ["projects", "task-form"], queryFn: () => api.get("/projects").then(r => r.data), enabled: management })

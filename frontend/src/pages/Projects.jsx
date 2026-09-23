@@ -15,6 +15,7 @@ import {
   X,
 } from "lucide-react"
 import { useAuth } from "../context/AuthContext"
+import { hasModuleAccess } from "../utils/roles"
 import api from "../api/client"
 import PageHeader from "../components/ui/PageHeader"
 import Avatar from "../components/ui/Avatar"
@@ -418,7 +419,7 @@ export default function Projects() {
   const [expired, setExpired] = useState(null)
   const [createOpen, setCreateOpen] = useState(false)
   const [workFieldsOpen, setWorkFieldsOpen] = useState(false)
-  const isManagement = ["ADMIN", "CEO", "SALES_HEAD", "HR", "MANAGEMENT", "DEPARTMENT_HEAD"].includes(user?.role)
+  const isManagement = hasModuleAccess(user?.role, "projects")
 
   const { data: projects = [], isLoading } = useQuery({
     queryKey: ["projects", activeStatus, search],

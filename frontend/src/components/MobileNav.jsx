@@ -31,9 +31,15 @@ import {
   MapPin,
   CalendarRange,
   BadgeCheck,
+  TrendingUp,
+  Handshake,
+  PieChart,
+  FileBarChart,
+  Receipt,
+  FileSpreadsheet,
 } from "lucide-react"
 import { useAuth } from "../context/AuthContext"
-import { isManagement, canAccessPayroll } from "../utils/roles"
+import { isManagement, hasModuleAccess } from "../utils/roles"
 import OrganizationSwitcher from "./OrganizationSwitcher"
 
 function Row({ to, icon: Icon, label, end, onClick, showDot = false }) {
@@ -62,7 +68,7 @@ function Row({ to, icon: Icon, label, end, onClick, showDot = false }) {
 export default function MobileNav({ open, onClose }) {
   const { user, logout } = useAuth()
   const isAdmin = isManagement(user?.role)
-  const isOwner = ["ADMIN", "CEO", "MANAGER"].includes(user?.role)
+  const isOwner = ["ADMIN", "CEO"].includes(user?.role)
   const isIT = user?.role === "IT_MANAGER"
 
   const { data: unreadNotifications } = useQuery({
@@ -95,33 +101,47 @@ export default function MobileNav({ open, onClose }) {
           {isAdmin ? (
             <>
               <Row to="/" icon={LayoutDashboard} label="Dashboard" end onClick={onClose} />
-              <Row to="/inventory" icon={Boxes} label="Inventory" onClick={onClose} />
-              <Row to="/employees" icon={Users} label="Employees" onClick={onClose} />
-              <Row to="/assignments" icon={ClipboardCheck} label="Asset Assignment" onClick={onClose} />
-              <Row to="/projects" icon={FolderKanban} label="Projects" onClick={onClose} />
+              {hasModuleAccess(user?.role, "inventory") && <Row to="/inventory" icon={Boxes} label="Inventory" onClick={onClose} />}
+              {hasModuleAccess(user?.role, "employees") && <Row to="/employees" icon={Users} label="Employees" onClick={onClose} />}
+              {hasModuleAccess(user?.role, "assetAssignments") && <Row to="/assignments" icon={ClipboardCheck} label="Asset Assignment" onClick={onClose} />}
+              {hasModuleAccess(user?.role, "sales") && <Row to="/sales" icon={TrendingUp} label="Sales" onClick={onClose} />}
+              {hasModuleAccess(user?.role, "salesTeam") && <Row to="/sales-team" icon={Handshake} label="Sales Team" onClick={onClose} />}
+              {hasModuleAccess(user?.role, "projects") && <Row to="/projects" icon={FolderKanban} label="Projects" onClick={onClose} />}
               <Row to="/calendar" icon={CalendarRange} label="Company Calendar" onClick={onClose} />
-              <Row to="/tasks" icon={ListTodo} label="Tasks" onClick={onClose} />
-              <Row to="/performance" icon={Award} label="Performance" onClick={onClose} />
-              <Row to="/asset-requests" icon={PackageSearch} label="Asset Requests" onClick={onClose} />
-              <Row to="/departments" icon={Building2} label="Departments" onClick={onClose} />
+              {hasModuleAccess(user?.role, "tasks") && <Row to="/tasks" icon={ListTodo} label="Tasks" onClick={onClose} />}
+              {hasModuleAccess(user?.role, "performance") && <Row to="/performance" icon={Award} label="Performance" onClick={onClose} />}
+              {hasModuleAccess(user?.role, "assetRequests") && <Row to="/asset-requests" icon={PackageSearch} label="Asset Requests" onClick={onClose} />}
+              {hasModuleAccess(user?.role, "departments") && <Row to="/departments" icon={Building2} label="Departments" onClick={onClose} />}
               <Row to="/tickets" icon={Ticket} label="Requests / Tickets" onClick={onClose} />
-              {(["ADMIN", "CEO", "HR"].includes(user?.role) || user?.canManageAttendance) && (
+              {(hasModuleAccess(user?.role, "attendance") || user?.canManageAttendance) && (
                 <>
                   <Row to="/attendance" icon={CalendarCheck} label="Attendance" onClick={onClose} />
                   <Row to="/attendance/sites" icon={MapPin} label="Attendance Sites" onClick={onClose} />
                 </>
               )}
               <Row to="/attendance/me" icon={UserCheck} label="My Attendance" onClick={onClose} />
-              <Row to="/leave-requests" icon={ClipboardList} label="Leave Requests" onClick={onClose} />
-              <Row to="/reports" icon={BarChart3} label="Reports" onClick={onClose} />
-              <Row to="/export" icon={Download} label="Export" onClick={onClose} />
-              <Row to="/audit-log" icon={ShieldCheck} label="Audit Log" onClick={onClose} />
-              {canAccessPayroll(user?.role) && <Row to="/payroll" icon={Wallet} label="Payroll" onClick={onClose} />}
+              {hasModuleAccess(user?.role, "leave") && <Row to="/leave-requests" icon={ClipboardList} label="Leave Requests" onClick={onClose} />}
+              {hasModuleAccess(user?.role, "reports") && (
+                <>
+                  <Row to="/reports" icon={BarChart3} label="Reports" onClick={onClose} />
+                  <Row to="/export" icon={Download} label="Export" onClick={onClose} />
+                </>
+              )}
+              {hasModuleAccess(user?.role, "salesReports") && <Row to="/reports/sales" icon={PieChart} label="Sales Reports" onClick={onClose} />}
+              {hasModuleAccess(user?.role, "hrReports") && <Row to="/reports/hr" icon={FileBarChart} label="HR Reports" onClick={onClose} />}
+              {hasModuleAccess(user?.role, "financialReports") && <Row to="/reports/financial" icon={Receipt} label="Financial Reports" onClick={onClose} />}
+              {isOwner && <Row to="/audit-log" icon={ShieldCheck} label="Audit Log" onClick={onClose} />}
+              {hasModuleAccess(user?.role, "payroll") && (
+                <>
+                  <Row to="/payroll" icon={Wallet} label="Payroll" onClick={onClose} />
+                  <Row to="/payroll/reports" icon={FileSpreadsheet} label="Payroll Reports" onClick={onClose} />
+                </>
+              )}
               <div className="my-2 divider" />
               <Row to="/notifications" icon={BellRing} label="Notifications" onClick={onClose} showDot={hasUnreadNotifications} />
-              {isOwner && <Row to="/employee-forms" icon={FileText} label="Employee Forms" onClick={onClose} />}
-              <Row to="/settings" icon={Settings} label="Settings" onClick={onClose} />
-              <Row to="/holidays" icon={CalendarDays} label="Holidays" onClick={onClose} />
+              {hasModuleAccess(user?.role, "employeeForms") && <Row to="/employee-forms" icon={FileText} label="Employee Forms" onClick={onClose} />}
+              {isOwner && <Row to="/settings" icon={Settings} label="Settings" onClick={onClose} />}
+              {hasModuleAccess(user?.role, "leave") && <Row to="/holidays" icon={CalendarDays} label="Holidays" onClick={onClose} />}
               <Row to="/profile" icon={UserCircle} label="Profile" onClick={onClose} />
             </>
           ) : isIT ? (

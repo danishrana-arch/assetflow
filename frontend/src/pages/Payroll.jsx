@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+﻿import { useMemo, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Wallet, Play, Send, CheckCircle2, XCircle, Trash2, ChevronLeft, ChevronRight } from "lucide-react"
 import api from "../api/client"
@@ -21,7 +21,7 @@ function money(n) {
 
 export default function Payroll() {
   const { user } = useAuth()
-  const isAdmin = user?.role === "ADMIN"
+  const canManagePayroll = ["ADMIN", "MANAGER"].includes(user?.role)
   const isCeo = user?.role === "CEO"
   const queryClient = useQueryClient()
   const now = new Date()
@@ -70,13 +70,13 @@ export default function Payroll() {
     onSuccess: invalidate,
   })
 
-  // Admin's final step — sends every DRAFT record this month to the CEO.
+  // Admin's final step â€” sends every DRAFT record this month to the CEO.
   const submit = useMutation({
     mutationFn: () => api.post("/payroll/submit", { month, year }).then((r) => r.data),
     onSuccess: invalidate,
   })
 
-  // CEO's sign-off — approves and pays every PENDING_APPROVAL record at
+  // CEO's sign-off â€” approves and pays every PENDING_APPROVAL record at
   // once, "delivered to every account" in one click.
   const approveAll = useMutation({
     mutationFn: () => api.post("/payroll/approve", { month, year }).then((r) => r.data),
@@ -132,7 +132,7 @@ export default function Payroll() {
           </button>
         </div>
 
-      {isAdmin && (
+      {canManagePayroll && (
         <>
           <button
             onClick={() => generate.mutate()}
@@ -140,7 +140,7 @@ export default function Payroll() {
             className="flex items-center gap-1.5 rounded-full bg-accent px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-60"
           >
             <Play size={14} />
-            {generate.isPending ? "Generating…" : "Generate"}
+            {generate.isPending ? "Generatingâ€¦" : "Generate"}
           </button>
           <button
             onClick={() => submit.mutate()}
@@ -149,7 +149,7 @@ export default function Payroll() {
             className="flex items-center gap-1.5 rounded-full border border-border-strong bg-surface px-4 py-2 text-sm font-semibold text-ink hover:bg-surface-2 disabled:opacity-40"
           >
             <Send size={14} />
-            {submit.isPending ? "Submitting…" : "Submit for Approval"}
+            {submit.isPending ? "Submittingâ€¦" : "Submit for Approval"}
           </button>
         </>
       )}
@@ -163,7 +163,7 @@ export default function Payroll() {
           className="flex items-center gap-1.5 rounded-full bg-accent px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-40"
         >
           <CheckCircle2 size={14} />
-          {approveAll.isPending ? "Paying…" : "Approve & Pay All"}
+          {approveAll.isPending ? "Payingâ€¦" : "Approve & Pay All"}
         </button>
         <button
           onClick={() => rejectAll.mutate()}
@@ -219,7 +219,7 @@ export default function Payroll() {
                   <Avatar name={r.employee?.name} size="sm" />
                   <div className="min-w-0">
                     <div className="truncate font-medium text-ink">{r.employee?.name}</div>
-                    <div className="truncate text-xs text-muted">{r.employee?.department?.name || "—"}</div>
+                    <div className="truncate text-xs text-muted">{r.employee?.department?.name || "â€”"}</div>
                   </div>
                 </div>
                 <StatusPill tone={STATUS_TONE[r.status]}>{r.status.replace("_", " ")}</StatusPill>
@@ -268,7 +268,7 @@ export default function Payroll() {
 
               <div className="mt-3 text-xs">
                 <p className="text-muted-2">Bank</p>
-                <p className="text-ink">{r.bankName || "—"}</p>
+                <p className="text-ink">{r.bankName || "â€”"}</p>
                 <p className="font-mono text-[11px] text-muted">{r.bankAccountNumber || "No account on file"}</p>
               </div>
 
@@ -281,7 +281,7 @@ export default function Payroll() {
               )}
 
               <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
-                {isDraft && isAdmin && isEditing && (
+                {isDraft && canManagePayroll && isEditing && (
                   <button
                     onClick={() => save.mutate({ id: r.id, bonus: editing.bonus, deductions: editing.deductions })}
                     disabled={save.isPending}
@@ -290,7 +290,7 @@ export default function Payroll() {
                     Save
                   </button>
                 )}
-                {isDraft && isAdmin && !isEditing && (
+                {isDraft && canManagePayroll && !isEditing && (
                   <button
                     onClick={() => setEditing({ id: r.id, bonus: r.bonus, deductions: r.deductions })}
                     className="rounded-full border border-border-strong px-3 py-1.5 text-xs font-semibold text-ink hover:bg-surface-2"
@@ -308,7 +308,7 @@ export default function Payroll() {
                     <CheckCircle2 size={16} />
                   </button>
                 )}
-                {!isPaid && (isAdmin || isCeo) && (
+                {!isPaid && (canManagePayroll || isCeo) && (
                   <button
                     onClick={() => remove.mutate(r.id)}
                     disabled={remove.isPending}
@@ -360,12 +360,12 @@ export default function Payroll() {
                 <Avatar name={r.employee?.name} size="sm" />
                 <div>
                   <div className="font-medium text-ink">{r.employee?.name}</div>
-                  <div className="text-xs text-muted">{r.employee?.department?.name || "—"}</div>
+                  <div className="text-xs text-muted">{r.employee?.department?.name || "â€”"}</div>
                 </div>
               </div>
             </td>
             <td className="px-5 py-3">
-              <div className="text-xs text-ink">{r.bankName || "—"}</div>
+              <div className="text-xs text-ink">{r.bankName || "â€”"}</div>
               <div className="font-mono text-[11px] text-muted">{r.bankAccountNumber || "No account on file"}</div>
             </td>
             <td className="px-5 py-3 font-mono text-xs text-ink">{money(r.baseSalary)}</td>
@@ -401,7 +401,7 @@ export default function Payroll() {
               {r.unpaidLeaveDays > 0 && <div>{r.unpaidLeaveDays} unpaid day{r.unpaidLeaveDays === 1 ? "" : "s"}</div>}
               {r.halfDayLeaveDays > 0 && <div>{r.halfDayLeaveDays} half-day{r.halfDayLeaveDays === 1 ? "" : "s"}</div>}
               {r.lateDays > 0 && <div>{r.lateDays} late</div>}
-              {!r.unpaidLeaveDays && !r.halfDayLeaveDays && !r.lateDays && "—"}
+              {!r.unpaidLeaveDays && !r.halfDayLeaveDays && !r.lateDays && "â€”"}
             </td>
             <td className="px-5 py-3 font-mono text-sm font-semibold text-ink">{money(r.netPay)}</td>
             <td className="px-5 py-3">
@@ -409,7 +409,7 @@ export default function Payroll() {
             </td>
             <td className="px-5 py-3">
               <div className="flex items-center justify-end gap-2">
-                {isDraft && isAdmin && isEditing && (
+                {isDraft && canManagePayroll && isEditing && (
                   <button
                     onClick={() => save.mutate({ id: r.id, bonus: editing.bonus, deductions: editing.deductions })}
                     disabled={save.isPending}
@@ -418,7 +418,7 @@ export default function Payroll() {
                     Save
                   </button>
                 )}
-                {isDraft && isAdmin && !isEditing && (
+                {isDraft && canManagePayroll && !isEditing && (
                   <button
                     onClick={() => setEditing({ id: r.id, bonus: r.bonus, deductions: r.deductions })}
                     className="rounded-full border border-border-strong px-3 py-1.5 text-xs font-semibold text-ink hover:bg-surface-2"
@@ -436,7 +436,7 @@ export default function Payroll() {
                     <CheckCircle2 size={16} />
                   </button>
                 )}
-                {!isPaid && (isAdmin || isCeo) && (
+                {!isPaid && (canManagePayroll || isCeo) && (
                   <button
                     onClick={() => remove.mutate(r.id)}
                     disabled={remove.isPending}

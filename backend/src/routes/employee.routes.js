@@ -9,7 +9,8 @@ const {
   importTemplate,
 } = require("../controllers/employee.controller")
 const { resetPassword } = require("../controllers/auth.controller")
-const { requireAuth, requireManagement, requireManagementOrSelf, requireRole } = require("../middleware/auth.middleware")
+const { requireAuth, requireRole, requireModule, requireModuleOrSelf } = require("../middleware/auth.middleware")
+const { EMPLOYEE_DIRECTORY_ROLES } = require("../utils/roles")
 const { noStore } = require("../middleware/cache.middleware")
 
 const router = express.Router()
@@ -26,17 +27,19 @@ const upload = multer({
 
 router.use(requireAuth)
 
-router.get("/import/template", requireManagement, importTemplate)
-router.post("/import", requireManagement, upload.single("file"), importEmployees)
+router.get("/import/template", requireModule("employees"), importTemplate)
+router.post("/import", requireModule("employees"), upload.single("file"), importEmployees)
 
-router.get("/", requireManagement, listEmployees)
+// IT_MANAGER lacks the "employees" module but still needs this list as a
+// redacted asset-assignment picker — see EMPLOYEE_DIRECTORY_ROLES.
+router.get("/", requireRole(...EMPLOYEE_DIRECTORY_ROLES), listEmployees)
 router.get("/:id", noStore, getEmployee)
-// Management can edit anyone; a non-management user can edit their own
-// phone/email only (enforced field-by-field in the controller).
-router.patch("/:id", requireManagementOrSelf, updateEmployee)
+// A role with the "employees" module can edit anyone; anyone else can only
+// edit their own phone/email (enforced field-by-field in the controller).
+router.patch("/:id", requireModuleOrSelf("employees"), updateEmployee)
 // Admin-assisted "forgot password" — management resets to a known temp
 // password since there's no email-reset flow.
-router.post("/:id/reset-password", requireManagement, resetPassword)
-router.delete("/:id", requireRole("ADMIN", "CEO", "MANAGER"), deleteEmployee)
+router.post("/:id/reset-password", requireModule("employees"), resetPassword)
+router.delete("/:id", requireRole("ADMIN", "CEO"), deleteEmployee)
 
 module.exports = router

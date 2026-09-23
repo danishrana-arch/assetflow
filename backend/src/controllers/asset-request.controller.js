@@ -1,5 +1,5 @@
 const prisma = require("../lib/prisma")
-const { MANAGEMENT_ROLES } = require("../utils/roles")
+const { hasModuleAccess } = require("../utils/roles")
 const { logAudit } = require("../utils/audit")
 const { notifyManagement, createNotification } = require("../utils/notifications")
 
@@ -48,7 +48,7 @@ async function listRequests(req, res, next) {
   try {
     const { organizationId, userId, role } = req.user
     const { status } = req.query
-    const isManagement = MANAGEMENT_ROLES.includes(role)
+    const isManagement = hasModuleAccess(role, "assetRequests")
 
     const requests = await prisma.assetRequest.findMany({
       where: {

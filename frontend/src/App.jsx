@@ -2,7 +2,7 @@ import { Suspense, lazy, useEffect } from "react"
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom"
 import { useAuth } from "./context/AuthContext"
 import { ThemeProvider, useTheme } from "./context/ThemeContext"
-import { isManagement, canManageInventory, canViewEmployeeDirectory, canAccessPayroll } from "./utils/roles"
+import { isManagement, hasModuleAccess, canManageInventory, canViewEmployeeDirectory, canAccessPayroll } from "./utils/roles"
 import DashboardLayout from "./layouts/DashboardLayout"
 // Not lazy-loaded like the other pages below: this is the offline-first
 // check-in/check-out page, so its code must already be in the main bundle
@@ -50,6 +50,12 @@ const Projects = lazy(() => import("./pages/Projects"))
 const Announcements = lazy(() => import("./pages/Announcements"))
 const EmployeeForms = lazy(() => import("./pages/EmployeeForms"))
 const PublicEmployeeForm = lazy(() => import("./pages/PublicEmployeeForm"))
+const Sales = lazy(() => import("./pages/Sales"))
+const SalesTeam = lazy(() => import("./pages/SalesTeam"))
+const SalesReports = lazy(() => import("./pages/SalesReports"))
+const HrReports = lazy(() => import("./pages/HrReports"))
+const FinancialReports = lazy(() => import("./pages/FinancialReports"))
+const PayrollReports = lazy(() => import("./pages/PayrollReports"))
 
 function PageFallback() {
   return (
@@ -62,16 +68,22 @@ function PageFallback() {
   )
 }
 
-// Gate for management-only pages (Owner + CEO/Sales Head/HR).
-function RequireManagement({ children }) {
+// Generic per-module gate — the frontend counterpart to hasModuleAccess()
+// used by the backend's requireModule() middleware. ADMIN/CEO always pass
+// via the "*" wildcard in ROLE_MODULES; every other role is checked
+// against its own fixed module list.
+function RequireModule({ moduleKey, children }) {
   const { user } = useAuth()
-  if (!isManagement(user?.role)) return <Navigate to={`/employees/${user?.id}`} replace />
+  if (!hasModuleAccess(user?.role, moduleKey)) return <Navigate to={user?.id ? `/employees/${user.id}` : "/login"} replace />
   return children
 }
 
+// Gate for ADMIN/CEO-only pages — org-wide configuration and sensitive
+// records that aren't a per-role module in the permission tree (Settings,
+// org comparison, the audit log).
 function RequireOwner({ children }) {
   const { user } = useAuth()
-  if (!["ADMIN", "CEO", "MANAGER"].includes(user?.role)) return <Navigate to="/" replace />
+  if (!["ADMIN", "CEO"].includes(user?.role)) return <Navigate to="/" replace />
   return children
 }
 
@@ -131,26 +143,32 @@ function ProtectedShell() {
           <Route path="/assignments" element={<RequireInventoryAccess><Assignments /></RequireInventoryAccess>} />
           <Route path="/projects" element={isIT ? <Navigate to="/inventory" replace /> : <Projects />} />
           <Route path="/asset-requests" element={<RequireInventoryAccess><AssetRequests /></RequireInventoryAccess>} />
-          <Route path="/departments" element={<RequireManagement><Departments /></RequireManagement>} />
+          <Route path="/departments" element={<RequireModule moduleKey="departments"><Departments /></RequireModule>} />
           <Route path="/calendar" element={<AdvancedCalendar />} />
           <Route path="/tasks" element={<Tasks />} />
           <Route path="/performance" element={<Performance />} />
           <Route path="/organization-comparison" element={<RequireOwner><OrganizationComparison /></RequireOwner>} />
-          <Route path="/attendance" element={<RequireManagement><Attendance /></RequireManagement>} />
-          <Route path="/attendance/sites" element={<RequireManagement><AttendanceSites /></RequireManagement>} />
+          <Route path="/attendance" element={<RequireModule moduleKey="attendance"><Attendance /></RequireModule>} />
+          <Route path="/attendance/sites" element={<RequireModule moduleKey="attendance"><AttendanceSites /></RequireModule>} />
           <Route path="/attendance/me" element={<MyAttendance />} />
-          <Route path="/leave-requests" element={<RequireManagement><LeaveRequests /></RequireManagement>} />
+          <Route path="/leave-requests" element={<RequireModule moduleKey="leave"><LeaveRequests /></RequireModule>} />
           <Route path="/leave-calendar" element={<Navigate to="/calendar" replace />} />
-          <Route path="/holidays" element={<RequireManagement><Holidays /></RequireManagement>} />
-          <Route path="/audit-log" element={<RequireManagement><AuditLog /></RequireManagement>} />
+          <Route path="/holidays" element={<RequireModule moduleKey="leave"><Holidays /></RequireModule>} />
+          <Route path="/audit-log" element={<RequireOwner><AuditLog /></RequireOwner>} />
           <Route path="/payroll" element={<RequirePayrollAccess><Payroll /></RequirePayrollAccess>} />
           <Route path="/payroll/me" element={<RequirePayrollAccess><MyPayroll /></RequirePayrollAccess>} />
+          <Route path="/payroll/reports" element={<RequireModule moduleKey="payrollReports"><PayrollReports /></RequireModule>} />
           <Route path="/tickets" element={<Tickets />} />
-          <Route path="/reports" element={<RequireManagement><Reports /></RequireManagement>} />
-          <Route path="/export" element={<RequireManagement><Export /></RequireManagement>} />
+          <Route path="/reports" element={<RequireModule moduleKey="reports"><Reports /></RequireModule>} />
+          <Route path="/reports/sales" element={<RequireModule moduleKey="salesReports"><SalesReports /></RequireModule>} />
+          <Route path="/reports/hr" element={<RequireModule moduleKey="hrReports"><HrReports /></RequireModule>} />
+          <Route path="/reports/financial" element={<RequireModule moduleKey="financialReports"><FinancialReports /></RequireModule>} />
+          <Route path="/sales" element={<RequireModule moduleKey="sales"><Sales /></RequireModule>} />
+          <Route path="/sales-team" element={<RequireModule moduleKey="salesTeam"><SalesTeam /></RequireModule>} />
+          <Route path="/export" element={<RequireModule moduleKey="reports"><Export /></RequireModule>} />
           <Route path="/notifications" element={<Notifications />} />
           <Route path="/announcements" element={<Announcements />} />
-          <Route path="/employee-forms" element={<RequireOwner><EmployeeForms /></RequireOwner>} />
+          <Route path="/employee-forms" element={<RequireModule moduleKey="employeeForms"><EmployeeForms /></RequireModule>} />
           <Route path="/settings" element={<RequireOwner><Settings /></RequireOwner>} />
           <Route path="/settings/attendance-devices" element={<RequireOwner><AttendanceDevices /></RequireOwner>} />
           <Route path="/billing" element={<Navigate to="/" replace />} />

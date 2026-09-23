@@ -14,7 +14,7 @@ function startOfDay(dateStr, timeZone) {
 
 async function getDailyAttendance(req, res, next) {
   try {
-    const { organizationId } = req.user
+    const { organizationId, role, departmentId } = req.user
     const organization = await prisma.organization.findUnique({
         where: { id: organizationId },
         select: {
@@ -33,7 +33,12 @@ async function getDailyAttendance(req, res, next) {
 
     const [employees, records] = await Promise.all([
       prisma.user.findMany({
-        where: { organizationId, status: "ACTIVE" },
+        where: {
+          organizationId,
+          status: "ACTIVE",
+          // DEPARTMENT_HEAD only ever sees their own department's roster.
+          ...(role === "DEPARTMENT_HEAD" ? { departmentId: departmentId || "__none__" } : {}),
+        },
         include: { department: true },
         orderBy: { name: "asc" },
       }),
@@ -167,7 +172,7 @@ async function saveDayAttendance(req, res, next) {
 
 async function exportAttendanceSheet(req, res, next) {
   try {
-    const { organizationId } = req.user
+    const { organizationId, role, departmentId } = req.user
     const organization = await prisma.organization.findUnique({
       where: { id: organizationId },
       select: { workingHoursPerDay: true, workingDaysPerWeek: true, timezone: true, breakStart: true, breakEnd: true, shiftStartDefault: true, shiftEndDefault: true },
@@ -187,7 +192,15 @@ async function exportAttendanceSheet(req, res, next) {
     endExclusive.setUTCDate(endExclusive.getUTCDate() + 1)
 
     const [employees, records, sites] = await Promise.all([
-      prisma.user.findMany({ where: { organizationId, status: "ACTIVE" }, include: { department: true }, orderBy: { name: "asc" } }),
+      prisma.user.findMany({
+        where: {
+          organizationId,
+          status: "ACTIVE",
+          ...(role === "DEPARTMENT_HEAD" ? { departmentId: departmentId || "__none__" } : {}),
+        },
+        include: { department: true },
+        orderBy: { name: "asc" },
+      }),
       prisma.attendanceRecord.findMany({ where: { organizationId, date: { gte: fromDate, lt: endExclusive } }, orderBy: [{ date: "asc" }, { employeeId: "asc" }] }),
       prisma.attendanceSite.findMany({ where: { organizationId }, select: { id: true, name: true } }),
     ])

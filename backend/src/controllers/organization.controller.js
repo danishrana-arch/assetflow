@@ -73,8 +73,8 @@ async function listCompanyOrganizations(req, res, next) {
 async function createSubOrganization(req, res, next) {
   try {
     const { organizationId, role, userId } = req.user
-    if (!["ADMIN", "CEO", "MANAGER"].includes(role)) {
-      return res.status(403).json({ error: "Only an ADMIN, CEO or MANAGER can create organizations" })
+    if (!["ADMIN", "CEO"].includes(role)) {
+      return res.status(403).json({ error: "Only an ADMIN or CEO can create organizations" })
     }
 
     const name = String(req.body.name || "").trim()
@@ -330,8 +330,8 @@ async function updateOrganization(req, res, next) {
 async function archiveSubOrganization(req, res, next) {
   try {
     const { organizationId, role, userId } = req.user
-    if (!["ADMIN", "CEO", "MANAGER"].includes(role)) {
-      return res.status(403).json({ error: "Only an ADMIN, CEO or MANAGER can remove organizations" })
+    if (!["ADMIN", "CEO"].includes(role)) {
+      return res.status(403).json({ error: "Only an ADMIN or CEO can remove organizations" })
     }
 
     const targetId = req.params.id

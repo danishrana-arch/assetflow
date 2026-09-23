@@ -1,28 +1,53 @@
 const prisma = require("../lib/prisma")
 const { createNotification } = require("../utils/notifications")
+const { hasModuleAccess } = require("../utils/roles")
 
-const MANAGEMENT = ["ADMIN", "CEO", "MANAGER", "SALES_HEAD", "HR", "MANAGEMENT", "DEPARTMENT_HEAD"]
 const STATUSES = ["TODO", "IN_PROGRESS", "BLOCKED", "DONE"]
 const PRIORITIES = ["LOW", "MEDIUM", "HIGH", "URGENT"]
 
-function isManagement(role) { return MANAGEMENT.includes(role) }
+function isManagement(role) { return hasModuleAccess(role, "tasks") }
 function number(value, fallback = 0) { const n = Number(value); return Number.isFinite(n) ? n : fallback }
 function date(value) { if (!value) return null; const d = new Date(value); return Number.isNaN(d.getTime()) ? undefined : d }
 
+// Same own-department constraint as project.controller.js: a DEPARTMENT_HEAD
+// may only touch a task whose project has a member from their department.
+async function isTaskProjectInDepartmentScope(projectId, departmentId) {
+  const member = await prisma.projectMember.findFirst({
+    where: { projectId, employee: { departmentId: departmentId || "__none__" } },
+    select: { id: true },
+  })
+  return !!member
+}
+
 async function listTasks(req, res, next) {
   try {
-    const { organizationId, userId, role } = req.user
+    const { organizationId, userId, role, departmentId } = req.user
     const { projectId, status, priority, assignedToId, search } = req.query
-    const where = { organizationId }
+    const where = { organizationId, AND: [] }
     if (!isManagement(role)) where.assignedToId = userId
-    else if (assignedToId) where.assignedToId = assignedToId
+    else {
+      if (role === "DEPARTMENT_HEAD") {
+        // Own-department scoping: tasks assigned to someone in the
+        // department, or belonging to a project that has a member from it.
+        where.AND.push({
+          OR: [
+            { assignedTo: { departmentId: departmentId || "__none__" } },
+            { project: { members: { some: { employee: { departmentId: departmentId || "__none__" } } } } },
+          ],
+        })
+      }
+      if (assignedToId) where.assignedToId = assignedToId
+    }
     if (projectId) where.projectId = projectId
     if (STATUSES.includes(status)) where.status = status
     if (PRIORITIES.includes(priority)) where.priority = priority
-    if (search) where.OR = [
-      { title: { contains: search, mode: "insensitive" } },
-      { description: { contains: search, mode: "insensitive" } },
-    ]
+    if (search) where.AND.push({
+      OR: [
+        { title: { contains: search, mode: "insensitive" } },
+        { description: { contains: search, mode: "insensitive" } },
+      ],
+    })
+    if (!where.AND.length) delete where.AND
     const tasks = await prisma.task.findMany({
       where,
       include: {
@@ -38,8 +63,8 @@ async function listTasks(req, res, next) {
 
 async function createTask(req, res, next) {
   try {
-    if (!isManagement(req.user.role)) return res.status(403).json({ error: "Only management can create tasks" })
-    const { organizationId, userId } = req.user
+    const { organizationId, userId, role, departmentId } = req.user
+    if (!isManagement(role)) return res.status(403).json({ error: "Only management can create tasks" })
     const { projectId, title, description, status = "TODO", priority = "MEDIUM", assignedToId, dueDate, estimatedHours = 0 } = req.body
     if (!projectId || !title?.trim()) return res.status(400).json({ error: "Project and task title are required" })
     if (!STATUSES.includes(status) || !PRIORITIES.includes(priority)) return res.status(400).json({ error: "Invalid task status or priority" })
@@ -47,10 +72,17 @@ async function createTask(req, res, next) {
     if (due === undefined) return res.status(400).json({ error: "Invalid due date" })
     const project = await prisma.project.findFirst({ where: { id: projectId, organizationId }, select: { id: true, name: true } })
     if (!project) return res.status(404).json({ error: "Project not found" })
+    if (role === "DEPARTMENT_HEAD" && !(await isTaskProjectInDepartmentScope(project.id, departmentId))) {
+      return res.status(404).json({ error: "Project not found" })
+    }
     let assignee = null
     if (assignedToId) {
       assignee = await prisma.user.findFirst({ where: { id: assignedToId, organizationId, status: "ACTIVE" }, select: { id: true, name: true } })
       if (!assignee) return res.status(400).json({ error: "Invalid task assignee" })
+      if (role === "DEPARTMENT_HEAD") {
+        const assigneeInDept = await prisma.user.findFirst({ where: { id: assignee.id, departmentId: departmentId || "__none__" }, select: { id: true } })
+        if (!assigneeInDept) return res.status(400).json({ error: "You can only assign tasks to employees in your own department" })
+      }
     }
     const task = await prisma.task.create({ data: {
       organizationId, projectId, title: title.trim(), description: description?.trim() || null,
@@ -64,11 +96,14 @@ async function createTask(req, res, next) {
 
 async function updateTask(req, res, next) {
   try {
-    const { organizationId, userId, role } = req.user
+    const { organizationId, userId, role, departmentId } = req.user
     const existing = await prisma.task.findFirst({ where: { id: req.params.id, organizationId } })
     if (!existing) return res.status(404).json({ error: "Task not found" })
     const allowed = isManagement(role) || existing.assignedToId === userId
     if (!allowed) return res.status(403).json({ error: "You cannot update this task" })
+    if (role === "DEPARTMENT_HEAD" && !(await isTaskProjectInDepartmentScope(existing.projectId, departmentId))) {
+      return res.status(404).json({ error: "Task not found" })
+    }
     const { title, description, status, priority, assignedToId, dueDate, estimatedHours, actualHours } = req.body
     const data = {}
     if (title !== undefined) data.title = String(title).trim()
@@ -93,9 +128,13 @@ async function updateTask(req, res, next) {
 
 async function deleteTask(req, res, next) {
   try {
-    if (!isManagement(req.user.role)) return res.status(403).json({ error: "Only management can delete tasks" })
-    const task = await prisma.task.findFirst({ where: { id: req.params.id, organizationId: req.user.organizationId } })
+    const { role, organizationId, departmentId } = req.user
+    if (!isManagement(role)) return res.status(403).json({ error: "Only management can delete tasks" })
+    const task = await prisma.task.findFirst({ where: { id: req.params.id, organizationId } })
     if (!task) return res.status(404).json({ error: "Task not found" })
+    if (role === "DEPARTMENT_HEAD" && !(await isTaskProjectInDepartmentScope(task.projectId, departmentId))) {
+      return res.status(404).json({ error: "Task not found" })
+    }
     await prisma.task.delete({ where: { id: task.id } })
     res.status(204).send()
   } catch (err) { next(err) }

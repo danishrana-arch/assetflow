@@ -3,11 +3,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Award, Plus, X } from "lucide-react"
 import api from "../api/client"
 import PageHeader from "../components/ui/PageHeader"
-import { isManagement } from "../utils/roles"
+import { hasModuleAccess } from "../utils/roles"
 import { useAuth } from "../context/AuthContext"
 
 export default function Performance(){
- const {user}=useAuth(); const management=isManagement(user?.role); const qc=useQueryClient(); const [show,setShow]=useState(false)
+ const {user}=useAuth(); const management=hasModuleAccess(user?.role, "performance"); const qc=useQueryClient(); const [show,setShow]=useState(false)
  const [form,setForm]=useState({employeeId:"",periodStart:"",periodEnd:"",rating:5,goals:"",achievements:"",feedback:""})
  const {data:reviews=[]}=useQuery({queryKey:["performance"],queryFn:()=>api.get("/performance").then(r=>r.data)})
  const {data:employees=[]}=useQuery({queryKey:["employees","performance"],queryFn:()=>api.get("/employees",{params:{page:1,pageSize:100}}).then(r=>r.data?.data||[]),enabled:management})

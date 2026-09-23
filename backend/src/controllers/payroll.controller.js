@@ -277,9 +277,9 @@ async function deletePayroll(req, res, next) {
 }
 
 // POST /api/payroll/submit  { month, year }
-// An admin/owner's final step after generating and reviewing a month's
-// batch: sends every DRAFT record for that month to the CEO for approval.
-// ADMIN-only — a CEO doesn't need to "submit to themselves".
+// An Admin/Finance Manager's final step after generating and reviewing a
+// month's batch: sends every DRAFT record for that month to the CEO for
+// approval. A CEO doesn't need to "submit to themselves".
 async function submitForApproval(req, res, next) {
   try {
     const { organizationId } = req.user

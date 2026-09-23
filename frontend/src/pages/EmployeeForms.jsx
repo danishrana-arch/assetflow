@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Copy, Link2, Plus, Power, Users, X, Send } from "lucide-react"
 import api from "../api/client"
 import { useAuth } from "../context/AuthContext"
+import { hasModuleAccess } from "../utils/roles"
 import PageHeader from "../components/ui/PageHeader"
 import SectionHeader from "../components/ui/SectionHeader"
 import { TextField, SelectField } from "../components/ui/Field"
@@ -84,7 +85,7 @@ export default function EmployeeForms() {
 
   const clearRecipients = () => setRecipientEmployeeIds([])
 
-  if (!["ADMIN", "CEO", "MANAGER"].includes(user?.role)) return null
+  if (!hasModuleAccess(user?.role, "employeeForms")) return null
 
   return (
     <div>

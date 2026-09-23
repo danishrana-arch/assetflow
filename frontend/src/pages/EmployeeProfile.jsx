@@ -9,7 +9,7 @@ import {
 } from "lucide-react"
 import api from "../api/client"
 import { useAuth } from "../context/AuthContext"
-import { isManagement, canManageInventory, ROLE_LABELS } from "../utils/roles"
+import { hasModuleAccess, canManageInventory, ROLE_LABELS } from "../utils/roles"
 import StatusBadge from "../components/StatusBadge"
 import ParticleText from "../components/ParticleText"
 import StatusPill from "../components/ui/StatusPill"
@@ -66,12 +66,12 @@ export default function EmployeeProfile() {
   const isSelf = user?.id === id
   // Management can edit every field on anyone (including themselves); a
   // non-management viewer can only edit their own phone/email.
-  const canEditFully = isManagement(user?.role)
+  const canEditFully = hasModuleAccess(user?.role, "employees")
   const canEditContactOnly = !canEditFully && isSelf && user?.role !== "IT_MANAGER"
   // Only the Owner (ADMIN) can remove an employee outright.
   const canRemoveEmployee = user?.role === "ADMIN" && user?.id !== id
   // Any management user can reset a forgotten password to the temp value.
-  const canResetPassword = isManagement(user?.role) && !isSelf
+  const canResetPassword = hasModuleAccess(user?.role, "employees") && !isSelf
   const [showAssignForm, setShowAssignForm] = useState(false)
   const [showAddAssetForm, setShowAddAssetForm] = useState(false)
   const [newAsset, setNewAsset] = useState({ name: "", category: "", serialNumber: "", cpu: "", ram: "", storage: "", purchaseDate: "", warrantyEnd: "" })
@@ -88,7 +88,7 @@ export default function EmployeeProfile() {
   const [usageDrafts, setUsageDrafts] = useState({}) // { [assetId]: { notUsing: bool, actual: string } }
   const [usageSubmitted, setUsageSubmitted] = useState({}) // { [assetId]: true }
   const [certificateDrafts, setCertificateDrafts] = useState([])
-  const canManageCertifications = ["ADMIN", "CEO", "MANAGER"].includes(user?.role) || isSelf
+  const canManageCertifications = hasModuleAccess(user?.role, "certifications") || isSelf
 
   const { data: employee, isLoading } = useQuery({
     queryKey: ["employee", id],
@@ -325,7 +325,7 @@ export default function EmployeeProfile() {
       <PageHeader
         title="Employee Profile"
         subtitle="Personal information, assigned assets and activity."
-        backTo={canManageAssets || isManagement(user?.role) ? "/employees" : "/"}
+        backTo={canManageAssets || hasModuleAccess(user?.role, "employees") ? "/employees" : "/"}
         actions={
           <div className="flex flex-wrap gap-2">
             <Link to={`/employee-360/${id}`} className="inline-flex items-center gap-2 rounded-2xl bg-surface-2 px-4 py-2.5 text-xs font-semibold text-ink"><BadgeCheck size={14} /> 360° View</Link>
@@ -921,7 +921,7 @@ export default function EmployeeProfile() {
                   </SelectField>
                   <SelectField label="Role" value={editForm.role} onChange={(e) => setEditForm((f) => ({ ...f, role: e.target.value }))}>
                     {Object.entries(ROLE_LABELS)
-                      .filter(([value]) => ["ADMIN", "CEO", "SALES_HEAD", "HR", "MANAGEMENT", "DEPARTMENT_HEAD", "IT_MANAGER", "EMPLOYEE"].includes(value))
+                      .filter(([value]) => ["ADMIN", "CEO", "MANAGER", "SALES_HEAD", "HR", "MANAGEMENT", "DEPARTMENT_HEAD", "IT_MANAGER", "EMPLOYEE"].includes(value))
                       .filter(([value]) => value !== "CEO" || employee.role === "CEO" || (managerOptions || []).filter((m) => m.role === "CEO").length < 3)
                       .map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                   </SelectField>

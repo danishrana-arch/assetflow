@@ -102,8 +102,12 @@ async function syncAttendanceFromPunches({ organizationId, employeeId, deviceId,
   })
 }
 
+// Biometric device management lives under Settings, which is ADMIN/CEO-only
+// now (RequireOwner no longer includes MANAGER) — plus the legacy per-user
+// canManageAttendance override, which predates the module system and stays
+// as an admin-grantable escape hatch regardless of role.
 function management(req) {
-  return ["ADMIN", "CEO", "MANAGER"].includes(req.user?.role) || !!req.user?.canManageAttendance
+  return ["ADMIN", "CEO"].includes(req.user?.role) || !!req.user?.canManageAttendance
 }
 
 async function listDevices(req, res, next) {

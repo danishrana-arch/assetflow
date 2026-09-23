@@ -1,4 +1,5 @@
 const prisma = require("../lib/prisma")
+const { hasModuleAccess } = require("../utils/roles")
 
 function parseDate(value) {
   if (!value) return null
@@ -9,10 +10,10 @@ function parseDate(value) {
 
 async function addCertification(req, res, next) {
   try {
-    const isManagement = ["ADMIN", "CEO", "MANAGER"].includes(req.user?.role)
+    const isManagement = hasModuleAccess(req.user?.role, "certifications")
     const isSelf = req.user?.userId === req.params.id
     if (!isManagement && !isSelf) {
-      return res.status(403).json({ error: "Only the employee or an ADMIN/CEO can manage certifications" })
+      return res.status(403).json({ error: "Only the employee or a role with certification access can manage certifications" })
     }
 
     const { id: employeeId } = req.params
@@ -61,10 +62,10 @@ async function addCertification(req, res, next) {
 
 async function updateCertification(req, res, next) {
   try {
-    const isManagement = ["ADMIN", "CEO", "MANAGER"].includes(req.user?.role)
+    const isManagement = hasModuleAccess(req.user?.role, "certifications")
     const isSelf = req.user?.userId === req.params.id
     if (!isManagement && !isSelf) {
-      return res.status(403).json({ error: "Only the employee or an ADMIN/CEO can manage certifications" })
+      return res.status(403).json({ error: "Only the employee or a role with certification access can manage certifications" })
     }
 
     const { id: employeeId, certificationId } = req.params
@@ -112,10 +113,10 @@ async function updateCertification(req, res, next) {
 
 async function deleteCertification(req, res, next) {
   try {
-    const isManagement = ["ADMIN", "CEO", "MANAGER"].includes(req.user?.role)
+    const isManagement = hasModuleAccess(req.user?.role, "certifications")
     const isSelf = req.user?.userId === req.params.id
     if (!isManagement && !isSelf) {
-      return res.status(403).json({ error: "Only the employee or an ADMIN/CEO can manage certifications" })
+      return res.status(403).json({ error: "Only the employee or a role with certification access can manage certifications" })
     }
     const { id: employeeId, certificationId } = req.params
     const { organizationId } = req.user

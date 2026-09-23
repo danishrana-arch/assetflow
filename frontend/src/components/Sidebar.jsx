@@ -35,10 +35,16 @@ import {
   Mic,
   Speaker,
   Megaphone,
+  TrendingUp,
+  Handshake,
+  PieChart,
+  FileBarChart,
+  Receipt,
+  FileSpreadsheet,
 } from "lucide-react"
 import { useAuth } from "../context/AuthContext"
 import { useTheme } from "../context/ThemeContext"
-import { isManagement, canAccessPayroll } from "../utils/roles"
+import { isManagement, hasModuleAccess } from "../utils/roles"
 import { useQuery } from "@tanstack/react-query"
 import api from "../api/client"
 import Avatar from "./ui/Avatar"
@@ -160,11 +166,11 @@ export default function Sidebar({ expanded, onMouseEnter, onMouseLeave }) {
 
   const isAdmin = isManagement(user?.role)
   const isIT = user?.role === "IT_MANAGER"
-  const isOwner = ["ADMIN", "CEO", "MANAGER"].includes(user?.role)
+  const isOwner = ["ADMIN", "CEO"].includes(user?.role)
   const isDark = mode === "dark"
 
   const canManageAttendance =
-    ["ADMIN", "CEO", "HR"].includes(user?.role) || !!user?.canManageAttendance
+    hasModuleAccess(user?.role, "attendance") || !!user?.canManageAttendance
 
   const { data: unreadNotifications } = useQuery({
     queryKey: ["notifications-unread-count"],
@@ -259,21 +265,13 @@ export default function Sidebar({ expanded, onMouseEnter, onMouseLeave }) {
               expanded={expanded}
             />
 
-            <RailItem
-              to="/inventory"
-              label="Inventory"
-              icon={Boxes}
-              isDark={isDark}
-              expanded={expanded}
-            />
+            {hasModuleAccess(user?.role, "inventory") && (
+              <RailItem to="/inventory" label="Inventory" icon={Boxes} isDark={isDark} expanded={expanded} />
+            )}
 
-            <RailItem
-              to="/employees"
-              label="Employees"
-              icon={Users}
-              isDark={isDark}
-              expanded={expanded}
-            />
+            {hasModuleAccess(user?.role, "employees") && (
+              <RailItem to="/employees" label="Employees" icon={Users} isDark={isDark} expanded={expanded} />
+            )}
 
              {canManageAttendance && (
               <>
@@ -293,17 +291,23 @@ export default function Sidebar({ expanded, onMouseEnter, onMouseLeave }) {
  <RailItem to="/calendar" label="Company Calendar" icon={CalendarRange} isDark={isDark} expanded={expanded} />
             {isOwner && <RailItem to="/organization-comparison" label="Organization Comparison" icon={Landmark} isDark={isDark} expanded={expanded} />}
 
+            {hasModuleAccess(user?.role, "sales") && (
+              <RailItem to="/sales" label="Sales" icon={TrendingUp} isDark={isDark} expanded={expanded} />
+            )}
+            {hasModuleAccess(user?.role, "salesTeam") && (
+              <RailItem to="/sales-team" label="Sales Team" icon={Handshake} isDark={isDark} expanded={expanded} />
+            )}
 
-            <RailItem
-              to="/projects"
-              label="Projects"
-              icon={FolderKanban}
-              isDark={isDark}
-              expanded={expanded}
-            />
+            {hasModuleAccess(user?.role, "projects") && (
+              <RailItem to="/projects" label="Projects" icon={FolderKanban} isDark={isDark} expanded={expanded} />
+            )}
 
-            <RailItem to="/tasks" label="Tasks" icon={ListTodo} isDark={isDark} expanded={expanded} />
-            <RailItem to="/performance" label="Performance" icon={Award} isDark={isDark} expanded={expanded} />
+            {hasModuleAccess(user?.role, "tasks") && (
+              <RailItem to="/tasks" label="Tasks" icon={ListTodo} isDark={isDark} expanded={expanded} />
+            )}
+            {hasModuleAccess(user?.role, "performance") && (
+              <RailItem to="/performance" label="Performance" icon={Award} isDark={isDark} expanded={expanded} />
+            )}
 
              <RailItem
               to="/announcements"
@@ -313,30 +317,17 @@ export default function Sidebar({ expanded, onMouseEnter, onMouseLeave }) {
               expanded={expanded}
             />
 
-            <RailItem
-              to="/departments"
-              label="Departments"
-              icon={Building2}
-              isDark={isDark}
-              expanded={expanded}
-            />
+            {hasModuleAccess(user?.role, "departments") && (
+              <RailItem to="/departments" label="Departments" icon={Building2} isDark={isDark} expanded={expanded} />
+            )}
 
-            <RailItem
-              to="/asset-requests"
-              label="Asset Requests"
-              icon={PackageSearch}
-              isDark={isDark}
-              expanded={expanded}
-            />
+            {hasModuleAccess(user?.role, "assetRequests") && (
+              <RailItem to="/asset-requests" label="Asset Requests" icon={PackageSearch} isDark={isDark} expanded={expanded} />
+            )}
 
-            <RailItem
-              to="/assignments"
-              label="Assignments"
-              icon={ClipboardCheck}
-              isDark={isDark}
-              expanded={expanded}
-            />
-
+            {hasModuleAccess(user?.role, "assetAssignments") && (
+              <RailItem to="/assignments" label="Assignments" icon={ClipboardCheck} isDark={isDark} expanded={expanded} />
+            )}
 
             <RailItem
               to="/tickets"
@@ -346,38 +337,36 @@ export default function Sidebar({ expanded, onMouseEnter, onMouseLeave }) {
               expanded={expanded}
             />
 
+            {hasModuleAccess(user?.role, "leave") && (
+              <RailItem to="/leave-requests" label="Leave Requests" icon={ClipboardList} isDark={isDark} expanded={expanded} />
+            )}
 
-            <RailItem
-              to="/leave-requests"
-              label="Leave Requests"
-              icon={ClipboardList}
-              isDark={isDark}
-              expanded={expanded}
-            />
+            {hasModuleAccess(user?.role, "reports") && (
+              <>
+                <RailItem to="/reports" label="Reports" icon={BarChart3} isDark={isDark} expanded={expanded} />
+                <RailItem to="/export" label="Export" icon={Download} isDark={isDark} expanded={expanded} />
+              </>
+            )}
 
-            <RailItem
-              to="/reports"
-              label="Reports"
-              icon={BarChart3}
-              isDark={isDark}
-              expanded={expanded}
-            />
+            {hasModuleAccess(user?.role, "salesReports") && (
+              <RailItem to="/reports/sales" label="Sales Reports" icon={PieChart} isDark={isDark} expanded={expanded} />
+            )}
+            {hasModuleAccess(user?.role, "hrReports") && (
+              <RailItem to="/reports/hr" label="HR Reports" icon={FileBarChart} isDark={isDark} expanded={expanded} />
+            )}
+            {hasModuleAccess(user?.role, "financialReports") && (
+              <RailItem to="/reports/financial" label="Financial Reports" icon={Receipt} isDark={isDark} expanded={expanded} />
+            )}
 
-            <RailItem
-              to="/export"
-              label="Export"
-              icon={Download}
-              isDark={isDark}
-              expanded={expanded}
-            />
-
-            <RailItem
-              to="/audit-log"
-              label="Audit Log"
-              icon={ShieldCheck}
-              isDark={isDark}
-              expanded={expanded}
-            />
+            {isOwner && (
+              <RailItem
+                to="/audit-log"
+                label="Audit Log"
+                icon={ShieldCheck}
+                isDark={isDark}
+                expanded={expanded}
+              />
+            )}
 
             {/* Activity - different icon from Announcements */}
             <RailItem
@@ -389,7 +378,7 @@ export default function Sidebar({ expanded, onMouseEnter, onMouseLeave }) {
               showNotificationDot={hasUnreadNotifications}
             />
 
-            {isOwner && (
+            {hasModuleAccess(user?.role, "employeeForms") && (
               <RailItem
                 to="/employee-forms"
                 label="Employee Forms"
@@ -409,14 +398,11 @@ export default function Sidebar({ expanded, onMouseEnter, onMouseLeave }) {
               />
             )}
 
-            {canAccessPayroll(user?.role) && (
-              <RailItem
-                to="/payroll"
-                label="Payroll"
-                icon={Wallet}
-                isDark={isDark}
-                expanded={expanded}
-              />
+            {hasModuleAccess(user?.role, "payroll") && (
+              <>
+                <RailItem to="/payroll" label="Payroll" icon={Wallet} isDark={isDark} expanded={expanded} />
+                <RailItem to="/payroll/reports" label="Payroll Reports" icon={FileSpreadsheet} isDark={isDark} expanded={expanded} />
+              </>
             )}
           </>
         ) : isIT ? (

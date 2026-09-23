@@ -357,6 +357,166 @@ chat request (not a prepared `NN-*.patch`).
   All four now re-resolve the employee's actual `organizationId` from their
   `User` row first.
 
+## Post-module addition: role → module permission matrix (strict lockdown)
+
+Not part of the original patch set — added afterward directly, per a live
+chat request. Replaces the old flat `MANAGEMENT_ROLES` bucket (ADMIN, CEO,
+MANAGER, SALES_HEAD, HR, MANAGEMENT, DEPARTMENT_HEAD all treated as
+functionally identical almost everywhere) with a real per-role module map.
+
+- **New single source of truth**: `ROLE_MODULES` + `hasModuleAccess(role,
+  moduleKey)`, defined in both `backend/src/utils/roles.js` and
+  `frontend/src/utils/roles.js` (hand-mirrored — no shared package between
+  the two apps, so the two must be kept in sync by hand going forward).
+  `"*"` means unrestricted. CEO and ADMIN both get `"*"`. Everyone else gets
+  a fixed list:
+  - `MANAGER` ("Finance Manager"): `payroll`, `payrollReports`,
+    `financialReports`.
+  - `HR`: `employees`, `employeeForms`, `certifications`, `attendance`,
+    `leave`, `hrReports`.
+  - `SALES_HEAD`: `sales`, `salesTeam`, `projects`, `tasks`,
+    `salesReports`.
+  - `MANAGEMENT`: `employees`, `projects`, `tasks`, `attendance`,
+    `performance`, `reports`.
+  - `DEPARTMENT_HEAD`: `departments`, `employees`, `attendance`,
+    `projects`, `tasks`, `leave` — **and** these are the first roles with
+    real own-department data scoping (see below), not just nav-level
+    gating.
+  - `IT_MANAGER`: `inventory`, `assets`, `assetAssignments`,
+    `assetRequests`, `tickets` — deliberately nothing else. Confirmed and
+    tightened: `EMPLOYEE_DIRECTORY_ROLES` no longer includes it for the
+    *directory page*, though the backend still lets it call `GET
+    /employees` for the redacted asset-assignment picker Assignments.jsx
+    depends on (`stripForIT` in `employee.controller.js`) — two different
+    things that were previously conflated.
+- **Backend enforcement**: new `requireModule(moduleKey)` /
+  `requireModuleOrSelf(moduleKey)` middleware in `auth.middleware.js`,
+  replacing `requireManagement`/ad hoc role arrays on: payroll list,
+  employee list/import/reset-password/edit, certifications, employee
+  forms, departments CRUD, project/task management actions, leave
+  review/calendar, holidays, exports (each of the 4 export types gated by
+  its own module now, not one blanket check). Also fixed two real gaps
+  this surfaced: `IT_MANAGER` could see "Asset Requests" and
+  "Support/Tickets" in its own nav but got 403 reviewing/fulfilling a
+  request or updating/deleting a ticket, because those actions were
+  gated by `requireManagement`, which never included `IT_MANAGER`
+  (`asset-request.routes.js`, `ticket.routes.js`,
+  `ticket.controller.js`'s self-scoping check).
+- **Attendance permission matrix** (`backend/src/utils/permissions.js`):
+  `MANAGER` removed from `ALWAYS_FULL_ATTENDANCE_ROLES` (Finance Manager
+  has no Attendance module at all now, not even a configurable row).
+  `MANAGEMENT` and `DEPARTMENT_HEAD` now default to full access (previously
+  fell through to the generic no-access-unless-`canManageAttendance`
+  fallback) since Attendance is one of their tree modules.
+- **DEPARTMENT_HEAD real data scoping** (not just nav-level — approved
+  explicitly over "nav-only" during the design pass): own department's
+  roster only, in `employee.controller.js` (`listEmployees`, `getEmployee`)
+  and `attendance.controller.js` (`getDailyAttendance`,
+  `exportAttendanceSheet`); own department's `Department` row only, in
+  `department.controller.js`; projects/tasks scoped to "has a member from
+  my department" via a new `isProjectInDepartmentScope`/
+  `isTaskProjectInDepartmentScope` check in `project.controller.js` /
+  `task.controller.js` (blocks reaching an out-of-scope project/task by
+  guessing its id, not just hiding it from lists); leave scoped the same
+  way in `leave.controller.js` (`listLeaves`, `getLeave`, `getLeaveCalendar`,
+  `reviewLeave`). `Departments.jsx` also gates create/rename/reassign-manager
+  UI to ADMIN/CEO only now — a DEPARTMENT_HEAD only ever gets their own
+  department back from the API, so they get a read-only view of it.
+- **`RequireOwner` narrowed** from `["ADMIN","CEO","MANAGER"]` to
+  `["ADMIN","CEO"]` in `App.jsx` (Settings, Attendance Devices, Org
+  Comparison, Audit Log) — Finance Manager's module list never included
+  any of these; audit log in particular isn't a per-role tree module at
+  all, so it's kept ADMIN/CEO-only rather than reopened to every
+  management role the way `requireManagement` used to allow.
+- **Mounted two previously-dead route files**: `task.routes.js` and
+  `performance.routes.js` existed with working controllers but were never
+  `require`d in `backend/src/index.js`, so `/api/tasks` and
+  `/api/performance/:employeeId` 404'd for every role regardless of
+  permissions. Both are now mounted and gated by the module map above.
+- **New placeholder pages/nav entries** for modules with no underlying
+  feature yet: `Sales.jsx`, `SalesTeam.jsx`, `SalesReports.jsx`,
+  `HrReports.jsx`, `FinancialReports.jsx`, `PayrollReports.jsx` — all thin
+  wrappers around a shared `components/ui/ComingSoonPage.jsx`, routed and
+  nav-gated by their module key like everything else. No backend routes
+  behind them; swap in a real page + API when each one gets built.
+- **Fixed pre-existing drift** between several independently-maintained
+  "management role list" copies that had already diverged from each other
+  (`Projects.jsx`, `AdvancedCalendar.jsx`, `AttendanceSites.jsx`,
+  `attendance-site.controller.js` each had their own slightly-different
+  array — one missing `MANAGER`, another missing `SALES_HEAD`) — all now
+  call `hasModuleAccess`/`isManagement` instead of hardcoding their own
+  list.
+- **Also fixed while in `auth.controller.js`**: `canSeeCompanyOrganizations`
+  let *any* ADMIN see every organization in the org-switcher, not just a
+  main-company ADMIN, contradicting its own comment and the actual
+  enforcement in `applyOrganizationScope` — a sub-org ADMIN would see other
+  subcompanies in the switcher and get a 403 after picking one. Now
+  requires `organization.id === organization.companyId` for ADMIN and
+  IT_MANAGER alike, matching CEO (always full company-wide) and the
+  existing enforcement point.
+- **Role label**: `MANAGER` now displays as "Finance Manager" everywhere
+  (`ROLE_LABELS` in `frontend/src/utils/roles.js`); `ADMIN` displays as
+  plain "Admin" (was "Owner / Admin"). Also gave `MANAGER` payroll
+  generate/submit/edit/delete capability in `payroll.routes.js` — Payroll
+  was previously ADMIN-only despite `MANAGER` being renamed to Finance
+  Manager for exactly this purpose.
+
+## Post-module addition: TESTPLAN.md rewrite + fixes found while updating it
+
+While rewriting `TESTPLAN.md` to match the module permission map above,
+found and fixed several real inconsistencies the original rewrite missed
+(not just doc updates):
+
+- **`certification.controller.js`**: the router-level gate was updated to
+  `requireModule("certifications")` (adds HR), but each of the three
+  handlers (`addCertification`/`updateCertification`/`deleteCertification`)
+  had its own internal `isManagement = ["ADMIN","CEO","MANAGER"]` check
+  left over from before — HR would pass the router and then still get a
+  403 from the handler. Now all three use `hasModuleAccess(role,
+  "certifications")`.
+- **`employee.controller.js`**: `getEmployee`'s certifications-field
+  redaction check had the same stale hardcoded array — now
+  `hasModuleAccess(role,"certifications")`.
+- **`EmployeeForms.jsx`**: same pattern on the frontend — the page had its
+  own `if (!["ADMIN","CEO","MANAGER"].includes(role)) return null` gate
+  that would render blank for HR even after the route let them in. Now
+  `hasModuleAccess(role,"employeeForms")`.
+- **`biometric.controller.js`**: `management()` helper (gates
+  `/settings/attendance-devices`'s API) still included `MANAGER`; Settings
+  is Owner-only now, so narrowed to `["ADMIN","CEO"]` (+ legacy
+  `canManageAttendance` flag, left alone).
+- **`organization.routes.js`**: org comparison, sub-org create/delete, org
+  settings update, and the attendance-permissions matrix (get + put) were
+  all still `requireRole("ADMIN","CEO","MANAGER")` — narrowed to
+  `ADMIN,CEO` to match the frontend's `RequireOwner`, which no longer
+  includes `MANAGER`. The attendance-matrix narrowing also matches Finance
+  Manager losing Attendance entirely — it wouldn't make sense for it to
+  still configure everyone else's attendance permissions.
+- **`organization.controller.js`**: `createSubOrganization`/
+  `archiveSubOrganization` had their own internal `["ADMIN","CEO",
+  "MANAGER"]` check + a matching error message mentioning MANAGER — now
+  unreachable-for-MANAGER given the route already blocks it, but the stale
+  message would have been misleading; updated to `["ADMIN","CEO"]` and the
+  message text.
+- **Frontend drift, not caused by this rewrite but found while auditing**:
+  `Announcements.jsx`'s "create/delete" gate was hardcoded to
+  `["ADMIN","CEO","MANAGER"]`, missing `SALES_HEAD/HR/MANAGEMENT/
+  DEPARTMENT_HEAD` — those roles could always create/delete via the API
+  (`requireManagement`, unchanged) but never saw the button. Fixed to use
+  the shared `isManagement()` util. Similarly `AdvancedCalendar.jsx`'s
+  "Add event" gate was missing `MANAGER` from its hardcoded list; also
+  fixed to use `isManagement()`.
+- `TESTPLAN.md` rewritten end-to-end against the new module map — every
+  row re-verified against actual current route guards/controller checks,
+  not carried over from the pre-rewrite version. New rows added for
+  department-head data scoping, the two newly-mounted routes
+  (tasks/performance), the 6 placeholder pages, and the IT_MANAGER
+  asset-request/ticket fixes. One new **open** gap flagged rather than
+  silently fixed: `PATCH /api/employees/:id` doesn't re-check a
+  `DEPARTMENT_HEAD`'s own department against the target employee (unlike
+  the read side, which does) — left open since fixing write-side scoping
+  wasn't part of the original ask and deserves its own confirmation pass.
+
 ## Known gaps flagged by whoever prepared these patches
 
 1. **`.env` git-history check** (brief §1): run

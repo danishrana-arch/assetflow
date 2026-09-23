@@ -1,5 +1,5 @@
 const prisma = require("../lib/prisma")
-const { MANAGEMENT_ROLES } = require("../utils/roles")
+const { hasModuleAccess } = require("../utils/roles")
 const { notifyManagement, createNotification } = require("../utils/notifications")
 
 async function listTickets(req, res, next) {
@@ -10,7 +10,7 @@ async function listTickets(req, res, next) {
     const tickets = await prisma.ticket.findMany({
       where: {
         organizationId,
-        ...(!MANAGEMENT_ROLES.includes(role) ? { raisedById: userId } : {}),
+        ...(!hasModuleAccess(role, "tickets") ? { raisedById: userId } : {}),
         ...(status ? { status } : {}),
         ...(priority ? { priority } : {}),
         ...(category ? { category } : {}),

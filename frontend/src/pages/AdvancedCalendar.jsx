@@ -4,6 +4,7 @@ import { CalendarDays, ChevronLeft, ChevronRight, Plus, X } from "lucide-react"
 import { useAuth } from "../context/AuthContext"
 import api from "../api/client"
 import PageHeader from "../components/ui/PageHeader"
+import { isManagement } from "../utils/roles"
 
 const TYPES = { BIRTHDAY:"Birthday", PROJECT_DEADLINE:"Project deadline", NATIONAL_HOLIDAY:"Holiday", EMPLOYEE_LEAVE:"Leave", ANNUAL_EVENT:"Company event" }
 const fmt = d => new Date(`${d}T00:00:00Z`).toLocaleDateString(undefined,{month:"short",day:"numeric",year:"numeric",timeZone:"UTC"})
@@ -14,7 +15,7 @@ export default function AdvancedCalendar(){
   const days=new Date(year,month+1,0).getDate(), first=new Date(year,month,1).getDay(); const cells=Array.from({length:Math.ceil((first+days)/7)*7},(_,i)=>{const d=i-first+1;return d>0&&d<=days?d:null})
   const byDate=useMemo(()=>{const m={};(q.data?.calendar||[]).forEach(e=>(m[e.date]??=[]).push(e));return m},[q.data])
   const create=useMutation({mutationFn:form=>api.post("/dashboard/events",form),onSuccess:()=>{qc.invalidateQueries({queryKey:["advanced-calendar"]});setOpen(false)}})
-  const management=["ADMIN","CEO","SALES_HEAD","HR","MANAGEMENT","DEPARTMENT_HEAD"].includes(user?.role)
+  const management=isManagement(user?.role)
   return <div><PageHeader title="Company Calendar" subtitle="One calendar for birthdays, leave, deadlines, holidays and company events." backTo="/" actions={management?<button onClick={()=>setOpen(true)} className="pill-accent inline-flex items-center gap-2 px-4 py-2.5 text-xs"><Plus size={15}/> Add event</button>:null}/>
     <div className="grid gap-5 lg:grid-cols-[1.5fr_.7fr]">
       <div className="card p-5"><div className="flex items-center justify-between"><button onClick={()=>setCursor(new Date(year,month-1,1))} className="rounded-xl p-2 hover:bg-surface-2"><ChevronLeft size={18}/></button><div className="text-center"><p className="text-lg font-semibold text-ink">{cursor.toLocaleDateString(undefined,{month:"long",year:"numeric"})}</p><p className="text-xs text-muted">{q.data?.calendar?.length||0} events this month</p></div><button onClick={()=>setCursor(new Date(year,month+1,1))} className="rounded-xl p-2 hover:bg-surface-2"><ChevronRight size={18}/></button></div>

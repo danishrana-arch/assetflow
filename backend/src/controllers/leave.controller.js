@@ -1,5 +1,5 @@
 const prisma = require("../lib/prisma")
-const { MANAGEMENT_ROLES } = require("../utils/roles")
+const { hasModuleAccess } = require("../utils/roles")
 const { logAudit } = require("../utils/audit")
 const { toDateOnly } = require("../utils/date")
 const { notifyManagement, createNotification } = require("../utils/notifications")
@@ -122,18 +122,20 @@ async function createLeave(req, res, next) {
 // (optionally filtered by status / type / employeeId).
 async function listLeaves(req, res, next) {
   try {
-    const { organizationId, userId, role } = req.user
+    const { organizationId, userId, role, departmentId } = req.user
     const { status, type, employeeId } = req.query
-    const isManagement = MANAGEMENT_ROLES.includes(role)
+    const isManagement = hasModuleAccess(role, "leave")
 
     const where = {
       organizationId,
       ...(status ? { status } : {}),
       ...(type ? { type } : {}),
       ...(isManagement
-        ? employeeId
-          ? { employeeId }
-          : {}
+        ? role === "DEPARTMENT_HEAD"
+          ? { employeeId: employeeId || undefined, employee: { departmentId: departmentId || "__none__" } }
+          : employeeId
+            ? { employeeId }
+            : {}
         : { employeeId: userId }),
     }
 
@@ -154,20 +156,28 @@ async function listLeaves(req, res, next) {
 
 async function getLeave(req, res, next) {
   try {
-    const { organizationId, userId, role } = req.user
+    const { organizationId, userId, role, departmentId } = req.user
     const { id } = req.params
-    const isManagement = MANAGEMENT_ROLES.includes(role)
+    const isManagement = hasModuleAccess(role, "leave")
 
     const leave = await prisma.leaveApplication.findFirst({
       where: { id, organizationId },
       include: {
-        employee: { select: { id: true, name: true, email: true } },
+        employee: { select: { id: true, name: true, email: true, departmentId: true } },
         reviewedBy: { select: { id: true, name: true } },
       },
     })
     if (!leave) return res.status(404).json({ error: "Leave application not found" })
     if (!isManagement && leave.employeeId !== userId) {
       return res.status(403).json({ error: "You can only view your own leave applications" })
+    }
+    if (
+      isManagement &&
+      role === "DEPARTMENT_HEAD" &&
+      leave.employeeId !== userId &&
+      leave.employee.departmentId !== departmentId
+    ) {
+      return res.status(403).json({ error: "You can only view leave applications from your own department" })
     }
     res.json(leave)
   } catch (err) {
@@ -178,7 +188,7 @@ async function getLeave(req, res, next) {
 async function getLeaveBalance(req, res, next) {
   try {
     const { organizationId, userId, role } = req.user
-    const isManagement = MANAGEMENT_ROLES.includes(role)
+    const isManagement = hasModuleAccess(role, "leave")
     const employeeId = (isManagement && req.query.employeeId) || userId
 
     if (!isManagement && employeeId !== userId) {
@@ -219,7 +229,7 @@ async function getLeaveBalance(req, res, next) {
 // overlaps the given month, one row per application (management only).
 async function getLeaveCalendar(req, res, next) {
   try {
-    const { organizationId } = req.user
+    const { organizationId, role, departmentId } = req.user
     const year = parseInt(req.query.year, 10) || new Date().getFullYear()
     const month = parseInt(req.query.month, 10) || new Date().getMonth() + 1
 
@@ -232,6 +242,7 @@ async function getLeaveCalendar(req, res, next) {
         status: "APPROVED",
         startDate: { lte: monthEnd },
         endDate: { gte: monthStart },
+        ...(role === "DEPARTMENT_HEAD" ? { employee: { departmentId: departmentId || "__none__" } } : {}),
       },
       include: { employee: { select: { id: true, name: true } } },
       orderBy: { startDate: "asc" },
@@ -247,7 +258,7 @@ async function getLeaveCalendar(req, res, next) {
 // every day in the range as LEAVE on the attendance sheet.
 async function reviewLeave(req, res, next) {
   try {
-    const { organizationId, userId } = req.user
+    const { organizationId, userId, role, departmentId } = req.user
     const { id } = req.params
     const { decision, reviewNote } = req.body
 
@@ -255,8 +266,14 @@ async function reviewLeave(req, res, next) {
       return res.status(400).json({ error: "decision must be APPROVED or REJECTED" })
     }
 
-    const leave = await prisma.leaveApplication.findFirst({ where: { id, organizationId } })
+    const leave = await prisma.leaveApplication.findFirst({
+      where: { id, organizationId },
+      include: { employee: { select: { departmentId: true } } },
+    })
     if (!leave) return res.status(404).json({ error: "Leave application not found" })
+    if (role === "DEPARTMENT_HEAD" && leave.employee.departmentId !== departmentId) {
+      return res.status(404).json({ error: "Leave application not found" })
+    }
     if (leave.status !== "PENDING") {
       return res.status(400).json({ error: `This application is already ${leave.status.toLowerCase()}` })
     }

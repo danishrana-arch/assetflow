@@ -1,6 +1,6 @@
 const { verifyToken } = require("../utils/jwt")
 const prisma = require("../lib/prisma")
-const { MANAGEMENT_ROLES } = require("../utils/roles")
+const { MANAGEMENT_ROLES, hasModuleAccess } = require("../utils/roles")
 
 // Organization switching is intentionally asymmetric:
 // - MAIN COMPANY ADMIN: may switch to any active organization in the company.
@@ -108,6 +108,7 @@ async function requireAuth(req, res, next) {
         organizationId: true,
         role: true,
         status: true,
+        departmentId: true,
         organization: {
           select: {
             companyId: true,
@@ -135,6 +136,7 @@ async function requireAuth(req, res, next) {
       companyId:
         dbUser.organization?.companyId || decoded.companyId,
       role: dbUser.role,
+      departmentId: dbUser.departmentId,
     }
 
     await applyOrganizationScope(req)
@@ -193,14 +195,11 @@ function requireManagementOrSelf(req, res, next) {
   next()
 }
 
+// Inventory is IT_MANAGER-only (plus ADMIN/CEO, who have every module) —
+// MANAGER (Finance Manager) is deliberately excluded, Inventory isn't one
+// of its modules. See ROLE_MODULES in utils/roles.js.
 function requireInventoryAccess(req, res, next) {
-  const allowedRoles = [
-    "ADMIN",
-    "CEO",
-    "MANAGER",
-    "HR",
-    "IT_MANAGER",
-  ]
+  const allowedRoles = ["ADMIN", "CEO", "IT_MANAGER"]
 
   if (!req.user || !allowedRoles.includes(req.user.role)) {
     return res.status(403).json({
@@ -211,10 +210,41 @@ function requireInventoryAccess(req, res, next) {
   next()
 }
 
+// Generic module gate — the backend counterpart to hasModuleAccess() used
+// by the frontend nav/route guards. ADMIN/CEO always pass via the "*"
+// wildcard in ROLE_MODULES; every other role is checked against its own
+// fixed module list.
+function requireModule(moduleKey) {
+  return (req, res, next) => {
+    if (!req.user || !hasModuleAccess(req.user.role, moduleKey)) {
+      return res.status(403).json({
+        error: "You do not have access to this module",
+      })
+    }
+    next()
+  }
+}
+
+// Same as requireModule, but also lets a user through onto their own
+// record (e.g. PATCH /employees/:id) even without the module.
+function requireModuleOrSelf(moduleKey) {
+  return (req, res, next) => {
+    const isSelf = req.user?.userId === req.params.id
+    if (!req.user || (!hasModuleAccess(req.user.role, moduleKey) && !isSelf)) {
+      return res.status(403).json({
+        error: "You do not have access to this module",
+      })
+    }
+    next()
+  }
+}
+
 module.exports = {
   requireAuth,
   requireRole,
   requireManagement,
   requireManagementOrSelf,
   requireInventoryAccess,
+  requireModule,
+  requireModuleOrSelf,
 }

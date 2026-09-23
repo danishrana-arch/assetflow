@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Megaphone, Trash2, Plus } from "lucide-react"
 import api from "../api/client"
 import { useAuth } from "../context/AuthContext"
+import { isManagement } from "../utils/roles"
 import PageHeader from "../components/ui/PageHeader"
 import SectionHeader from "../components/ui/SectionHeader"
 import { TextField, SelectField } from "../components/ui/Field"
@@ -10,7 +11,7 @@ import useMarkNotificationsRead from "../hooks/useMarkNotificationsRead"
 
 export default function Announcements(){
  useMarkNotificationsRead("ANNOUNCEMENT")
- const {user}=useAuth(), qc=useQueryClient(), management=["ADMIN","CEO","MANAGER"].includes(user?.role)
+ const {user}=useAuth(), qc=useQueryClient(), management=isManagement(user?.role)
  const [title,setTitle]=useState(""),[body,setBody]=useState(""),[audienceType,setAudienceType]=useState("ALL"),[audienceId,setAudienceId]=useState("")
  const {data:rows=[]}=useQuery({queryKey:["announcements"],queryFn:()=>api.get("/dashboard/announcements").then(r=>r.data)})
  const {data:departments=[]}=useQuery({queryKey:["departments"],queryFn:()=>api.get("/departments").then(r=>r.data),enabled:management})

@@ -24,15 +24,20 @@ function organizationSummary(organization) {
   }
 }
 
-// CEO and a main-company ADMIN can already see every organization in the
-// company. An IT_MANAGER gets the same company-wide list, but only when
-// their own home organization *is* the main company — a sub-organization's
-// IT_MANAGER stays locked to their own org, same as a sub-organization ADMIN
+// CEO can always see every organization in the company. A main-company
+// ADMIN or a main-company IT_MANAGER gets the same company-wide list, but
+// only when their own home organization *is* the main company — a
+// sub-organization's ADMIN or IT_MANAGER stays locked to their own org
 // (see applyOrganizationScope in auth.middleware.js, which is the actual
-// enforcement point — this just decides what the org-switcher shows).
+// enforcement point — this just decides what the org-switcher shows, and
+// must stay in sync with it: an ADMIN/IT_MANAGER outside the main company
+// who could see other orgs here but not switch into them would just hit a
+// 403 after picking one).
 function canSeeCompanyOrganizations(user) {
-  if (["ADMIN", "CEO"].includes(user.role)) return true
-  if (user.role === "IT_MANAGER") return user.organization.id === user.organization.companyId
+  if (user.role === "CEO") return true
+  if (["ADMIN", "IT_MANAGER"].includes(user.role)) {
+    return user.organization.id === user.organization.companyId
+  }
   return false
 }
 
@@ -154,7 +159,7 @@ async function login(req, res, next) {
 
 // Management creates an employee account directly, with the full profile
 // filled in up front (contact details, CNIC, DOB, residence, skill, level).
-// Only the org owner (ADMIN) may set a role other than EMPLOYEE — that's
+// Only Admin may set a role other than EMPLOYEE — that's
 // how CEO/Sales Head/HR accounts get created.
 async function inviteEmployee(req, res, next) {
   try {
@@ -187,7 +192,7 @@ async function inviteEmployee(req, res, next) {
     let assignedRole = "EMPLOYEE"
     if (role !== undefined && role !== "EMPLOYEE") {
       if (!["ADMIN", "CEO"].includes(requesterRole)) {
-        return res.status(403).json({ error: "Only the organization owner or a CEO can create management accounts" })
+        return res.status(403).json({ error: "Only Admin or CEO can create management accounts" })
       }
       if (!ASSIGNABLE_ROLES.includes(role)) {
         return res.status(400).json({ error: `role must be one of: ${ASSIGNABLE_ROLES.join(", ")}` })

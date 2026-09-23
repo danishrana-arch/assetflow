@@ -2,9 +2,16 @@ const prisma = require("../lib/prisma")
 
 async function listDepartments(req, res, next) {
   try {
-    const { organizationId } = req.user
+    const { organizationId, role, departmentId } = req.user
+    // DEPARTMENT_HEAD only ever sees their own department — everyone else
+    // (who needs the list to pick a department on a filter, e.g. Employees)
+    // sees the whole org's departments, same as before.
+    const where =
+      role === "DEPARTMENT_HEAD"
+        ? { organizationId, id: departmentId || "__none__" }
+        : { organizationId }
     const departments = await prisma.department.findMany({
-      where: { organizationId },
+      where,
       include: {
         manager: { select: { id: true, name: true, email: true, role: true } },
         _count: { select: { employees: true, assets: true } },

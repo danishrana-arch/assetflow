@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Plus, X, Ticket as TicketIcon } from "lucide-react"
 import api from "../api/client"
 import { useAuth } from "../context/AuthContext"
-import { isManagement } from "../utils/roles"
+import { hasModuleAccess } from "../utils/roles"
 import PageHeader from "../components/ui/PageHeader"
 import IconChip from "../components/ui/IconChip"
 import StatusPill from "../components/ui/StatusPill"
@@ -23,7 +23,7 @@ function humanize(s) {
 export default function Tickets() {
   useMarkNotificationsRead("TICKET")
   const { user } = useAuth()
-  const isAdmin = isManagement(user?.role)
+  const isAdmin = hasModuleAccess(user?.role, "tickets")
   const [showForm, setShowForm] = useState(false)
   const [subject, setSubject] = useState("")
   const [description, setDescription] = useState("")

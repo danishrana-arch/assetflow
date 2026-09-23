@@ -5,15 +5,17 @@ const {
   exportDepartments,
   exportTickets,
 } = require("../controllers/export.controller")
-const { requireAuth, requireManagement } = require("../middleware/auth.middleware")
+const { requireAuth, requireModule } = require("../middleware/auth.middleware")
 
 const router = express.Router()
 
-router.use(requireAuth, requireManagement)
+router.use(requireAuth)
 
-router.get("/employees", exportEmployees)
-router.get("/inventory", exportInventory)
-router.get("/departments", exportDepartments)
-router.get("/tickets", exportTickets)
+// Each export is gated by the module it actually belongs to, rather than
+// one blanket "any management role" check.
+router.get("/employees", requireModule("employees"), exportEmployees)
+router.get("/inventory", requireModule("inventory"), exportInventory)
+router.get("/departments", requireModule("departments"), exportDepartments)
+router.get("/tickets", requireModule("tickets"), exportTickets)
 
 module.exports = router

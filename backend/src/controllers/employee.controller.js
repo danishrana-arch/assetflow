@@ -1,6 +1,6 @@
 const bcrypt = require("bcrypt")
 const prisma = require("../lib/prisma")
-const { MANAGEMENT_ROLES, ASSIGNABLE_ROLES, MAX_CEO_COUNT, EMPLOYEE_DIRECTORY_ROLES } = require("../utils/roles")
+const { MANAGEMENT_ROLES, ASSIGNABLE_ROLES, MAX_CEO_COUNT, EMPLOYEE_DIRECTORY_ROLES, hasModuleAccess } = require("../utils/roles")
 const { encryptField, decryptField } = require("../utils/crypto")
 const { logAudit } = require("../utils/audit")
 const { parseCsv } = require("../utils/csv")
@@ -28,8 +28,14 @@ function stripForIT(user) {
 
 async function listEmployees(req, res, next) {
   try {
-    const { organizationId, companyId, role: requesterRole } = req.user
+    const { organizationId, companyId, role: requesterRole, departmentId: requesterDepartmentId } = req.user
     const { search, department, status, page, pageSize, includeCompanyManagers } = req.query
+
+    // A DEPARTMENT_HEAD only ever sees their own department's roster,
+    // regardless of what the client asks for — this is their "own
+    // department" scoping, not a client-toggleable filter.
+    const scopedDepartment =
+      requesterRole === "DEPARTMENT_HEAD" ? requesterDepartmentId || "__none__" : department
 
     const useCompanyManagerPool = includeCompanyManagers === "true" || includeCompanyManagers === "1"
     const where = useCompanyManagerPool
@@ -38,7 +44,7 @@ async function listEmployees(req, res, next) {
             { organizationId },
             { organizationId: companyId || organizationId, role: "CEO" },
           ],
-          ...(department ? { departmentId: department } : {}),
+          ...(scopedDepartment ? { departmentId: scopedDepartment } : {}),
           ...(status ? { status } : {}),
           ...(search
             ? {
@@ -51,7 +57,7 @@ async function listEmployees(req, res, next) {
         }
       : {
           organizationId,
-          ...(department ? { departmentId: department } : {}),
+          ...(scopedDepartment ? { departmentId: scopedDepartment } : {}),
           ...(status ? { status } : {}),
           ...(search
             ? {
@@ -111,7 +117,7 @@ async function listEmployees(req, res, next) {
 
 async function getEmployee(req, res, next) {
   try {
-    const { organizationId, userId, role } = req.user
+    const { organizationId, userId, role, departmentId: requesterDepartmentId } = req.user
     const { id } = req.params
 
     // Employees can only view their own profile management roles can view anyone's.
@@ -120,7 +126,15 @@ async function getEmployee(req, res, next) {
     }
 
     const employee = await prisma.user.findFirst({
-      where: { id, organizationId },
+      where: {
+        id,
+        organizationId,
+        // DEPARTMENT_HEAD is scoped to their own department, same as the
+        // directory list — but they can always still open their own profile.
+        ...(role === "DEPARTMENT_HEAD" && id !== userId
+          ? { departmentId: requesterDepartmentId || "__none__" }
+          : {}),
+      },
       include: {
         department: true,
         organization: true,
@@ -192,9 +206,10 @@ async function getEmployee(req, res, next) {
         }
       : rest
 
-    // Certifications are visible to ADMIN/CEO/MANAGER and to the employee
-    // themselves. They are not part of other viewers' profile responses.
-    if (!(["ADMIN", "CEO", "MANAGER"].includes(role) || userId === id)) delete safe.certifications
+    // Certifications are visible to whoever has the certifications module
+    // (ADMIN/CEO/HR) and to the employee themselves. They are not part of
+    // other viewers' profile responses.
+    if (!(hasModuleAccess(role, "certifications") || userId === id)) delete safe.certifications
 
     res.json(safe)
   } catch (err) {
