@@ -64,11 +64,15 @@ export function canManageInventory(role) {
   return hasModuleAccess(role, "inventory")
 }
 
-// Gates the standalone Employees directory PAGE/nav link. IT_MANAGER is
-// deliberately excluded here even though the backend still lets it call
-// GET /employees — that's only for the redacted asset-assignment picker on
-// the Assignments page, not for opening the directory page itself. See
-// EMPLOYEE_DIRECTORY_ROLES in backend/src/utils/roles.js.
+// Gates the Employees directory PAGE/nav link. IT_MANAGER is included even
+// though it has no "employees" module — the Sidebar/MobileNav IT nav set
+// has always linked here labeled "Employees & Assets", and the backend
+// (GET /employees) already redacts the response for that role down to
+// name/email/phone/role/status/photo/designation/department/assignedAssets
+// (see stripForIT in employee.controller.js) — this is IT's asset-
+// assignment view of who has what, not an HR-style directory. See
+// EMPLOYEE_DIRECTORY_ROLES in backend/src/utils/roles.js for the matching
+// API-side exception.
 export function canViewEmployeeDirectory(role) {
-  return hasModuleAccess(role, "employees")
+  return hasModuleAccess(role, "employees") || role === "IT_MANAGER"
 }

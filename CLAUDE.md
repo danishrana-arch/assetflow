@@ -383,12 +383,21 @@ functionally identical almost everywhere) with a real per-role module map.
     real own-department data scoping (see below), not just nav-level
     gating.
   - `IT_MANAGER`: `inventory`, `assets`, `assetAssignments`,
-    `assetRequests`, `tickets` — deliberately nothing else. Confirmed and
-    tightened: `EMPLOYEE_DIRECTORY_ROLES` no longer includes it for the
-    *directory page*, though the backend still lets it call `GET
-    /employees` for the redacted asset-assignment picker Assignments.jsx
-    depends on (`stripForIT` in `employee.controller.js`) — two different
-    things that were previously conflated.
+    `assetRequests`, `tickets` — deliberately nothing else. The backend
+    lets it call `GET /employees` for the redacted asset-assignment picker
+    Assignments.jsx depends on (`stripForIT` in `employee.controller.js`),
+    server-side field redaction doing the real work either way.
+    **Correction (2026-09-23)**: the first pass of this rewrite also
+    dropped `IT_MANAGER` from the *frontend's* `canViewEmployeeDirectory`
+    (gating the `/employees` page/nav link itself), reasoning it was only
+    an API-level exception for the picker — but IT's own Sidebar/MobileNav
+    has always had an "Employees & Assets" link pointing at that exact
+    page, and it broke: clicking it redirected IT away. Restored the
+    `role === "IT_MANAGER"` exception in `frontend/src/utils/roles.js`,
+    matching the backend's `EMPLOYEE_DIRECTORY_ROLES`. This page *is* IT's
+    asset-assignment view, not an HR directory — the redaction already
+    keeps it to name/email/phone/role/status/photo/department/
+    assignedAssets, same fields Assignments.jsx's picker gets.
 - **Backend enforcement**: new `requireModule(moduleKey)` /
   `requireModuleOrSelf(moduleKey)` middleware in `auth.middleware.js`,
   replacing `requireManagement`/ad hoc role arrays on: payroll list,

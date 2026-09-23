@@ -166,6 +166,7 @@ async function getEmployee(req, res, next) {
         assignedAssets,
         tickets,
         lifecycleEvents,
+        organization,
       } = employee
 
       return res.json({
@@ -184,6 +185,11 @@ async function getEmployee(req, res, next) {
         assignedAssets,
         tickets,
         lifecycleEvents,
+        // Just the org name for the profile page's decorative banner — not
+        // sensitive, and the redacted response otherwise omitted it
+        // entirely, which made the banner fall back to "ASSETFLOW" for
+        // every profile an IT_MANAGER opened.
+        organization: organization ? { name: organization.name } : null,
       })
     }
 
