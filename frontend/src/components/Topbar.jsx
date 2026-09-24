@@ -4,6 +4,7 @@ import { useAuth } from "../context/AuthContext"
 import Avatar from "./ui/Avatar"
 import OrganizationSwitcher from "./OrganizationSwitcher"
 import NotificationBell from "./NotificationBell"
+import RoleBadge from "./RoleBadge"
 import GlobalSearch from "./GlobalSearch"
 
 export default function Topbar({ onMenuClick }) {
@@ -25,6 +26,7 @@ export default function Topbar({ onMenuClick }) {
       </div>
       <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
         <GlobalSearch className="hidden min-w-0 flex-1 sm:block sm:max-w-[360px]" />
+        <RoleBadge className="hidden border border-border bg-surface-2 sm:inline-flex" />
         <NotificationBell />
         <Link to="/profile" aria-label="Open profile">
           <Avatar name={user?.name || "?"} size="sm" />

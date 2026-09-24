@@ -7,6 +7,7 @@ import OrganizationSwitcher from "../components/OrganizationSwitcher"
 import { useAuth } from "../context/AuthContext"
 import GlobalSearch from "../components/GlobalSearch"
 import NotificationBell from "../components/NotificationBell"
+import RoleBadge from "../components/RoleBadge"
 
 // How long the cursor must stay on the sidebar before it (and the page shift
 // below) engages — long enough that a quick pass over one icon doesn't
@@ -65,6 +66,7 @@ export default function DashboardLayout() {
                   <OrganizationSwitcher />
                 </div>
               )}
+              <RoleBadge className="border border-border bg-surface/90 shadow-card backdrop-blur-xl" />
               <NotificationBell className="border border-border bg-surface/90 shadow-card backdrop-blur-xl" />
             </div>
           </div>
