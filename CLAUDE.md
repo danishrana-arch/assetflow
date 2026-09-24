@@ -860,6 +860,153 @@ Two more fixes from the same live chat thread:
     this request. A future pass revisiting `TESTPLAN.md` in full should
     fold those in properly.
 
+## Post-module fix: Performance page 404, Tasks page silent no-op
+
+Reported as "Task page, Performance page are not working properly," with a
+screenshot of `Performance` showing "Route not found: POST
+/api/performance" on submit.
+
+- **Performance page — real route-shape bug**: `performance.routes.js`
+  only ever defined `GET/POST /performance/:employeeId` (built for
+  `Employee360.jsx`, which correctly posts to `/performance/${id}`). The
+  separate standalone `Performance.jsx` page (linked from the sidebar as
+  "Performance"/"My Performance", with its own employee picker + org-wide
+  list) was written against a completely different, flat-collection API
+  shape — `GET /performance` to list, `POST /performance` with
+  `employeeId` in the body to create — that never actually existed
+  server-side. The list call 404'd silently (React Query just left
+  `reviews` as its `[]` default, so the page looked merely empty rather
+  than broken); the create call surfaced the "Route not found" error
+  visibly, which is what the screenshot caught.
+  Fixed by adding the missing shape rather than changing the page:
+  `performance.controller.js` gained `listAllPerformanceReviews` (org-wide
+  for management, self-only otherwise — same visibility rule as the
+  per-employee route, just without requiring an `employeeId` in the URL)
+  and `createPerformanceReviewForEmployee` (same validation/creation logic
+  as the existing per-employee create, refactored into a shared
+  `createReview()` helper, just reading `employeeId` from the body).
+  `performance.routes.js` now has both `GET/POST /` (new, backs
+  `Performance.jsx`) and `GET/POST /:employeeId` (unchanged, backs
+  `Employee360.jsx`) on the same router — no path conflict, since Express
+  only matches `/:employeeId` when there's an actual segment. Verified
+  both the management and self-view cases directly against the live DB
+  before considering it fixed.
+- **Tasks page — not a bug, but looked like one**: the entire database has
+  **zero `Project` rows** (checked directly). `createTask` requires a
+  `projectId` (a task belongs to a project), and `Tasks.jsx`'s submit
+  handler silently no-op'd (`if (form.projectId && form.title.trim())
+  create.mutate()`) whenever nothing was selected — with an always-empty
+  "Select project" dropdown (no projects exist to populate it), clicking
+  "Create task" did visibly nothing, no error, which reads exactly like "a
+  broken page" even though the API layer itself was verified correct end
+  to end (`listTasks`/`createTask`/`updateTask`/`deleteTask` all match
+  their routes exactly — tested `listTasks` directly against the live DB
+  with no error). Fixed the UX gap rather than inventing a missing
+  feature: the submit handler now sets a visible inline error ("Select a
+  project first." / "Task title is required.") instead of silently doing
+  nothing, and the Project field shows a hint + link to the Projects page
+  when there are no projects yet to pick from. The actual fix for Tasks
+  being usable is creating at least one project from `/projects` — that's
+  expected behavior, not something code can route around.
+
+## Post-module addition: full CRUD on Tasks and Performance pages
+
+Follow-up to the Task/Performance fixes above — both pages could Create,
+Read, and (Tasks only) partially Update, but neither had a real Update UI
+for anything but status, and neither had Delete on the review side
+(Tasks already had task deletion).
+
+- **Performance** (`backend/src/controllers/performance.controller.js`,
+  `backend/src/routes/performance.routes.js`): added
+  `updatePerformanceReview` (`PATCH /performance/:id`) and
+  `deletePerformanceReview` (`DELETE /performance/:id`), both gated the
+  same way as create (`hasModuleAccess(role,"performance")` — management
+  only). Sits on the same router as the existing `GET/POST /:employeeId`
+  per-employee routes with no path conflict — different HTTP methods on a
+  single-segment path pattern don't collide in Express, so `Employee360.jsx`
+  (which uses `/:employeeId`) is untouched. `frontend/src/pages/Performance.jsx`
+  now has an Edit (pencil) and Delete (trash) button per review card,
+  visible to management only; Edit swaps the card into an inline form
+  (period/rating/goals/achievements/feedback — matches the create form's
+  fields, employee can't be reassigned after the fact) instead of a modal,
+  consistent with the Employee Forms page's edit-in-place pattern added
+  earlier. Verified `updatePerformanceReview`'s validation (rejects an
+  out-of-range rating) and mutation directly against the live DB, then
+  reverted the test edit.
+- **Tasks** (`frontend/src/pages/Tasks.jsx`): backend `updateTask` already
+  supported editing every field (title/description/priority/assignee/due
+  date/estimated+actual hours) — the UI only ever exposed the status
+  dropdown. Added an Edit (pencil) button next to the existing Delete
+  button (both management-only), which swaps a task card into an inline
+  form covering all of those fields, reusing the same `PATCH /tasks/:id`
+  endpoint. Status stays as its own always-visible dropdown outside edit
+  mode, since a plain assignee (not just management) is allowed to update
+  status per the backend's `existing.assignedToId === userId` check, and
+  folding it into the management-only edit form would have taken that away
+  from them.
+
+## Post-module addition: Task no longer requires a Project
+
+Per a live chat request — a task should be assignable directly to
+someone without first creating a project.
+
+- `backend/prisma/schema.prisma`: `Task.projectId` changed from `String`
+  to `String?`, and its `project` relation from `Project` to `Project?`.
+  New migration
+  `backend/prisma/migrations/20260924140000_task_project_optional/migration.sql`
+  (`ALTER TABLE "Task" ALTER COLUMN "projectId" DROP NOT NULL` — the
+  existing `onDelete: Cascade` on the FK is unaffected by nullability, it
+  only fires when a non-null `projectId`'s project row is deleted).
+  **Manual step, required** — this is now the *third* pending migration
+  from this session; deploy and regenerate together:
+  ```bash
+  cd backend
+  npx prisma migrate deploy
+  npx prisma generate
+  ```
+  Until that runs, `createTask`/`updateTask` will still hit the live DB's
+  `NOT NULL` constraint on `projectId` whenever one isn't given.
+- `backend/src/controllers/task.controller.js`:
+  - `createTask` no longer requires `projectId` — only `title` is
+    mandatory now. The project-lookup/DEPARTMENT_HEAD-scope check only
+    runs when a `projectId` is actually given.
+  - **Found and fixed a real crash this change would otherwise have
+    introduced**: `updateTask`'s status-change notification did
+    `` `${task.project.name}: ...` `` unconditionally — would throw
+    "Cannot read properties of null (reading 'name')" on any project-less
+    task the moment its status changed. Now falls back to just the task
+    title when there's no project. Same fix applied to `createTask`'s
+    "New task assigned" notification.
+  - **Found and fixed the DEPARTMENT_HEAD scoping gap this change opened
+    up**: `updateTask`/`deleteTask` both scoped a DEPARTMENT_HEAD strictly
+    via `isTaskProjectInDepartmentScope(task.projectId, ...)` — called
+    with `projectId: null` this always returned `false` (no
+    `ProjectMember` row has a null `projectId`), meaning a DEPARTMENT_HEAD
+    would get a 404 "Task not found" trying to edit or delete *any*
+    project-less task, even ones assigned to their own department's
+    member. Replaced with a new `isTaskInDepartmentScope(task, ...)`
+    helper that scopes on whichever signal the task actually has: project
+    membership (unchanged), the assignee's own department (new, for a
+    project-less-but-assigned task), or — for a task with neither project
+    nor assignee — whether this department head created it themselves (so
+    their own fully-unscoped tasks don't 404 out from under them either).
+    `listTasks`'s DEPARTMENT_HEAD `OR` filter got the same third clause
+    added, for the same reason (a self-created, project-less, unassigned
+    task would otherwise vanish from their own list the instant they made
+    it).
+  - `updateTask` also gained a `projectId` field (management-only, same
+    validation as create) — a task can now have a project attached or
+    removed after creation, not just at creation time.
+- `frontend/src/pages/Tasks.jsx`: the create form's Project field is now
+  labeled "(optional)" with a "No project — assign directly" default
+  option, and no longer blocks submission when empty (only a missing
+  title does, with a visible inline error — see the earlier Tasks fix
+  above for why silent-no-op mattered here). The "no projects exist yet"
+  hint was reworded since it's no longer a blocker. The Edit form (added
+  in the CRUD pass above) gained a matching Project field. The task card
+  header falls back to "No project" instead of rendering blank when
+  `task.project` is null.
+
 ## Known gaps flagged by whoever prepared these patches
 
 1. **`.env` git-history check** (brief §1): run

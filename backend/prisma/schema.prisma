@@ -449,7 +449,7 @@ model ProjectMember {
 model Task {
   id             String       @id @default(cuid())
   organizationId String
-  projectId      String
+  projectId      String?
   title          String
   description    String?
   status         String       @default("TODO")
@@ -464,7 +464,7 @@ model Task {
   assignedTo     User?        @relation("TaskAssignee", fields: [assignedToId], references: [id])
   createdBy      User?        @relation("TaskCreator", fields: [createdById], references: [id])
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  project        Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project        Project?     @relation(fields: [projectId], references: [id], onDelete: Cascade)
   TimeEntry      TimeEntry[]
 
   @@index([organizationId, status])
