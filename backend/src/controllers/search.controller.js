@@ -19,7 +19,7 @@ async function globalSearch(req, res, next) {
     }
 
     const contains = { contains: q, mode: "insensitive" }
-    const isManagement = MANAGEMENT_ROLES.includes(role) || role === "MANAGER"
+    const isManagement = MANAGEMENT_ROLES.includes(role)
     const isIT = role === "IT_MANAGER"
 
     const [

@@ -21,7 +21,7 @@ function money(n) {
 
 export default function Payroll() {
   const { user } = useAuth()
-  const canManagePayroll = ["ADMIN", "MANAGER"].includes(user?.role)
+  const canManagePayroll = user?.role === "ADMIN"
   const isCeo = user?.role === "CEO"
   const queryClient = useQueryClient()
   const now = new Date()

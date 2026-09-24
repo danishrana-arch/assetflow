@@ -2,15 +2,10 @@ const prisma = require("../lib/prisma")
 
 // These roles are always full-access on Attendance and can never be
 // downgraded through the AttendancePermission table — the Settings matrix
-// only ever shows/edits the other, configurable roles. MANAGER (Finance
-// Manager) is deliberately excluded: Attendance isn't one of its modules
-// at all, not even a configurable/no-access row — see ROLE_MODULES in
-// utils/roles.js.
+// only ever shows/edits the other, configurable roles.
 const ALWAYS_FULL_ATTENDANCE_ROLES = ["ADMIN", "CEO"]
 
-// Roles an ADMIN/CEO can actually configure from the matrix. MANAGER isn't
-// listed — Attendance isn't one of its modules, so there's nothing to
-// configure; it stays NO_ACCESS unconditionally.
+// Roles an ADMIN/CEO can actually configure from the matrix.
 const CONFIGURABLE_ATTENDANCE_ROLES = [
   "HR",
   "MANAGEMENT",

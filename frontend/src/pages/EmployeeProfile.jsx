@@ -5,7 +5,7 @@ import {
   BadgeCheck, Plus, X, Boxes, Ticket as TicketIcon, Activity, UserX, Pencil, Check,
   Mail, Phone, KeyRound, ChevronDown, ChevronUp, Laptop, PackageSearch, MapPin,
   Calendar, Users as ManagerIcon, Briefcase, Send, AlertTriangle, Save, Minus,
-  BriefcaseBusiness, UserRoundCheck, CalendarRange,
+  BriefcaseBusiness, UserRoundCheck, CalendarRange, ShieldCheck,
 } from "lucide-react"
 import api from "../api/client"
 import { useAuth } from "../context/AuthContext"
@@ -805,6 +805,10 @@ export default function EmployeeProfile() {
               {organization?.name ? ` · ${organization.name}` : ""}
             </p>
             <div className="mt-2 flex flex-wrap items-center justify-center gap-1.5">
+              <span className="inline-flex items-center gap-1 rounded-full bg-chip-blue-bg px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-chip-blue-fg">
+                <ShieldCheck size={11} strokeWidth={2.5} />
+                {ROLE_LABELS[employee.role] || employee.role}
+              </span>
               <StatusBadge type="employee" status={employee.status} />
               {level && (
                 <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide bg-chip-${levelTone}-bg text-chip-${levelTone}-fg`}>
@@ -927,7 +931,7 @@ export default function EmployeeProfile() {
                   </SelectField>
                   <SelectField label="Role" value={editForm.role} onChange={(e) => setEditForm((f) => ({ ...f, role: e.target.value }))}>
                     {Object.entries(ROLE_LABELS)
-                      .filter(([value]) => ["ADMIN", "CEO", "MANAGER", "HR", "MANAGEMENT", "DEPARTMENT_HEAD", "IT_MANAGER", "EMPLOYEE"].includes(value))
+                      .filter(([value]) => ["ADMIN", "CEO", "HR", "MANAGEMENT", "DEPARTMENT_HEAD", "IT_MANAGER", "EMPLOYEE"].includes(value))
                       .filter(([value]) => value !== "CEO" || employee.role === "CEO" || (managerOptions || []).filter((m) => m.role === "CEO").length < 3)
                       .map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                   </SelectField>

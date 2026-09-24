@@ -27,7 +27,7 @@ const PRESETS = [
 export default function Settings() {
   const { user, organizations, refreshUser, switchOrganization } = useAuth()
   const isCeo = user?.role === "CEO"
-  const canEditSchedule = ["ADMIN", "CEO", "MANAGER"].includes(user?.role)
+  const canEditSchedule = ["ADMIN", "CEO"].includes(user?.role)
   const queryClient = useQueryClient()
   const { applyAccent } = useTheme()
   const [name, setName] = useState("")
@@ -59,7 +59,7 @@ export default function Settings() {
   const [payrollError, setPayrollError] = useState("")
   const [attendanceMatrix, setAttendanceMatrix] = useState([])
   const [permissionsError, setPermissionsError] = useState("")
-  const isOwnerTier = user?.role === "ADMIN" || user?.role === "CEO" || user?.role === "MANAGER"
+  const isOwnerTier = user?.role === "ADMIN" || user?.role === "CEO"
 
   const { data: organization } = useQuery({
     queryKey: ["organization"],

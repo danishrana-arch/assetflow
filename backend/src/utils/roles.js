@@ -1,7 +1,6 @@
 const MANAGEMENT_ROLES = [
   "ADMIN",
   "CEO",
-  "MANAGER",
   "HR",
   "MANAGEMENT",
   "DEPARTMENT_HEAD",
@@ -10,7 +9,6 @@ const MANAGEMENT_ROLES = [
 const ASSIGNABLE_ROLES = [
   "ADMIN",
   "CEO",
-  "MANAGER",
   "HR",
   "MANAGEMENT",
   "EMPLOYEE",
@@ -41,10 +39,13 @@ const MAX_CEO_COUNT = 3
 // then restored the same day at the user's request — HR Reports is a real
 // part of the app. "payrollReports" is kept (Payroll Reports page, still a
 // placeholder).
+// The MANAGER role ("Finance Manager") was removed entirely on 2026-09-24
+// (see UserRole enum) — 0 live users held it, so no reassignment was
+// needed. ADMIN/CEO already cover payroll/payrollReports via the "*"
+// wildcard, so nothing else needed to pick those modules up.
 const ROLE_MODULES = {
   CEO: ["*"],
   ADMIN: ["*"],
-  MANAGER: ["payroll", "payrollReports"],
   HR: ["employees", "employeeForms", "certifications", "attendance", "leave", "hrReports"],
   MANAGEMENT: ["employees", "projects", "tasks", "attendance", "performance", "reports"],
   DEPARTMENT_HEAD: ["departments", "employees", "attendance", "projects", "tasks", "leave"],

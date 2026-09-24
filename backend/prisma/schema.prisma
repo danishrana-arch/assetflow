@@ -894,7 +894,6 @@ enum PlanTier {
 
 enum UserRole {
   ADMIN
-  MANAGER
   EMPLOYEE
   CEO
   HR

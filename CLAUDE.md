@@ -795,6 +795,71 @@ Three fixes from a live chat request:
   layout wraps every route, so the bell is now visible up top for every
   role, CEO through employee, not just on mobile.
 
+## Post-module addition: role badge on Employee Profile, MANAGER role removed entirely
+
+Two more fixes from the same live chat thread:
+
+- **Role badge on `/employees/:id`**: the profile header card (avatar, name,
+  department, status/level/work-location chips) had no indication of the
+  viewed employee's role anywhere. Added a small badge — reusing
+  `ROLE_LABELS` from `utils/roles.js` (already imported for the role-edit
+  dropdown, just not used for display) — as the first chip in that row, so
+  every profile now visibly shows CEO/Admin/HR/etc. at a glance, for
+  whoever's viewing it (any role, on anyone's profile they're allowed to
+  open).
+- **`MANAGER` ("Finance Manager") role removed entirely**, same pattern as
+  the `SALES_HEAD` removal on 2026-09-23: checked the live Neon DB first —
+  **0 `User` rows and 0 `AttendancePermission` rows** referenced `MANAGER`,
+  so unlike `SALES_HEAD` (one live user needing reassignment), this was a
+  straight removal with no data migration step beyond the enum rebuild.
+  - New migration `backend/prisma/migrations/20260924130000_remove_manager_role/migration.sql`
+    (same enum-rebuild pattern as the `SALES_HEAD` migration — Postgres
+    can't drop a single enum value directly). **Manual step, required**,
+    same as always: `cd backend && npx prisma migrate deploy && npx prisma
+    generate` (this can run in the same pass as the still-outstanding
+    `20260924120000_employee_form_submission_optional_fields` migration
+    from earlier the same day — both are pending on the live DB).
+  - Removed `MANAGER` from `UserRole` in `schema.prisma`, from
+    `MANAGEMENT_ROLES`/`ASSIGNABLE_ROLES`/`ROLE_MODULES` in both
+    `utils/roles.js` files, and from `ROLE_LABELS` (frontend) — "Finance
+    Manager" no longer exists as a label or a role.
+  - Since `MANAGER` held `payroll`+`payrollReports` only, and ADMIN/CEO
+    already cover every module via the `"*"` wildcard, nothing lost access
+    to Payroll/Payroll Reports as a result — those pages simply have one
+    fewer role that could reach them.
+  - Backend cleanup: `payroll.routes.js` narrowed `generate`/`submit`/
+    `PATCH :id` from `ADMIN,MANAGER` to `ADMIN` only, and `DELETE :id` from
+    `ADMIN,CEO,MANAGER` to `ADMIN,CEO`; `search.controller.js` dropped a
+    redundant `|| role === "MANAGER"` (already covered by
+    `MANAGEMENT_ROLES.includes(role)` before `MANAGER` was in that list, so
+    this was dead weight even before removal). Stale explanatory comments
+    referencing "MANAGER (Finance Manager) is deliberately excluded" were
+    cleaned up in `auth.middleware.js`, `attendance-site.controller.js`,
+    `organization.routes.js`, `biometric.controller.js`, and
+    `utils/permissions.js` — none of these needed functional changes, since
+    `MANAGER` was already excluded from all of their role arrays before
+    today (Attendance/Inventory/Settings/Org-settings were never part of
+    its module list to begin with).
+  - Frontend cleanup: every remaining hardcoded role array that still
+    listed `"MANAGER"` alongside the shared-util-driven ones —
+    `EmployeeProfile.jsx`'s inline role-select filter, `Payroll.jsx`'s
+    `canManagePayroll`, `Dashboard.jsx`'s locally-defined `isManagement`/
+    `isManager` (these duplicate-list-drift variables were flagged as a
+    known pattern during the earlier module-permission-matrix rewrite —
+    this is another instance of the same drift, fixed the same way: just
+    dropped `MANAGER` rather than rewiring to the shared `isManagement()`
+    util, to keep this change minimal), and `Settings.jsx`'s
+    `canEditSchedule`/`isOwnerTier`.
+  - `TESTPLAN.md`: added a removal banner in §0 (same treatment as the
+    `SALES_HEAD` banner), updated the role table (6 roles now, not 7) and
+    the "Owner"/"Management (N)"/"Payroll module"/"Inventory module" group
+    definitions. Unlike the `SALES_HEAD` removal, did **not** do a full
+    end-to-end rewrite of every individual test row still mentioning
+    `MANAGER`/"Finance Manager" (~50 rows) — those are flagged as
+    historical via the banner instead, since a full rewrite wasn't part of
+    this request. A future pass revisiting `TESTPLAN.md` in full should
+    fold those in properly.
+
 ## Known gaps flagged by whoever prepared these patches
 
 1. **`.env` git-history check** (brief §1): run

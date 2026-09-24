@@ -1,7 +1,6 @@
 export const MANAGEMENT_ROLES = [
   "ADMIN",
   "CEO",
-  "MANAGER",
   "HR",
   "MANAGEMENT",
   "DEPARTMENT_HEAD",
@@ -11,7 +10,6 @@ export const ROLE_LABELS = {
   CEO: "CEO",
   ADMIN: "Admin",
   HR: "HR",
-  MANAGER: "Finance Manager",
   MANAGEMENT: "Management",
   DEPARTMENT_HEAD: "Department Head",
   IT_MANAGER: "IT Manager",
@@ -33,10 +31,12 @@ export const ROLE_LABELS = {
 // removed and then restored the same day at the user's request — HR
 // Reports is a real part of the app. "payrollReports" is kept (Payroll
 // Reports page, still a placeholder).
+// The MANAGER role ("Finance Manager") was removed entirely on 2026-09-24
+// (see UserRole enum) — ADMIN/CEO already cover payroll/payrollReports via
+// the "*" wildcard.
 export const ROLE_MODULES = {
   CEO: ["*"],
   ADMIN: ["*"],
-  MANAGER: ["payroll", "payrollReports"],
   HR: ["employees", "employeeForms", "certifications", "attendance", "leave", "hrReports"],
   MANAGEMENT: ["employees", "projects", "tasks", "attendance", "performance", "reports"],
   DEPARTMENT_HEAD: ["departments", "employees", "attendance", "projects", "tasks", "leave"],
@@ -63,8 +63,7 @@ export function canAccessPayroll(role) {
 }
 
 // IT_MANAGER's own inventory area (Inventory/Assets/Asset Assignments/Asset
-// Requests) — ADMIN/CEO always pass via the wildcard. MANAGER (Finance
-// Manager) is deliberately excluded: Inventory isn't one of its modules.
+// Requests) — ADMIN/CEO always pass via the wildcard.
 export function canManageInventory(role) {
   return hasModuleAccess(role, "inventory")
 }

@@ -195,9 +195,8 @@ function requireManagementOrSelf(req, res, next) {
   next()
 }
 
-// Inventory is IT_MANAGER-only (plus ADMIN/CEO, who have every module) —
-// MANAGER (Finance Manager) is deliberately excluded, Inventory isn't one
-// of its modules. See ROLE_MODULES in utils/roles.js.
+// Inventory is IT_MANAGER-only (plus ADMIN/CEO, who have every module).
+// See ROLE_MODULES in utils/roles.js.
 function requireInventoryAccess(req, res, next) {
   const allowedRoles = ["ADMIN", "CEO", "IT_MANAGER"]
 

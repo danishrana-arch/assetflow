@@ -35,16 +35,31 @@ directly), and from every role list in `backend/src/utils/roles.js` and
 `frontend/src/utils/roles.js`. One real active user had this role (Ali
 Sher Farooqi, CostBidding org) and was reassigned before the migration
 ran; a `prisma/seed.js` test fixture using this role was changed to
-`MANAGEMENT`. **A role list that still shows 7 management-tier roles
-anywhere below is describing pre-2026-09-23 history, not something you can
-still reproduce by logging in as `SALES_HEAD` — that login no longer
-exists.** Table below has 7 roles total, not 8.
+`MANAGEMENT`.
+
+**`MANAGER` ("Finance Manager") was removed entirely on 2026-09-24**, same
+pattern: dropped from `UserRole` in `schema.prisma` (migration
+`20260924130000_remove_manager_role`), and from every role list in both
+`utils/roles.js` files, `payroll.routes.js`'s route guards (generate/
+submit/patch narrowed to `ADMIN` only; delete to `ADMIN,CEO`),
+`search.controller.js`, and every hardcoded frontend role-array
+(`EmployeeProfile.jsx`'s role-select options, `Payroll.jsx`'s
+`canManagePayroll`, `Dashboard.jsx`'s local `isManagement`/`isManager`,
+`Settings.jsx`'s `canEditSchedule`/`isOwnerTier`). 0 live users held this
+role on the Neon DB and 0 stale `AttendancePermission` rows referenced it
+(checked before writing the migration — no reassignment step needed, unlike
+`SALES_HEAD`). ADMIN/CEO already had `payroll`/`payrollReports` via the
+`*` wildcard, so nothing lost access to Payroll/Payroll Reports as a
+result. **Any row below that grants, restricts, or tests `MANAGER`/
+"Finance Manager" access is describing pre-2026-09-24 history — that login
+no longer exists, and this file's individual test rows below were not all
+rewritten to remove those mentions (see the 2026-09-23 `SALES_HEAD` note
+above for the same caveat).** Table below has 6 roles total, not 7.
 
 | Role | Label in UI | Modules (`ROLE_MODULES`) |
 |---|---|---|
 | `ADMIN` | "Admin" (was "Owner / Admin") | `*` (everything) |
 | `CEO` | "CEO" | `*` (everything); sole role for payroll approve/reject/mark-paid/bulk-delete and `set-main` company; max 3 users per org (`MAX_CEO_COUNT = 3`) |
-| `MANAGER` | **"Finance Manager"** (was "Manager") | `payroll`, `payrollReports` — **only**. No Employees, Inventory, Attendance, Leave, Departments, Settings, Audit Log, or Org Comparison. |
 | `HR` | "HR" | `employees`, `employeeForms`, `certifications`, `attendance`, `leave`, `hrReports` |
 | `MANAGEMENT` | "Management" | `employees`, `projects`, `tasks`, `attendance`, `performance`, `reports` |
 | `DEPARTMENT_HEAD` | "Department Head" | `departments`, `employees`, `attendance`, `projects`, `tasks`, `leave` — **and** these six are scoped to the department head's own department at the data layer, not just hidden in nav (see §4/§6/§9/§6d) |
@@ -64,27 +79,32 @@ no backend behind it yet, but the module/page/nav entry all still exist
 (`ADMIN,CEO,MANAGER`).
 
 Role groups referenced repeatedly below:
-- **Owner** = `ADMIN, CEO` **only** (was `ADMIN, CEO, MANAGER` — narrowed
-  when `MANAGER` became Finance Manager; `RequireOwner` in `App.jsx` and
-  the org-settings/attendance-matrix routes in `organization.routes.js`
-  both changed accordingly).
-- **Management (6)** = `ADMIN, CEO, MANAGER, HR, MANAGEMENT,
-  DEPARTMENT_HEAD` (was "Management (6)" — `SALES_HEAD` removed, see
-  banner above; rows below written before 2026-09-23 may still say
-  "Management (6)" or list `SALES_HEAD` in a "these roles lost X" sentence
-  — read that as historical, the count is 6 now). This is the **old,
-  still-in-use-in-places** broad bucket (`isManagement()` / `MANAGEMENT_ROLES`
-  / backend `requireManagement` middleware). Deliberately **not** narrowed
-  everywhere — it's still the gate for announcements, calendar events,
-  work-categories read/write visibility of dashboard widgets, and the
-  leave/holiday/project-adjacent bits that aren't one of the specific tree
-  modules. Don't assume every row using "Management (6)"/"Management (6)"
-  got the module treatment — check the specific row.
-- **Payroll module** = `ADMIN, CEO, MANAGER` (was `ADMIN,CEO,MANAGER,HR,
-  MANAGEMENT` — HR and MANAGEMENT lost payroll access entirely).
+- **Owner** = `ADMIN, CEO` **only** (was `ADMIN, CEO, MANAGER` back when
+  `MANAGER` still existed as Finance Manager; `RequireOwner` in `App.jsx`
+  and the org-settings/attendance-matrix routes in `organization.routes.js`
+  both changed accordingly, and `MANAGER` itself is gone now — see banner
+  above).
+- **Management (5)** = `ADMIN, CEO, HR, MANAGEMENT, DEPARTMENT_HEAD` (was
+  "Management (6)" including `MANAGER`, before its 2026-09-24 removal, and
+  "Management (7)" including `SALES_HEAD` before that — see both banners
+  above; rows below written before either removal may still say
+  "Management (6)"/"Management (7)" or list `MANAGER`/`SALES_HEAD` in a
+  "these roles lost X" sentence — read that as historical, the count is 5
+  now). This is the **old, still-in-use-in-places** broad bucket
+  (`isManagement()` / `MANAGEMENT_ROLES` / backend `requireManagement`
+  middleware). Deliberately **not** narrowed everywhere — it's still the
+  gate for announcements, calendar events, work-categories read/write
+  visibility of dashboard widgets, and the leave/holiday/project-adjacent
+  bits that aren't one of the specific tree modules. Don't assume every row
+  using "Management (6)"/"Management (7)" got the module treatment — check
+  the specific row.
+- **Payroll module** = `ADMIN, CEO` only now (`MANAGER` — the only other
+  role that ever had it — was removed 2026-09-24; before that it was
+  `ADMIN,CEO,MANAGER`, and before that `ADMIN,CEO,MANAGER,HR,MANAGEMENT` —
+  HR and MANAGEMENT lost payroll access entirely back on 2026-09-23).
 - **Inventory module** = `ADMIN, CEO, IT_MANAGER` (was `ADMIN,CEO,MANAGER,
   IT_MANAGER` — MANAGER lost inventory entirely, including Assignments and
-  Asset Requests review/fulfill).
+  Asset Requests review/fulfill, before being removed as a role outright).
 - **Employees module** = `ADMIN, CEO, HR, MANAGEMENT, DEPARTMENT_HEAD`
   (was Management-6 + `IT_MANAGER`; `MANAGER` and `SALES_HEAD` lost the
   directory page/module entirely). `IT_MANAGER` is **not** in this module

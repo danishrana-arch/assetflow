@@ -21,10 +21,7 @@ router.use(requireAuth)
 
 router.get("/", getOrganization)
 router.get("/company", listCompanyOrganizations)
-// ADMIN/CEO only — matches the frontend's RequireOwner, which no longer
-// includes MANAGER (Finance Manager's module list is payroll-only; it has
-// no more claim on org settings/structure or the attendance matrix than
-// HR or any other non-owner role does).
+// ADMIN/CEO only — matches the frontend's RequireOwner.
 router.get("/comparison", requireRole("ADMIN", "CEO"), getOrganizationComparison)
 router.post("/suborganizations", requireRole("ADMIN", "CEO"), createSubOrganization)
 router.delete("/suborganizations/:id", requireRole("ADMIN", "CEO"), archiveSubOrganization)

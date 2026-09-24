@@ -4,8 +4,6 @@ const prisma = require("../lib/prisma")
 const { distanceMeters } = require("../utils/geo")
 const { normalizeBoundary, siteDistance, polygonCentroid, polygonPerimeterMeters, polygonAreaSqMeters } = require("../utils/site-geofence")
 
-// MANAGER (Finance Manager) is deliberately excluded — Attendance (sites
-// included) isn't one of its modules. See ROLE_MODULES in utils/roles.js.
 const MANAGEMENT = ["ADMIN", "CEO", "HR", "MANAGEMENT", "DEPARTMENT_HEAD"]
 
 function isManagement(req) {
