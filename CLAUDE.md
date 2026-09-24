@@ -1007,6 +1007,36 @@ someone without first creating a project.
   header falls back to "No project" instead of rendering blank when
   `task.project` is null.
 
+## Post-module addition: ADMIN/CEO profile protection
+
+Per a live chat request: an ADMIN can't delete or remove a CEO, and only
+ADMIN/CEO can make changes to an ADMIN or CEO profile.
+
+- `employee.controller.js` `updateEmployee`: 403 if the target is ADMIN/CEO
+  and the requester isn't ADMIN/CEO (blocks HR/MANAGEMENT/DEPARTMENT_HEAD,
+  who hold the `employees` module). Also 403 if a non-CEO tries to change a
+  CEO's `role` or `status` — demoting or marking a CEO "Left Company" is
+  effectively removal, which `deleteEmployee` already restricted to CEOs
+  (that delete check was already in place; unchanged).
+- **Fixed a pre-existing bug along the way**: the role-change guard fired on
+  *any* `role` in the request body, and `EmployeeProfile.jsx`'s edit form
+  always sends the current role back unchanged — so HR/MANAGEMENT/
+  DEPARTMENT_HEAD saving *any* profile edit got a 403 "Only the
+  organization owner or a CEO can change roles". Now only fires when the
+  role actually changes.
+- `certification.controller.js`: same ADMIN/CEO-profile protection on
+  add/update/delete (HR has the `certifications` module and could
+  otherwise edit an ADMIN/CEO's certifications). Self is always allowed.
+- `EmployeeProfile.jsx`: `canEditFully`/`canManageCertifications` now also
+  require the viewer to be ADMIN/CEO (or self) when the profile is
+  ADMIN/CEO; the Remove button is hidden on CEO profiles; Role select is
+  disabled for non-ADMIN/CEO viewers and for an ADMIN on a CEO profile;
+  Status select is disabled for a non-CEO on a CEO profile. These gates
+  moved below the `employee` query since they need the target's role.
+- Verified against the live DB (non-mutating — all return before any
+  write): HR edit CEO, MANAGEMENT edit CEO, ADMIN deactivate CEO, ADMIN
+  demote CEO, ADMIN delete CEO → all 403.
+
 ## Known gaps flagged by whoever prepared these patches
 
 1. **`.env` git-history check** (brief §1): run

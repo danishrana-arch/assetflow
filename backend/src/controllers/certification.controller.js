@@ -1,6 +1,18 @@
 const prisma = require("../lib/prisma")
 const { hasModuleAccess } = require("../utils/roles")
 
+// ADMIN/CEO profiles can only be changed by an ADMIN, a CEO, or themselves.
+async function isProtectedProfileForRequester(req, employeeId) {
+  if (["ADMIN", "CEO"].includes(req.user?.role) || req.user?.userId === employeeId) return false
+  const target = await prisma.user.findFirst({
+    where: { id: employeeId, organizationId: req.user.organizationId },
+    select: { role: true },
+  })
+  return !!target && ["ADMIN", "CEO"].includes(target.role)
+}
+
+const PROTECTED_PROFILE_ERROR = { error: "Only an Admin or CEO can edit an Admin or CEO profile" }
+
 function parseDate(value) {
   if (!value) return null
   const date = new Date(value)
@@ -15,6 +27,7 @@ async function addCertification(req, res, next) {
     if (!isManagement && !isSelf) {
       return res.status(403).json({ error: "Only the employee or a role with certification access can manage certifications" })
     }
+    if (await isProtectedProfileForRequester(req, req.params.id)) return res.status(403).json(PROTECTED_PROFILE_ERROR)
 
     const { id: employeeId } = req.params
     const { organizationId } = req.user
@@ -67,6 +80,7 @@ async function updateCertification(req, res, next) {
     if (!isManagement && !isSelf) {
       return res.status(403).json({ error: "Only the employee or a role with certification access can manage certifications" })
     }
+    if (await isProtectedProfileForRequester(req, req.params.id)) return res.status(403).json(PROTECTED_PROFILE_ERROR)
 
     const { id: employeeId, certificationId } = req.params
     const { organizationId } = req.user
@@ -118,6 +132,7 @@ async function deleteCertification(req, res, next) {
     if (!isManagement && !isSelf) {
       return res.status(403).json({ error: "Only the employee or a role with certification access can manage certifications" })
     }
+    if (await isProtectedProfileForRequester(req, req.params.id)) return res.status(403).json(PROTECTED_PROFILE_ERROR)
     const { id: employeeId, certificationId } = req.params
     const { organizationId } = req.user
     const existing = await prisma.certification.findFirst({

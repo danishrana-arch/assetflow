@@ -64,12 +64,7 @@ export default function EmployeeProfile() {
   const canManageAssets = canManageInventory(user?.role)
   const isIT = user?.role === "IT_MANAGER"
   const isSelf = user?.id === id
-  // Management can edit every field on anyone (including themselves); a
-  // non-management viewer can only edit their own phone/email.
-  const canEditFully = hasModuleAccess(user?.role, "employees")
-  const canEditContactOnly = !canEditFully && isSelf && user?.role !== "IT_MANAGER"
-  // Only the Owner (ADMIN) can remove an employee outright.
-  const canRemoveEmployee = user?.role === "ADMIN" && user?.id !== id
+  const viewerIsOwnerTier = ["ADMIN", "CEO"].includes(user?.role)
   const [showAssignForm, setShowAssignForm] = useState(false)
   const [showAddAssetForm, setShowAddAssetForm] = useState(false)
   const [newAsset, setNewAsset] = useState({ name: "", category: "", serialNumber: "", cpu: "", ram: "", storage: "", purchaseDate: "", warrantyEnd: "" })
@@ -86,12 +81,25 @@ export default function EmployeeProfile() {
   const [usageDrafts, setUsageDrafts] = useState({}) // { [assetId]: { notUsing: bool, actual: string } }
   const [usageSubmitted, setUsageSubmitted] = useState({}) // { [assetId]: true }
   const [certificateDrafts, setCertificateDrafts] = useState([])
-  const canManageCertifications = hasModuleAccess(user?.role, "certifications") || isSelf
 
   const { data: employee, isLoading } = useQuery({
     queryKey: ["employee", id],
     queryFn: () => api.get(`/employees/${id}`).then((r) => r.data),
   })
+
+  // ADMIN/CEO profiles can only be changed by an ADMIN or CEO — mirrors the
+  // backend's check in updateEmployee/certification.controller.js.
+  const isProtectedTarget = ["ADMIN", "CEO"].includes(employee?.role)
+  const canTouchThisProfile = !isProtectedTarget || viewerIsOwnerTier || isSelf
+  // Management can edit every field on anyone (including themselves); a
+  // non-management viewer can only edit their own phone/email.
+  const canEditFully = hasModuleAccess(user?.role, "employees") && canTouchThisProfile
+  const canEditContactOnly = !canEditFully && isSelf && user?.role !== "IT_MANAGER"
+  // Only the Owner (ADMIN) can remove an employee outright — and never a CEO.
+  const canRemoveEmployee = user?.role === "ADMIN" && !isSelf && employee?.role !== "CEO"
+  // An ADMIN editing a CEO can't demote or deactivate them (that's removal).
+  const canChangeRoleAndStatus = viewerIsOwnerTier && !(employee?.role === "CEO" && user?.role !== "CEO")
+  const canManageCertifications = (hasModuleAccess(user?.role, "certifications") || isSelf) && canTouchThisProfile
 
   useEffect(() => {
     if (!employee) return
@@ -929,7 +937,7 @@ export default function EmployeeProfile() {
                     <option value="">None</option>
                     {(departments || []).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
                   </SelectField>
-                  <SelectField label="Role" value={editForm.role} onChange={(e) => setEditForm((f) => ({ ...f, role: e.target.value }))}>
+                  <SelectField label="Role" value={editForm.role} disabled={!canChangeRoleAndStatus} onChange={(e) => setEditForm((f) => ({ ...f, role: e.target.value }))}>
                     {Object.entries(ROLE_LABELS)
                       .filter(([value]) => ["ADMIN", "CEO", "HR", "MANAGEMENT", "DEPARTMENT_HEAD", "IT_MANAGER", "EMPLOYEE"].includes(value))
                       .filter(([value]) => value !== "CEO" || employee.role === "CEO" || (managerOptions || []).filter((m) => m.role === "CEO").length < 3)
@@ -941,7 +949,7 @@ export default function EmployeeProfile() {
                       <option key={manager.id} value={manager.id}>{manager.name} — {ROLE_LABELS[manager.role] || manager.role}</option>
                     ))}
                   </SelectField>
-                  <SelectField label="Status" value={editForm.status} onChange={(e) => setEditForm((f) => ({ ...f, status: e.target.value }))}>
+                  <SelectField label="Status" value={editForm.status} disabled={employee.role === "CEO" && user?.role !== "CEO"} onChange={(e) => setEditForm((f) => ({ ...f, status: e.target.value }))}>
                     <option value="ACTIVE">Active</option>
                     <option value="ON_LEAVE">On Leave</option>
                     <option value="LEFT_COMPANY">Left Company</option>

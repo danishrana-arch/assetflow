@@ -272,6 +272,22 @@ async function updateEmployee(req, res, next) {
     const existing = await prisma.user.findFirst({ where: { id, organizationId } })
     if (!existing) return res.status(404).json({ error: "Employee not found" })
 
+    const requesterIsOwnerTier = ["ADMIN", "CEO"].includes(requesterRole)
+    if (["ADMIN", "CEO"].includes(existing.role) && !requesterIsOwnerTier) {
+      return res.status(403).json({ error: "Only an Admin or CEO can edit an Admin or CEO profile" })
+    }
+    // An ADMIN may edit a CEO's details, but not remove them by demoting
+    // or deactivating them — that's the same as deleting, which only a CEO
+    // may do to another CEO (see deleteEmployee).
+    if (existing.role === "CEO" && requesterRole !== "CEO") {
+      if (req.body.role !== undefined && req.body.role !== existing.role) {
+        return res.status(403).json({ error: "Only a CEO can change a CEO's role" })
+      }
+      if (req.body.status !== undefined && req.body.status !== existing.status) {
+        return res.status(403).json({ error: "Only a CEO can change a CEO's status" })
+      }
+    }
+
     const allowedFields = isManagementRequester
       ? MANAGEMENT_EDITABLE_FIELDS
       : isSelf
@@ -345,8 +361,10 @@ async function updateEmployee(req, res, next) {
     // The Owner (ADMIN) or a CEO may change roles, and only to a known
     // role. This stops an HR/Sales Head account from promoting itself or
     // anyone else into a management role.
-    if (req.body.role !== undefined) {
-      if (!["ADMIN", "CEO"].includes(requesterRole)) {
+    // Only enforced when the role actually changes — the profile edit form
+    // always sends the current role back unchanged.
+    if (req.body.role !== undefined && req.body.role !== existing.role) {
+      if (!requesterIsOwnerTier) {
         return res.status(403).json({ error: "Only the organization owner or a CEO can change roles" })
       }
       if (!ASSIGNABLE_ROLES.includes(req.body.role)) {
