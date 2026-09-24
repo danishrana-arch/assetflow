@@ -160,6 +160,70 @@ async function toggleEmployeeForm(req, res, next) {
   }
 }
 
+async function updateEmployeeForm(req, res, next) {
+  try {
+    const { organizationId, userId } = req.user
+    const form = await prisma.employeeForm.findFirst({ where: { id: req.params.id, organizationId } })
+    if (!form) return res.status(404).json({ error: "Form not found" })
+
+    const data = {}
+    if (req.body.title !== undefined) {
+      const title = clean(req.body.title, 120)
+      if (!title) return res.status(400).json({ error: "Title is required" })
+      data.title = title
+    }
+    if (req.body.expiresInDays !== undefined && req.body.expiresInDays !== "" && req.body.expiresInDays !== null) {
+      const days = Number(req.body.expiresInDays)
+      if (!Number.isInteger(days) || days < 1 || days > 365) {
+        return res.status(400).json({ error: "expiresInDays must be a whole number between 1 and 365" })
+      }
+      data.expiresAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000)
+    }
+    if (!Object.keys(data).length) return res.status(400).json({ error: "Nothing to update" })
+
+    const updated = await prisma.employeeForm.update({ where: { id: form.id }, data })
+    logAudit({ organizationId, actorId: userId, action: "employee_form.updated", targetType: "EmployeeForm", targetId: form.id, note: updated.title })
+    res.json({ id: updated.id, title: updated.title, active: updated.active, expiresAt: updated.expiresAt })
+  } catch (err) {
+    next(err)
+  }
+}
+
+async function deleteEmployeeForm(req, res, next) {
+  try {
+    const { organizationId, userId } = req.user
+    const form = await prisma.employeeForm.findFirst({ where: { id: req.params.id, organizationId } })
+    if (!form) return res.status(404).json({ error: "Form not found" })
+    await prisma.employeeForm.delete({ where: { id: form.id } })
+    logAudit({ organizationId, actorId: userId, action: "employee_form.deleted", targetType: "EmployeeForm", targetId: form.id, note: form.title })
+    res.json({ id: form.id, deleted: true })
+  } catch (err) {
+    next(err)
+  }
+}
+
+async function deleteEmployeeFormSubmission(req, res, next) {
+  try {
+    const { organizationId, userId } = req.user
+    const submission = await prisma.employeeFormSubmission.findFirst({
+      where: { id: req.params.submissionId, formId: req.params.id, organizationId },
+    })
+    if (!submission) return res.status(404).json({ error: "Submission not found" })
+    await prisma.employeeFormSubmission.delete({ where: { id: submission.id } })
+    logAudit({
+      organizationId,
+      actorId: userId,
+      action: "employee_form_submission.deleted",
+      targetType: "EmployeeFormSubmission",
+      targetId: submission.id,
+      note: submission.name,
+    })
+    res.json({ id: submission.id, deleted: true })
+  } catch (err) {
+    next(err)
+  }
+}
+
 async function getEmployeeFormSubmissions(req, res, next) {
   try {
     const form = await prisma.employeeForm.findFirst({ where: { id: req.params.id, organizationId: req.user.organizationId } })
@@ -263,7 +327,10 @@ module.exports = {
   sendEmployeeFormNotifications,
   listEmployeeForms,
   toggleEmployeeForm,
+  updateEmployeeForm,
+  deleteEmployeeForm,
   getEmployeeFormSubmissions,
+  deleteEmployeeFormSubmission,
   getPublicEmployeeForm,
   submitPublicEmployeeForm,
 }

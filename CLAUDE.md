@@ -695,6 +695,106 @@ Fixed:
   is still no "(re)send" action on an already-created form once that
   banner is gone (e.g. after a page refresh).
 
+## Post-module addition: full CRUD on the Employee Forms page
+
+The "Employee Forms" page previously only had Create (a form + optional
+recipients), Read (list forms, view submissions), and a binary
+active/inactive toggle — no way to edit a form's title/expiry, delete a
+form, or remove an individual submission. Added the missing Update/Delete
+operations, both for forms and for their submissions ("responses"):
+
+- Backend (`backend/src/controllers/employee-form.controller.js`,
+  `backend/src/routes/employee-form.routes.js`, both still behind
+  `requireModule("employeeForms")`):
+  - `PATCH /employee-forms/:id` (`updateEmployeeForm`) — edits `title`
+    and/or extends `expiresAt` (via the same `expiresInDays` days-from-now
+    convention `createEmployeeForm` uses). Separate from the existing
+    `PATCH /employee-forms/:id/toggle`, which still only flips
+    `active`.
+  - `DELETE /employee-forms/:id` (`deleteEmployeeForm`) — deletes the form;
+    `EmployeeFormSubmission.form` is `onDelete: Cascade` in the schema, so
+    its responses go with it (surfaced in the frontend's confirm dialog).
+  - `DELETE /employee-forms/:id/submissions/:submissionId`
+    (`deleteEmployeeFormSubmission`) — deletes one response.
+  - All three log through the existing `logAudit` helper, same as
+    `createEmployeeForm`.
+- Frontend (`frontend/src/pages/EmployeeForms.jsx`): each form card gets
+  Edit (inline title + "extend expiry by" form, replacing the card content
+  in place) and Delete buttons alongside the existing Deactivate/Copy
+  link; each response in the "Form responses" panel gets a Delete button
+  next to its status chip. Both deletes use `window.confirm`, matching the
+  destructive-action pattern already used elsewhere (`Departments.jsx`,
+  `Employees.jsx`, etc.). Added a page-level error banner (`{error &&
+  !showCreate && ...}`) since delete failures need to surface even when
+  the create-form panel (the previous only place `error` rendered) is
+  closed.
+
+## Post-module fix: password reset locked to ADMIN/CEO, form-submission 500, notification bell moved off the sidebar
+
+Three fixes from a live chat request:
+
+- **Password reset restricted to ADMIN/CEO only**: `POST /employees/:id/reset-password`
+  was gated by `requireModule("employees")`, which HR/MANAGEMENT/
+  DEPARTMENT_HEAD also hold (for directory access) — so any of those roles
+  could reset another employee's password. Changed to
+  `requireRole("ADMIN", "CEO")` in `backend/src/routes/employee.routes.js`.
+  Matching frontend gate in `EmployeeProfile.jsx` (`canResetPassword`)
+  changed from `hasModuleAccess(user?.role, "employees")` to an explicit
+  `["ADMIN","CEO"].includes(user?.role)` check, so the button itself no
+  longer renders for HR/MANAGEMENT/DEPARTMENT_HEAD either.
+  **Follow-up same day**: HR asked back in, but scoped — HR can reset any
+  employee's password except an ADMIN's or CEO's (that stays ADMIN/CEO
+  resetting each other only). Route now allows `requireRole("ADMIN",
+  "CEO", "HR")`; the actual HR-vs-target-role check lives in
+  `resetPassword` (`auth.controller.js`) since it needs the *target*
+  user's role, which route-level `requireRole` can't see — returns 403
+  ("HR cannot reset an Admin or CEO's password") if an HR caller's target
+  is ADMIN/CEO. `EmployeeProfile.jsx`'s `canResetPassword` was moved to
+  after the `employee` query resolves (it previously only depended on the
+  viewer's own role) and mirrors the same rule: ADMIN/CEO always sees the
+  button; HR sees it only when the profile being viewed isn't ADMIN/CEO.
+- **Employee-form public submission was 500ing** ("Internal server error"
+  on the public fill-out form's submit button): `EmployeeFormSubmission`
+  still had three required columns left over from an older,
+  never-actually-wired invitation-based form flow —
+  `invitationId` (unique, mandatory relation to the dead
+  `EmployeeFormInvitation` model — see the "Employee Forms 'Send'"
+  section above, which already flagged that model as dead but didn't
+  realize it was still enforced as required here), `data` (`Json`, no
+  default), and `updatedAt` (no default, no `@updatedAt`). The current
+  token-based `submitPublicEmployeeForm` controller
+  (`employee-form.controller.js`) never sets any of the three, so every
+  `prisma.employeeFormSubmission.create()` call failed validation before
+  it ever reached the DB. Fixed in `backend/prisma/schema.prisma`:
+  `invitationId`/`data` made optional, `updatedAt` given `@updatedAt` (so
+  Prisma Client supplies it automatically on create, same pattern already
+  used on `EmployeeForm`/`Certification`). New migration at
+  `backend/prisma/migrations/20260924120000_employee_form_submission_optional_fields/migration.sql`
+  drops the `NOT NULL` constraints on `invitationId`/`data`.
+  **Manual step, required** (same pattern as modules 07 and the
+  SALES_HEAD-removal migration): run in an environment with normal network
+  access —
+  ```bash
+  cd backend
+  npx prisma migrate deploy
+  npx prisma generate
+  ```
+  Until this runs, the public form's submit button will keep failing with
+  the same 500.
+- **Notification bell moved out of the sidebar**: every role's nav rail in
+  `Sidebar.jsx` had a "Notifications"/"Activity" entry buried among 10-20+
+  other icons — easy to miss, and on desktop that sidebar entry was the
+  *only* way to see there were unread notifications (the existing
+  `NotificationBell` component was already wired up, but only rendered
+  inside `Topbar.jsx`, which is `lg:hidden` — mobile-only). Removed the
+  three sidebar `RailItem`s (management/IT/employee branches) and their
+  now-unused unread-count query in `Sidebar.jsx`. Added `<NotificationBell
+  />` to the desktop header row in `frontend/src/layouts/DashboardLayout.jsx`
+  (next to the global search bar / organization switcher, `lg:flex`,
+  hidden on mobile where the Topbar's own bell already covers it) — that
+  layout wraps every route, so the bell is now visible up top for every
+  role, CEO through employee, not just on mobile.
+
 ## Known gaps flagged by whoever prepared these patches
 
 1. **`.env` git-history check** (brief §1): run

@@ -326,6 +326,12 @@ async function resetPassword(req, res, next) {
     const user = await prisma.user.findFirst({ where: { id, organizationId } })
     if (!user) return res.status(404).json({ error: "Employee not found" })
 
+    // HR can reset anyone's password except an ADMIN's or CEO's — that's
+    // reserved for ADMIN/CEO resetting each other.
+    if (req.user.role === "HR" && ["ADMIN", "CEO"].includes(user.role)) {
+      return res.status(403).json({ error: "HR cannot reset an Admin or CEO's password" })
+    }
+
     const hashed = await bcrypt.hash(TEMP_PASSWORD, 10)
     await prisma.user.update({ where: { id }, data: { password: hashed } })
 

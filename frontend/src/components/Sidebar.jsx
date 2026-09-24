@@ -19,9 +19,6 @@ import {
   UserCheck,
   ClipboardList,
   ShieldCheck,
-  Bell,
-  BellRing,
-  Activity,
   Settings as SettingsIcon,
   Wallet,
   Sun,
@@ -41,8 +38,6 @@ import {
 import { useAuth } from "../context/AuthContext"
 import { useTheme } from "../context/ThemeContext"
 import { isManagement, hasModuleAccess } from "../utils/roles"
-import { useQuery } from "@tanstack/react-query"
-import api from "../api/client"
 import Avatar from "./ui/Avatar"
 import logoFull from "../assets/logo1.png"
 
@@ -167,15 +162,6 @@ export default function Sidebar({ expanded, onMouseEnter, onMouseLeave }) {
 
   const canManageAttendance =
     hasModuleAccess(user?.role, "attendance") || !!user?.canManageAttendance
-
-  const { data: unreadNotifications } = useQuery({
-    queryKey: ["notifications-unread-count"],
-    queryFn: () => api.get("/notifications/unread-count").then((r) => r.data),
-    refetchInterval: 15000,
-    staleTime: 5000,
-  })
-
-  const hasUnreadNotifications = Number(unreadNotifications?.count || 0) > 0
 
   return (
     <aside
@@ -351,16 +337,6 @@ export default function Sidebar({ expanded, onMouseEnter, onMouseLeave }) {
               />
             )}
 
-            {/* Activity - different icon from Announcements */}
-            <RailItem
-              to="/notifications"
-              label="Activity"
-              icon={BellRing}
-              isDark={isDark}
-              expanded={expanded}
-              showNotificationDot={hasUnreadNotifications}
-            />
-
             {hasModuleAccess(user?.role, "employeeForms") && (
               <RailItem
                 to="/employee-forms"
@@ -398,7 +374,6 @@ export default function Sidebar({ expanded, onMouseEnter, onMouseLeave }) {
             <RailItem to="/tickets" label="Requests / Tickets" icon={Ticket} isDark={isDark} expanded={expanded} />
             <RailItem to="/calendar" label="Company Calendar" icon={CalendarDays} isDark={isDark} expanded={expanded} />
             <RailItem to="/attendance/me" label="My Attendance" icon={CalendarCheck} isDark={isDark} expanded={expanded} />
-            <RailItem to="/notifications" label="Notifications" icon={Activity} isDark={isDark} expanded={expanded} showNotificationDot={hasUnreadNotifications} />
           </>
         ) : (
           <>
@@ -447,15 +422,6 @@ export default function Sidebar({ expanded, onMouseEnter, onMouseLeave }) {
               icon={Ticket}
               isDark={isDark}
               expanded={expanded}
-            />
-
-            <RailItem
-              to="/notifications"
-              label="Notifications"
-              icon={BellRing}
-              isDark={isDark}
-              expanded={expanded}
-              showNotificationDot={hasUnreadNotifications}
             />
           </>
         )}

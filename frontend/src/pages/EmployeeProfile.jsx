@@ -70,8 +70,6 @@ export default function EmployeeProfile() {
   const canEditContactOnly = !canEditFully && isSelf && user?.role !== "IT_MANAGER"
   // Only the Owner (ADMIN) can remove an employee outright.
   const canRemoveEmployee = user?.role === "ADMIN" && user?.id !== id
-  // Any management user can reset a forgotten password to the temp value.
-  const canResetPassword = hasModuleAccess(user?.role, "employees") && !isSelf
   const [showAssignForm, setShowAssignForm] = useState(false)
   const [showAddAssetForm, setShowAddAssetForm] = useState(false)
   const [newAsset, setNewAsset] = useState({ name: "", category: "", serialNumber: "", cpu: "", ram: "", storage: "", purchaseDate: "", warrantyEnd: "" })
@@ -108,6 +106,14 @@ export default function EmployeeProfile() {
       notes: certificate.notes || "",
     })))
   }, [employee])
+
+  // ADMIN/CEO can reset anyone's password. HR can reset anyone's except an
+  // ADMIN's or CEO's — matches the backend's controller-level check, which
+  // needs the *target*'s role, not just the requester's.
+  const canResetPassword =
+    !isSelf &&
+    (["ADMIN", "CEO"].includes(user?.role) ||
+      (user?.role === "HR" && !["ADMIN", "CEO"].includes(employee?.role)))
 
   const lens = useProfileLens({ user, employee, isSelf })
   const showAssets = lens === "full" || lens === "it" || lens === "manager"

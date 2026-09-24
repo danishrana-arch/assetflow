@@ -37,9 +37,14 @@ router.get("/:id", noStore, getEmployee)
 // A role with the "employees" module can edit anyone; anyone else can only
 // edit their own phone/email (enforced field-by-field in the controller).
 router.patch("/:id", requireModuleOrSelf("employees"), updateEmployee)
-// Admin-assisted "forgot password" — management resets to a known temp
-// password since there's no email-reset flow.
-router.post("/:id/reset-password", requireModule("employees"), resetPassword)
+// Admin-assisted "forgot password" — resets to a known temp password since
+// there's no email-reset flow. ADMIN/CEO can reset anyone; HR can reset
+// anyone except an ADMIN/CEO (enforced inside the controller, since that
+// needs the *target*'s role, not just the requester's) — deliberately not
+// gated by the "employees" module alone, since MANAGEMENT/DEPARTMENT_HEAD
+// also have that module for directory access but must not be able to
+// reset any password at all.
+router.post("/:id/reset-password", requireRole("ADMIN", "CEO", "HR"), resetPassword)
 router.delete("/:id", requireRole("ADMIN", "CEO"), deleteEmployee)
 
 module.exports = router

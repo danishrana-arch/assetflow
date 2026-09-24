@@ -6,6 +6,7 @@ import MobileNav from "../components/MobileNav"
 import OrganizationSwitcher from "../components/OrganizationSwitcher"
 import { useAuth } from "../context/AuthContext"
 import GlobalSearch from "../components/GlobalSearch"
+import NotificationBell from "../components/NotificationBell"
 
 // How long the cursor must stay on the sidebar before it (and the page shift
 // below) engages — long enough that a quick pass over one icon doesn't
@@ -58,11 +59,14 @@ export default function DashboardLayout() {
         <div className="mx-auto w-full max-w-[1600px] min-w-0">
           <div className="mb-5 hidden items-center justify-between gap-4 lg:flex">
             <GlobalSearch className="w-full max-w-[430px]" />
-            {showCompanySwitcher && (
-              <div className="rounded-2xl border border-border bg-surface/90 p-1.5 shadow-card backdrop-blur-xl">
-                <OrganizationSwitcher />
-              </div>
-            )}
+            <div className="flex shrink-0 items-center gap-2">
+              {showCompanySwitcher && (
+                <div className="rounded-2xl border border-border bg-surface/90 p-1.5 shadow-card backdrop-blur-xl">
+                  <OrganizationSwitcher />
+                </div>
+              )}
+              <NotificationBell className="border border-border bg-surface/90 shadow-card backdrop-blur-xl" />
+            </div>
           </div>
           <Outlet />
         </div>

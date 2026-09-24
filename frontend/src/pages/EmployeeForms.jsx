@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Copy, Link2, Plus, Power, Users, X, Send } from "lucide-react"
+import { Copy, Link2, Plus, Power, Users, X, Send, Pencil, Trash2, Check } from "lucide-react"
 import api from "../api/client"
 import { useAuth } from "../context/AuthContext"
 import { hasModuleAccess } from "../utils/roles"
@@ -26,6 +26,10 @@ export default function EmployeeForms() {
   const [sendResult, setSendResult] = useState(null)
   const [recipientEmployeeIds, setRecipientEmployeeIds] = useState([])
   const [employeeSearch, setEmployeeSearch] = useState("")
+  const [editingFormId, setEditingFormId] = useState(null)
+  const [editTitle, setEditTitle] = useState("")
+  const [editExpiresInDays, setEditExpiresInDays] = useState("30")
+  const [editError, setEditError] = useState("")
 
   const { data: forms = [], isLoading } = useQuery({
     queryKey: ["employee-forms"],
@@ -74,6 +78,38 @@ export default function EmployeeForms() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["employee-forms"] }),
   })
 
+  const updateForm = useMutation({
+    mutationFn: ({ id, title, expiresInDays }) => api.patch(`/employee-forms/${id}`, { title, expiresInDays: Number(expiresInDays) }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["employee-forms"] })
+      setEditingFormId(null)
+      setEditError("")
+    },
+    onError: (err) => setEditError(err.response?.data?.error || "Could not update form"),
+  })
+
+  const deleteForm = useMutation({
+    mutationFn: (id) => api.delete(`/employee-forms/${id}`),
+    onSuccess: (_res, id) => {
+      queryClient.invalidateQueries({ queryKey: ["employee-forms"] })
+      if (selectedForm === id) setSelectedForm(null)
+    },
+    onError: (err) => setError(err.response?.data?.error || "Could not delete form"),
+  })
+
+  const deleteSubmission = useMutation({
+    mutationFn: ({ formId, submissionId }) => api.delete(`/employee-forms/${formId}/submissions/${submissionId}`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["employee-form-submissions", selectedForm] }),
+    onError: (err) => setError(err.response?.data?.error || "Could not delete submission"),
+  })
+
+  const startEditing = (form) => {
+    setEditingFormId(form.id)
+    setEditTitle(form.title)
+    setEditExpiresInDays("30")
+    setEditError("")
+  }
+
   const sendForm = useMutation({
     mutationFn: () => api.post(`/employee-forms/${createdFormId}/send`, { employeeIds: recipientEmployeeIds }),
     onSuccess: (res) => setSendResult({ ok: true, message: `Notified ${res.data.notified} employee${res.data.notified === 1 ? "" : "s"} in-app.` }),
@@ -113,6 +149,10 @@ export default function EmployeeForms() {
           </button>
         )}
       />
+
+      {error && !showCreate && (
+        <p className="mb-4 text-sm text-danger">{error}</p>
+      )}
 
       {createdLink && (
         <div className="card mb-5 border-l-[5px] border-l-chip-green-fg p-5">
@@ -211,32 +251,75 @@ export default function EmployeeForms() {
             {!isLoading && forms.length === 0 && <p className="text-sm text-muted">No employee forms created yet.</p>}
             {forms.map((form) => {
               const link = form.publicToken ? `${window.location.origin}/employee-form/${form.publicToken}` : ""
+              const isEditing = editingFormId === form.id
               return (
                 <div key={form.id} className={`rounded-2xl border p-4 ${selectedForm === form.id ? "border-accent" : "border-border"}`}>
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-ink">{form.title}</p>
-                      <p className="mt-0.5 text-xs text-muted">Created {formatDate(form.createdAt)} · Expires {formatDate(form.expiresAt)}</p>
-                    </div>
-                    <span className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-semibold ${form.active ? "bg-chip-green-bg text-chip-green-fg" : "bg-surface-2 text-muted"}`}>
-                      {form.active ? "Active" : "Inactive"}
-                    </span>
-                  </div>
-                  <div className="mt-3 flex flex-wrap items-center gap-2">
-                    <button onClick={() => setSelectedForm(form.id)} className="pill-secondary flex items-center gap-1.5 px-3 py-1.5 text-xs">
-                      <Users size={12} /> {form.submissionCount} responses
-                    </button>
-                    <button onClick={() => toggleForm.mutate(form.id)} disabled={toggleForm.isPending} className="pill-secondary flex items-center gap-1.5 px-3 py-1.5 text-xs">
-                      <Power size={12} /> {form.active ? "Deactivate" : "Activate"}
-                    </button>
-                    <button
-                      onClick={() => navigator.clipboard.writeText(link)}
-                      className="pill-secondary flex items-center gap-1.5 px-3 py-1.5 text-xs"
+                  {isEditing ? (
+                    <form
+                      onSubmit={(e) => { e.preventDefault(); updateForm.mutate({ id: form.id, title: editTitle, expiresInDays: editExpiresInDays }) }}
+                      className="space-y-3"
                     >
-                      <Link2 size={12} /> Copy link
-                    </button>
-                  </div>
-                  <p className="mt-2 text-[10px] text-muted-2">The form link is generated from a private token. Use the Copy link button rather than editing it.</p>
+                      <TextField label="Form title" value={editTitle} onChange={(e) => setEditTitle(e.target.value)} required />
+                      <SelectField label="Extend expiry by" value={editExpiresInDays} onChange={(e) => setEditExpiresInDays(e.target.value)}>
+                        <option value="7">7 days from today</option>
+                        <option value="14">14 days from today</option>
+                        <option value="30">30 days from today</option>
+                        <option value="60">60 days from today</option>
+                        <option value="90">90 days from today</option>
+                        <option value="365">1 year from today</option>
+                      </SelectField>
+                      {editError && <p className="text-xs text-danger">{editError}</p>}
+                      <div className="flex items-center gap-2">
+                        <button type="submit" disabled={updateForm.isPending} className="pill-accent flex items-center gap-1.5 px-3 py-1.5 text-xs disabled:opacity-60">
+                          <Check size={12} /> {updateForm.isPending ? "Saving…" : "Save"}
+                        </button>
+                        <button type="button" onClick={() => setEditingFormId(null)} className="pill-secondary flex items-center gap-1.5 px-3 py-1.5 text-xs">
+                          <X size={12} /> Cancel
+                        </button>
+                      </div>
+                    </form>
+                  ) : (
+                    <>
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-ink">{form.title}</p>
+                          <p className="mt-0.5 text-xs text-muted">Created {formatDate(form.createdAt)} · Expires {formatDate(form.expiresAt)}</p>
+                        </div>
+                        <span className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-semibold ${form.active ? "bg-chip-green-bg text-chip-green-fg" : "bg-surface-2 text-muted"}`}>
+                          {form.active ? "Active" : "Inactive"}
+                        </span>
+                      </div>
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                        <button onClick={() => setSelectedForm(form.id)} className="pill-secondary flex items-center gap-1.5 px-3 py-1.5 text-xs">
+                          <Users size={12} /> {form.submissionCount} responses
+                        </button>
+                        <button onClick={() => toggleForm.mutate(form.id)} disabled={toggleForm.isPending} className="pill-secondary flex items-center gap-1.5 px-3 py-1.5 text-xs">
+                          <Power size={12} /> {form.active ? "Deactivate" : "Activate"}
+                        </button>
+                        <button
+                          onClick={() => navigator.clipboard.writeText(link)}
+                          className="pill-secondary flex items-center gap-1.5 px-3 py-1.5 text-xs"
+                        >
+                          <Link2 size={12} /> Copy link
+                        </button>
+                        <button onClick={() => startEditing(form)} className="pill-secondary flex items-center gap-1.5 px-3 py-1.5 text-xs">
+                          <Pencil size={12} /> Edit
+                        </button>
+                        <button
+                          onClick={() => {
+                            if (window.confirm(`Delete "${form.title}"? This also deletes its ${form.submissionCount} response(s). This cannot be undone.`)) {
+                              deleteForm.mutate(form.id)
+                            }
+                          }}
+                          disabled={deleteForm.isPending}
+                          className="pill-secondary flex items-center gap-1.5 px-3 py-1.5 text-xs text-danger disabled:opacity-60"
+                        >
+                          <Trash2 size={12} /> Delete
+                        </button>
+                      </div>
+                      <p className="mt-2 text-[10px] text-muted-2">The form link is generated from a private token. Use the Copy link button rather than editing it.</p>
+                    </>
+                  )}
                 </div>
               )
             })}
@@ -261,7 +344,25 @@ export default function EmployeeForms() {
                         <p className="truncate text-sm font-semibold text-ink">{submission.name}</p>
                         <p className="text-xs text-muted">{submission.personalEmail || submission.phone || "No contact provided"} · Submitted {formatDate(submission.submittedAt)}</p>
                       </div>
-                      <span className="rounded-full bg-chip-blue-bg px-2.5 py-1 text-[10px] font-semibold text-chip-blue-fg">{submission.status}</span>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <span className="rounded-full bg-chip-blue-bg px-2.5 py-1 text-[10px] font-semibold text-chip-blue-fg">{submission.status}</span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.preventDefault()
+                            e.stopPropagation()
+                            if (window.confirm(`Delete ${submission.name}'s response? This cannot be undone.`)) {
+                              deleteSubmission.mutate({ formId: selectedForm, submissionId: submission.id })
+                            }
+                          }}
+                          disabled={deleteSubmission.isPending}
+                          className="flex h-7 w-7 items-center justify-center rounded-full text-danger hover:bg-chip-pink-bg disabled:opacity-60"
+                          aria-label="Delete response"
+                          title="Delete response"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
                     </div>
                   </summary>
                   <div className="grid grid-cols-1 gap-3 border-t border-border p-4 sm:grid-cols-2">

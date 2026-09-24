@@ -272,12 +272,12 @@ model EmployeeForm {
 
 model EmployeeFormSubmission {
   id                     String                       @id @default(cuid())
-  invitationId           String                       @unique
+  invitationId           String?                      @unique
   organizationId         String
-  data                   Json
+  data                   Json?
   submittedAt            DateTime                     @default(now())
   createdAt              DateTime                     @default(now())
-  updatedAt              DateTime
+  updatedAt              DateTime                     @updatedAt
   formId                 String?
   name                   String?
   fatherName             String?
@@ -296,7 +296,7 @@ model EmployeeFormSubmission {
   convertedEmployeeId    String?
   convertedEmployee      User?                        @relation("FormSubmissionEmployee", fields: [convertedEmployeeId], references: [id])
   form                   EmployeeForm?                @relation(fields: [formId], references: [id], onDelete: Cascade)
-  EmployeeFormInvitation EmployeeFormInvitation       @relation(fields: [invitationId], references: [id], onDelete: Cascade)
+  EmployeeFormInvitation EmployeeFormInvitation?      @relation(fields: [invitationId], references: [id], onDelete: Cascade)
   organization           Organization                 @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   @@index([formId, submittedAt])
