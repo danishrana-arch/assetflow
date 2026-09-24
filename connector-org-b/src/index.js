@@ -17,6 +17,7 @@ let syncInFlight = false
 let stopping = false
 let realtimeHandle = null
 let realtimeReconnectTimer = null
+let liveSyncTimer = null
 
 // --- retry/backoff helper -------------------------------------------------
 // Any network or device call in this service goes through here so a flaky
@@ -79,13 +80,12 @@ async function startRealtime() {
   if (stopping || !adapter || typeof adapter.subscribeRealTime !== "function") return
   try {
     realtimeHandle = await adapter.subscribeRealTime(
-      async (punch) => {
-        try {
-          await client.post("/connector/punches", { punches: [punch] })
-          logger.info("Live punch synced", { device: config.name, externalUserId: punch.externalUserId, occurredAt: punch.occurredAt })
-        } catch (e) {
-          logger.warn("Failed to push a live punch — the next reconciliation cycle will pick it up", { error: e.message })
-        }
+      (punch) => {
+        // The live event can't tell Check-In from Check-Out, so it isn't sent
+        // as-is — it just triggers a quick pull, which reads the button state
+        // from the device's stored record.
+        logger.info("Live punch detected, syncing", { device: config.name, externalUserId: punch.externalUserId })
+        scheduleLiveSync()
       },
       (err) => {
         logger.warn("Real-time connection dropped, will reconnect", { device: config.name, error: err.message })
@@ -98,6 +98,23 @@ async function startRealtime() {
     logger.warn("Could not start real-time subscription, relying on periodic sync only", { error: e.message })
     scheduleRealtimeReconnect()
   }
+}
+
+// Several people often scan within a few seconds of each other — collapse
+// those into one pull instead of one per scan.
+const LIVE_SYNC_DEBOUNCE_MS = 3000
+
+function scheduleLiveSync() {
+  if (stopping) return
+  clearTimeout(liveSyncTimer)
+  liveSyncTimer = setTimeout(async function run() {
+    if (syncInFlight) {
+      liveSyncTimer = setTimeout(run, LIVE_SYNC_DEBOUNCE_MS)
+      return
+    }
+    liveSyncTimer = null
+    await runSyncCycle()
+  }, LIVE_SYNC_DEBOUNCE_MS)
 }
 
 function scheduleRealtimeReconnect() {
@@ -172,6 +189,7 @@ async function main() {
     clearInterval(syncTimer)
     clearInterval(heartbeatTimer)
     if (realtimeReconnectTimer) clearTimeout(realtimeReconnectTimer)
+    if (liveSyncTimer) clearTimeout(liveSyncTimer)
     if (realtimeHandle) { try { realtimeHandle.disconnect() } catch { /* already gone */ } }
     pushServer.close(() => {
       logger.info("Shutdown complete")

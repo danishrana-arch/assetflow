@@ -45,22 +45,53 @@ class HttpAdapter {
   }
 }
 
+// Byte 31 of each 40-byte attendance record is the function key the user
+// pressed before scanning: 0 = Check-In, 1 = Check-Out (2-5 are
+// break/overtime keys on devices that have them). node-zklib's
+// getAttendances() decodes only user id + time and drops it, so records are
+// read raw here. Verified against a live K40: byte 31 was only ever 0 or 1,
+// and matched real in/out patterns.
+const PUNCH_STATE_OFFSET = 31
+const RECORD_SIZE = 40
+
+function directionFromPunchState(state) {
+  if (state === 0) return "IN"
+  if (state === 1) return "OUT"
+  return null
+}
+
 class ZktecoAdapter {
   constructor(c) { this.c = c }
   async pullPunches() {
-    let ZKLib
-    try { ZKLib = require("node-zklib") } catch { throw new Error("ZKTeco adapter requires 'node-zklib' in connector. Run npm install node-zklib") }
+    let ZKLib, REQUEST_DATA, decodeRecordData40
+    try {
+      ZKLib = require("node-zklib")
+      ;({ REQUEST_DATA } = require("node-zklib/constants"))
+      ;({ decodeRecordData40 } = require("node-zklib/utils"))
+    } catch { throw new Error("ZKTeco adapter requires 'node-zklib' in connector. Run npm install node-zklib") }
     const zk = new ZKLib(this.c.ipAddress, this.c.port || 4370, 10000, 4000, 0, "tcp")
     try {
       await zk.createSocket()
-      const logs = await zk.getAttendances()
-      const rows = logs?.data || logs || []
+      const tcp = zk.zklibTcp
+      try { await tcp.freeData() } catch { /* nothing buffered */ }
+      const data = await tcp.readWithBuffer(REQUEST_DATA.GET_ATTENDANCE_LOGS)
+      try { await tcp.freeData() } catch { /* nothing buffered */ }
+
+      const rows = []
+      let buf = data.data.subarray(4)
+      while (buf.length >= RECORD_SIZE) {
+        const raw = buf.subarray(0, RECORD_SIZE)
+        rows.push({ ...decodeRecordData40(raw), punchState: raw[PUNCH_STATE_OFFSET] })
+        buf = buf.subarray(RECORD_SIZE)
+      }
+
       return rows
-        .map((p, i) => ({
-          externalUserId: String(p.deviceUserId ?? p.user_id ?? p.userId ?? p.uid ?? ""),
-          occurredAt: p.recordTime || p.record_time || p.timestamp || p.datetime || p.time,
-          verification: String(p.type ?? p.state ?? "biometric"),
-          externalId: String(p.userSn ?? p.uid ?? p.id ?? `${p.deviceUserId ?? p.user_id ?? p.userId}:${p.recordTime || p.record_time || p.timestamp || i}`),
+        .map((p) => ({
+          externalUserId: String(p.deviceUserId ?? ""),
+          occurredAt: p.recordTime,
+          verification: "biometric",
+          direction: directionFromPunchState(p.punchState),
+          externalId: String(p.userSn),
           rawPayload: p,
         }))
         .filter((p) => p.externalUserId && p.occurredAt)
@@ -70,11 +101,15 @@ class ZktecoAdapter {
   }
 
   // Opens one persistent connection and registers for the device's live
-  // event stream (CMD_REG_EVENT) instead of re-pulling and re-decoding the
-  // entire onboard log on a timer — the device pushes each new punch the
-  // moment it happens. onPunch is called once per punch; onError once if the
+  // event stream (CMD_REG_EVENT) — the device notifies us the moment a punch
+  // happens. onPunch is called once per punch; onError once if the
   // connection drops, so the caller can reconnect. Returns the underlying
   // zk handle so the caller can disconnect() on shutdown.
+  //
+  // The live event's decoder (decodeRecordRealTimeLog52) doesn't expose the
+  // Check-In/Check-Out key either, and its byte layout isn't verified here —
+  // so callers should treat this as a "something happened" signal and pull
+  // via pullPunches() (verified direction) rather than send this punch as-is.
   async subscribeRealTime(onPunch, onError) {
     let ZKLib
     try { ZKLib = require("node-zklib") } catch { throw new Error("ZKTeco adapter requires 'node-zklib' in connector. Run npm install node-zklib") }

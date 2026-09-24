@@ -273,19 +273,35 @@ async function ingestPunchBatch(device, punches) {
         ...(externalIds.length ? [{ externalId: { in: externalIds } }] : []),
       ],
     },
-    select: { fingerprint: true, externalId: true },
+    select: { id: true, fingerprint: true, externalId: true, direction: true, employeeId: true, occurredAt: true },
   })
-  const existingFingerprints = new Set(existing.map((e) => e.fingerprint))
-  const existingExternalIds = new Set(existing.filter((e) => e.externalId).map((e) => e.externalId))
+  const existingByFingerprint = new Map(existing.map((e) => [e.fingerprint, e]))
+  const existingByExternalId = new Map(existing.filter((e) => e.externalId).map((e) => [e.externalId, e]))
 
   const mappings = await prisma.biometricDeviceEmployee.findMany({ where: { deviceId: device.id }, select: { externalUserId: true, employeeId: true } })
   const employeeByExternalId = new Map(mappings.map((m) => [m.externalUserId, m.employeeId]))
 
+  // A punch already stored can still be missing what we now know: the
+  // IN/OUT key (older connectors never sent it) or the employee (mapped
+  // after the punch arrived). Fill those in on the existing row rather than
+  // skipping it as a plain duplicate — otherwise the connector re-sending it
+  // would never fix today's attendance.
+  const repairedRows = []
   const toInsert = []
   let unmatched = 0
   for (const c of candidates) {
-    if (existingFingerprints.has(c.fingerprint) || (c.externalId && existingExternalIds.has(c.externalId))) {
+    const prior = existingByFingerprint.get(c.fingerprint) || (c.externalId && existingByExternalId.get(c.externalId))
+    if (prior) {
       duplicates++
+      const direction = c.p.direction === "IN" || c.p.direction === "OUT" ? c.p.direction : null
+      const employeeId = employeeByExternalId.get(String(c.p.externalUserId)) || null
+      const data = {}
+      if (direction && !prior.direction) data.direction = direction
+      if (employeeId && !prior.employeeId) data.employeeId = employeeId
+      if (Object.keys(data).length) {
+        await prisma.biometricPunch.update({ where: { id: prior.id }, data })
+        repairedRows.push({ employeeId: data.employeeId || prior.employeeId, occurredAt: prior.occurredAt })
+      }
       continue
     }
     const employeeId = employeeByExternalId.get(String(c.p.externalUserId)) || null
@@ -312,7 +328,7 @@ async function ingestPunchBatch(device, punches) {
   // Every row in toInsert already passed the today-only filter above, so
   // this only ever recomputes today's attendance — never a backfilled past day.
   const seenEmployeeDays = new Set()
-  for (const row of toInsert) {
+  for (const row of [...toInsert, ...repairedRows]) {
     if (!row.employeeId) continue
     const key = `${row.employeeId}|${dateKeyInTimeZone(row.occurredAt, timeZone)}`
     if (seenEmployeeDays.has(key)) continue
