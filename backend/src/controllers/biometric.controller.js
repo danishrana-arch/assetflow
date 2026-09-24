@@ -386,6 +386,23 @@ async function mapEmployee(req, res, next) {
     }
 
     res.json({ ...mapping, backfilledPunches: backfilled.count })
+  } catch (e) {
+    if (e?.code === "P2002") {
+      return res.status(400).json({ error: "That device user ID is already mapped to another employee on this device" })
+    }
+    next(e)
+  }
+}
+
+async function deleteMapping(req, res, next) {
+  try {
+    if (!management(req)) return res.status(403).json({ error: "Biometric device access is restricted" })
+    const device = await prisma.biometricDevice.findFirst({ where: { id: req.params.id, organizationId: req.user.organizationId } })
+    if (!device) return res.status(404).json({ error: "Device not found" })
+    const mapping = await prisma.biometricDeviceEmployee.findFirst({ where: { id: req.params.mappingId, deviceId: device.id } })
+    if (!mapping) return res.status(404).json({ error: "Mapping not found" })
+    await prisma.biometricDeviceEmployee.delete({ where: { id: mapping.id } })
+    res.json({ ok: true })
   } catch (e) { next(e) }
 }
 
@@ -399,4 +416,4 @@ async function listMappings(req, res, next) {
   } catch (e) { next(e) }
 }
 
-module.exports = { listDevices, createDevice, rotateToken, updateDevice, deleteDevice, connectorAuth, connectorConfig, heartbeat, ingestPunches, ingestPunchBatch, mapEmployee, listMappings }
+module.exports = { listDevices, createDevice, rotateToken, updateDevice, deleteDevice, connectorAuth, connectorConfig, heartbeat, ingestPunches, ingestPunchBatch, mapEmployee, listMappings, deleteMapping }
