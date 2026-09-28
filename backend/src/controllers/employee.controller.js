@@ -460,6 +460,12 @@ async function deleteEmployee(req, res, next) {
           data: { status: "AVAILABLE", assignedToId: null },
         })
       ),
+      // EmployeeFormInvitation (dead, never-wired feature) still has a
+      // RESTRICT FK to its creator — clear those rows so they can't block
+      // the delete. Everything else referencing User either cascades or is
+      // SET NULL at the DB level, so the row (and its email) is fully freed
+      // and the same email can be invited again afterwards.
+      prisma.employeeFormInvitation.deleteMany({ where: { createdById: id } }),
       prisma.user.delete({ where: { id } }),
     ])
 

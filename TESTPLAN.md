@@ -8,6 +8,32 @@ actual routing/guard code (`frontend/src/App.jsx`, `Sidebar.jsx`,
 assumed from feature names. Each row is "verify this works / is
 blocked as stated," not a full step-by-step script.
 
+**Last automated run: 2026-09-28** — 489 API checks (every role except
+`DEPARTMENT_HEAD`, which no live user holds), non-mutating, against the
+live DB: first pass **479 passed, 10 failed**; the one real failure,
+TASK-04 (`GET /api/tasks` 500 — stale Prisma client), was fixed by
+running `npx prisma generate`, and the re-run gave **482 passed, 7
+failed**. The remaining 7 were stale expectations in this file, now
+corrected in place (ATT-13/16/17, LV-03, ORG-02, ORG-03, EMP-11) — the
+code behaves as intended. **Final run with corrected expectations: 498/498
+API checks passed**, plus **100/100 static/unit checks** (role-map
+parity, route guards, nav gating, time/timezone utils, notification
+links — see CLAUDE.md "Automated RBAC test run"). §16 item 10 (`.env`
+git history) also done — clean.
+
+**Still untested (can't be done safely/automatically)**: all
+`DEPARTMENT_HEAD` rows (no live user holds the role); genuinely mutating
+actions (PAY-04/05/06/08 payroll generate/submit/approve/bulk-delete,
+EMP-07 real password reset incl. HR→ADMIN/CEO block, EMP-06b HR editing
+a CEO, TASK-04 project-less create, AUTH-12 public form submit, EMP-12
+form send); UI-only rows that need a real browser (per-role sidebar
+rendering, NAV-09b scroll line, timezone picker, 12-hour display, NOT-04
+click-through, dashboard widgets, mobile nav, offline behaviour — there's
+no browser-automation tool installed); device/connector rows
+(BIO-03/04/05) that need a physical device. Not covered by
+the run: `DEPARTMENT_HEAD` scoping, genuinely mutating actions, UI-only
+rows.
+
 For every endpoint below, also run the implicit negative case: an
 unauthenticated request (no/expired token) → `401`, and a request from a
 role **not** listed in "Roles with access" → `403`/redirect, not a silent
@@ -39,10 +65,9 @@ ran; a `prisma/seed.js` test fixture using this role was changed to
 
 **`MANAGER` ("Finance Manager") was removed entirely on 2026-09-24**, same
 pattern: dropped from `UserRole` in `schema.prisma` (migration
-`20260924130000_remove_manager_role` — **manual step pending as of this
-writing**: `cd backend && npx prisma migrate deploy && npx prisma generate`
-has not yet been run against the live DB, same as two other 2026-09-24
-migrations — see the Appendix), and from every role list in both
+`20260924130000_remove_manager_role` — **deployed, confirmed 2026-09-28**
+via `prisma migrate status`, client regenerated the same day — see the
+Appendix), and from every role list in both
 `utils/roles.js` files, `payroll.routes.js`'s route guards (generate/
 submit/patch narrowed to `ADMIN` only; delete to `ADMIN,CEO`),
 `search.controller.js`, and every hardcoded frontend role-array
@@ -143,7 +168,7 @@ Role groups referenced repeatedly below:
 | AUTH-10 | Org switch — authorized | `CEO` (any org), or `ADMIN`/`IT_MANAGER` **whose home org is the main company** can switch org via `X-Organization-Id` | `CEO`, main-company `ADMIN`/`IT_MANAGER` |
 | AUTH-11 | Org switch — blocked | A sub-org `ADMIN`/`IT_MANAGER`, or any other role, forging `X-Organization-Id` to a different org must be rejected server-side, not just hidden in UI | Negative test — all other roles |
 | AUTH-11b | **FIXED 2026-09-23**: org-switcher list vs. actual switch enforcement | `canSeeCompanyOrganizations()` in `auth.controller.js` used to return `true` for *any* `ADMIN` regardless of home org, contradicting `applyOrganizationScope`'s actual enforcement (main-company only) — a sub-org ADMIN would see every subcompany in the switcher and get a 403 after picking one. Now requires `organization.id === organization.companyId` for ADMIN, matching IT_MANAGER and the real enforcement point. Re-test: log in as a **sub-org** ADMIN and confirm the org switcher shows/offers only their own org, not siblings. | Sub-org `ADMIN` (negative — should see just their own org) |
-| AUTH-12 | Public employee form | `GET /api/public/employee-forms/:token` and `POST .../submit` work with no auth; submit rate-limited 30/15min. **Fixed 2026-09-24**: submit used to 500 unconditionally — `EmployeeFormSubmission` had three stale required columns (`invitationId`, `data`, `updatedAt`) left over from a dead invitation flow that `submitPublicEmployeeForm` never populated. Schema now makes `invitationId`/`data` optional and gives `updatedAt` `@updatedAt`. **Manual step pending**: migration `20260924120000_employee_form_submission_optional_fields` is not yet deployed to the live DB as of this writing — re-test only after `cd backend && npx prisma migrate deploy && npx prisma generate` has actually been run; until then this will still 500 | Public |
+| AUTH-12 | Public employee form | `GET /api/public/employee-forms/:token` and `POST .../submit` work with no auth; submit rate-limited 30/15min. **Fixed 2026-09-24**: submit used to 500 unconditionally — `EmployeeFormSubmission` had three stale required columns (`invitationId`, `data`, `updatedAt`) left over from a dead invitation flow that `submitPublicEmployeeForm` never populated. Schema now makes `invitationId`/`data` optional and gives `updatedAt` `@updatedAt`. **Migration deployed (confirmed 2026-09-28)**: `20260924120000_employee_form_submission_optional_fields` is applied on the live DB; `npx prisma generate` re-run 2026-09-28, so the client now accepts the optional fields — re-test the public submit end-to-end (not covered by the automated run, since it writes a row) | Public |
 | AUTH-13 | Registration cap / CEO limit | Assigning a 4th `CEO` in one org is rejected (`MAX_CEO_COUNT = 3`) | Owner (role-assignment UI) |
 
 ---
@@ -180,6 +205,7 @@ treating "Management (6)" as one nav profile.
 | NAV-07 | Sidebar — Employee nav set | Shows: My Profile, My Projects, My Attendance, Company Calendar, My Employee 360°, My Tasks, My Performance, Announcements, My Payslips, Tickets. **No longer includes a "Notifications" link** (see NAV-14) | `EMPLOYEE` |
 | NAV-08 | Sidebar — "My Payslips" link for EMPLOYEE | **Known contradiction, unchanged (gap #2)**: link is shown, but `/payroll/me`'s `RequirePayrollAccess` guard checks `hasModuleAccess(role,"payroll")`, which `EMPLOYEE` never has — clicking it should redirect away; confirm actual behavior | `EMPLOYEE` (expect redirect, not payslip data) |
 | NAV-09 | Unread notifications badge | Sidebar polls `GET /notifications/unread-count` every 15s; badge count matches | Any authenticated |
+| NAV-09b | **New 2026-09-28**: sidebar scroll indicator | Desktop sidebar shows a thin line on its right edge with a thumb that tracks scroll position/size — only when the nav list overflows (e.g. ADMIN/CEO); absent for short menus (IT/employee) | All roles (desktop) |
 | NAV-10 | Theme toggle / Logout / My Account | Present for every role at bottom of sidebar | All roles |
 | NAV-11 | MobileNav parity | Confirm MobileNav's per-role link sets now **match** the desktop Sidebar's module-by-module gating from NAV-01a–f (previously MobileNav had its own drifted checks — e.g. it showed "Settings" unconditionally to every management role, and "Holidays" unconditionally; both are now gated the same as desktop: Settings → Owner only, Holidays → `leave` module) | All roles (mobile viewport) |
 | NAV-12 | Desktop Org Switcher | Appears inline in `DashboardLayout` only for `{ADMIN,CEO,IT_MANAGER}`; switching updates all page data without full reload | `ADMIN`, `CEO`, `IT_MANAGER` (and only if authorized per AUTH-10/AUTH-11b) |
@@ -248,12 +274,12 @@ they still use their own local, narrower buckets, independent of
 | EMP-09 | Certifications: add/edit/delete (`POST/PATCH/DELETE /api/employees/:id/certifications...`) | CRUD on an employee's certifications. **Router-level gate is now `requireModule("certifications")` = `ADMIN,CEO,HR`** (was `ADMIN,CEO,MANAGER` — this was the actual bug being fixed: HR previously had no access at all despite the tree giving it to them). **Also fixed a follow-on bug**: the controller's own internal `isManagement` check inside each of the three handlers still hardcoded `["ADMIN","CEO","MANAGER"]` after the route was updated, which would have 403'd HR anyway despite passing the router — now uses `hasModuleAccess(role,"certifications")` too. Confirm HR can actually add/edit/delete a certification end-to-end, not just reach the route. | `ADMIN,CEO,HR` (+ self can manage their own) |
 | EMP-09b | Certification visibility on `GET /employees/:id` | The `certifications` field is stripped from the response unless the viewer has the `certifications` module or is viewing their own profile — was hardcoded `["ADMIN","CEO","MANAGER"]`, now `hasModuleAccess(role,"certifications")`; confirm HR now sees it, `MANAGER`/`SALES_HEAD`/`MANAGEMENT`/`DEPARTMENT_HEAD` do not (unless self) | `ADMIN,CEO,HR` (+ self) |
 | EMP-10 | `/employees/:id/attendance` history page | Per-employee attendance history view | No explicit route guard — verify who can actually reach a *different* employee's history vs. their own (likely should be self or Management) — **unchanged by this rewrite** |
-| EMP-11 | `/employee-360/:id` (Employee 360°) | Aggregated profile+assets+attendance+performance view; `GET /api/employee-360/:id` is `requireAuth` only | Any authenticated (confirm whether it should be self-or-management scoped) — **unchanged** |
+| EMP-11 | `/employee-360/:id` (Employee 360°) | Aggregated profile+assets+attendance+performance view; `GET /api/employee-360/:id` is `requireAuth` only at the route layer. **Confirmed 2026-09-28**: the controller does scope it — `IT_MANAGER` opening someone else's 360 gets 403 "You can only view your own 360 profile"; management roles can open others' | Self (any role); management roles (others) |
 | EMP-12 | `/employee-forms` builder | Create/toggle custom onboarding forms, view submissions. Route guard is the `employeeForms` module (`ADMIN,CEO,HR`), not Owner — HR gained this, `MANAGER` (since removed as a role entirely, see §0) lost it. **Also fixed**: the page component itself had its own hardcoded `if (!["ADMIN","CEO","MANAGER"].includes(role)) return null` gate that would have shown a blank page to HR even after the route let them in — now uses `hasModuleAccess(role,"employeeForms")` | `ADMIN,CEO,HR` |
 | EMP-12b | **New 2026-09-24**: `PATCH /employee-forms/:id` | `updateEmployeeForm` — edits `title` and/or extends `expiresAt` (via the same `expiresInDays` days-from-now convention `createEmployeeForm` uses). Separate from the existing `PATCH /employee-forms/:id/toggle` (only flips `active`). Frontend: each form card gets an inline Edit (pencil) form (title + "extend expiry by") | `ADMIN,CEO,HR` (same `employeeForms` module gate) |
 | EMP-12c | **New 2026-09-24**: `DELETE /employee-forms/:id` | `deleteEmployeeForm` — deletes the form; `EmployeeFormSubmission.form` is `onDelete: Cascade`, so its responses go with it (confirm the frontend's confirm dialog surfaces this). Frontend Delete button uses `window.confirm` | `ADMIN,CEO,HR` |
 | EMP-12d | **New 2026-09-24**: `DELETE /employee-forms/:id/submissions/:submissionId` | `deleteEmployeeFormSubmission` — deletes one response only, form and other responses untouched. Frontend: Delete button next to each response's status chip in the "Form responses" panel, `window.confirm`-gated | `ADMIN,CEO,HR` |
-| EMP-13 | Public form fill (`/employee-form/:token`) | Prospective employee fills form with no login. **See AUTH-12** for the 2026-09-24 submit-500 fix and its still-pending migration | Public |
+| EMP-13 | Public form fill (`/employee-form/:token`) | Prospective employee fills form with no login. **See AUTH-12** for the 2026-09-24 submit-500 fix (migration deployed, client regenerated 2026-09-28) | Public |
 | EMP-14 | CEO role assignment cap | Role dropdown blocks assigning a 4th CEO (`MAX_CEO_COUNT=3`) in both `EmployeeProfile.jsx` and `Employees.jsx` role selects | Owner (only they can reassign roles) |
 | EMP-15 | **REMOVED 2026-09-24** — Finance Manager (`MANAGER`) role, re-scoped | The `MANAGER` role itself no longer exists (dropped from `UserRole` in `schema.prisma`, migration `20260924130000_remove_manager_role` — same enum-rebuild pattern as `SALES_HEAD`) — there is nothing left to test here; a login with this role can't be created. Historical note only: between 2026-09-23 and its removal the following day, it briefly had only narrow Payroll/Payroll Reports access after previously being treated as "Owner-tier" everywhere | N/A — role removed |
 
@@ -305,7 +331,7 @@ Unchanged by this rewrite — included for completeness.
 |---|---|---|---|
 | ATT-12 | `/attendance` grid page | Route guard changed from `RequireManagement` (Management-6) to the `attendance` module (`ADMIN,CEO,HR,MANAGEMENT,DEPARTMENT_HEAD`) — **`SALES_HEAD` and `MANAGER` (Finance Manager) can no longer reach this page at all**, confirm redirect. Actual data-action visibility (Mark/Save/Resolve) is still gated by the **Attendance permission matrix**, not just the route | `ADMIN,CEO,HR,MANAGEMENT,DEPARTMENT_HEAD` reach the page; matrix decides what they can do |
 | ATT-12b | `DEPARTMENT_HEAD` grid scoping | The daily attendance grid (`GET /api/attendance`) for a `DEPARTMENT_HEAD` only lists employees from **their own department** — confirm a department head cannot see other departments' rows even by paging/searching | `DEPARTMENT_HEAD` |
-| ATT-13 | `GET /api/attendance` (daily grid data) | Requires `canRead` per the matrix | Per matrix (§6c) |
+| ATT-13 | `GET /api/attendance` (daily grid data) | Requires `canRead` per the matrix. **2026-09-28 run**: `IT_MANAGER` in CloudNext360 gets 200 here (also on ATT-16/ATT-17) — expected, not a bug: that org has an explicit `AttendancePermission` row for `IT_MANAGER` (`canCreate`+`canRead`, saved 2026-09-21), which overrides the no-access default (PERM-06). Account for per-org matrix rows before calling this a leak | Per matrix (§6c) |
 | ATT-14 | `POST /api/attendance/mark`, `POST /api/attendance/save` | Requires `canCreate` **or** `canUpdate` | Per matrix |
 | ATT-15 | `GET /api/attendance/export` | Date-range export; for a `DEPARTMENT_HEAD` the exported sheet only includes their own department's employees (same scoping as the grid) | Per matrix (`canRead`); `DEPARTMENT_HEAD` scoped to own dept |
 | ATT-16 | `GET /api/attendance/anomalies`, `PATCH /api/attendance/anomalies/:id/resolve` | List + resolve anomalies (late/missing checkout) | `canRead` / `canUpdate` |
@@ -339,7 +365,7 @@ Unchanged by this rewrite — included for completeness.
 |---|---|---|---|
 | LV-01 | `/leave-requests` page + `POST /api/leaves` | Submit a leave request | Any authenticated (self) |
 | LV-02 | `GET /api/leaves` | Non-`leave`-module roles see only own requests; `leave` module roles see all, **except `DEPARTMENT_HEAD` which is scoped to their own department's employees only** (an `employeeId` query param combined with the department filter, not a full override) | Self-scoped (default) / `ADMIN,CEO,HR` (all) / `DEPARTMENT_HEAD` (own dept only) |
-| LV-03 | `GET /api/leaves/balance` | `employeeId` query param usable only by `leave`-module roles — verify a non-management user passing another employee's ID is rejected | Self (own) / `ADMIN,CEO,HR,DEPARTMENT_HEAD` (any) |
+| LV-03 | `GET /api/leaves/balance` | `employeeId` query param usable only by `leave`-module roles. **Corrected 2026-09-28**: a non-`leave`-module user passing another employee's ID is **not** rejected with 403 — the controller silently ignores the param and returns the caller's *own* balance (200). That's still safe (no data leaks); verify the response is the caller's own balance, not a 403 | Self (own) / `ADMIN,CEO,HR,DEPARTMENT_HEAD` (any) |
 | LV-04 | `GET /api/leaves/calendar` | Leave calendar view. Route guard now the `leave` module (`ADMIN,CEO,HR,DEPARTMENT_HEAD` — was Management-6, so `SALES_HEAD`/`MANAGEMENT`/`MANAGER` lost this). `DEPARTMENT_HEAD` sees only their own department's approved leave | `ADMIN,CEO,HR,DEPARTMENT_HEAD` (dept-scoped for the latter) |
 | LV-05 | `PATCH /api/leaves/:id/review` | Approve/reject. Route guard now the `leave` module. **A `DEPARTMENT_HEAD` reviewing a leave application outside their own department now gets a 404** (new scoping check) — confirm this, not just that the route itself is reachable | `ADMIN,CEO,HR,DEPARTMENT_HEAD` (dept-scoped for the latter) |
 | LV-06 | `DELETE /api/leaves/:id` | Cancel own pending leave | Self |
@@ -387,14 +413,16 @@ pre-2026-09-24 history.
 | ID | Feature / Endpoint | What to verify | Roles with access |
 |---|---|---|---|
 | ORG-01 | `GET /api/organization`, `GET /api/organization/company` | Basic org info | Any authenticated |
-| ORG-02 | `/organization-comparison` page + `GET /api/organization/comparison` | Cross-org comparison view. Both frontend `RequireOwner` and backend route narrowed from `ADMIN,CEO,MANAGER` to `ADMIN,CEO` | Owner (`ADMIN,CEO`) |
-| ORG-03 | `POST /api/organization/suborganizations`, `DELETE .../suborganizations/:id` | Create/delete a sub-org. Route guard **and** the controller's own internal role check both narrowed from `ADMIN,CEO,MANAGER` to `ADMIN,CEO` (the internal check's error message also updated, was previously stale/misleading) | `ADMIN, CEO` |
+| ORG-02 | `/organization-comparison` page + `GET /api/organization/comparison` | Cross-org comparison view. Both frontend `RequireOwner` and backend route narrowed from `ADMIN,CEO,MANAGER` to `ADMIN,CEO`. **Clarified 2026-09-28**: the controller further restricts `ADMIN` to the **main-company** ADMIN — a sub-org ADMIN gets 403 "Only the main company ADMIN can compare organizations" (by design, same rule as org switching) | `CEO`, main-company `ADMIN` |
+| ORG-03 | `POST /api/organization/suborganizations`, `DELETE .../suborganizations/:id` | Create/delete a sub-org. Route guard **and** the controller's own internal role check both narrowed from `ADMIN,CEO,MANAGER` to `ADMIN,CEO` (the internal check's error message also updated, was previously stale/misleading). **Clarified 2026-09-28**: same main-company-only rule as ORG-02 for `ADMIN` — a sub-org ADMIN gets 403 "Only the main company ADMIN can remove organizations" | `CEO`, main-company `ADMIN` |
 | ORG-04 | `PATCH /api/organization` | Edit org settings (name, primary color, working hours/day, timezone). Narrowed from `ADMIN,CEO,MANAGER` to `ADMIN,CEO` | `ADMIN, CEO` |
 | ORG-05 | `PATCH /api/organization/company/set-main` | Designate the main company org — unchanged | `CEO` only |
 | ORG-06 | `/departments` page + CRUD | **Split for the first time**: reading the list is open to any authenticated user (unchanged, needed for filter dropdowns elsewhere), but create/rename/reassign-manager is now `ADMIN,CEO` only (narrowed from Management-6 via `requireManagement`) — confirm `HR`/`SALES_HEAD`/`MANAGEMENT` can no longer create or edit a department, only view. `DEPARTMENT_HEAD` gets a **read-only** view of just their own department (page hides Add/Delete/manager-reassign controls for them — `canEdit = ["ADMIN","CEO"].includes(role)` in `Departments.jsx`) | View: any authenticated (dept-scoped for `DEPARTMENT_HEAD`); Write: `ADMIN, CEO` only |
 | ORG-06b | `GET /api/departments` — `DEPARTMENT_HEAD` scoping | A `DEPARTMENT_HEAD` only ever gets their own department back (`where: { id: departmentId }`), not the full org list — a department head with no `departmentId` set gets an empty array | `DEPARTMENT_HEAD` |
 | ORG-07 | Timezone picker (Settings) | All 6 GCC zones labeled with country names, plus Karachi/Kolkata; ~400 remaining IANA zones show a live "City (UTC offset)" label; grouped into `<optgroup>`s by region | Owner (Settings access) |
 | ORG-08 | Shared `timezones.js` | `AttendanceSites.jsx` timezone dropdown matches `Settings.jsx` | `ADMIN,CEO,HR,MANAGEMENT,DEPARTMENT_HEAD` on AttendanceSites (attendance module), Owner on Settings |
+| ORG-07b | **Updated 2026-09-28**: full timezone list | 425 zones incl. a `UTC` group and a real `Europe` group (Europe zones used to fall into "Other"); legacy aliases like `Asia/Calcutta` present; labels read "City, Region (UTC±HH:MM)" (DST-aware), sorted by offset within each region; GCC/Karachi/Kolkata keep their friendly names | Owner (Settings), attendance module (AttendanceSites) |
+| ORG-07c | **New 2026-09-28**: 12-hour time everywhere | Every displayed time shows AM/PM (attendance tables, My Attendance, profile check-in/out and "Shift", audit log, announcements, device last-sync, offline record) regardless of OS locale; native time pickers (shift/break) show a 12-hour readout underneath since the picker itself follows the OS | All roles |
 | ORG-09 | `primaryColor` → accent token | Changing the org's brand color in Settings updates `--accent` app-wide | Owner |
 
 ---
@@ -409,12 +437,12 @@ pre-2026-09-24 history.
 | PRJ-03b | `DEPARTMENT_HEAD` project scoping | A `DEPARTMENT_HEAD`'s "all projects" view (and single-project `GET`) is further scoped to projects that have **at least one member from their own department** — not the whole org | `DEPARTMENT_HEAD` |
 | PRJ-04 | `POST/PATCH/DELETE /api/projects`, `.../members`, `.../members/:memberId` | Create/edit/delete project + manage members. Route guard changed from `requireManagement` to the `projects` module (`ADMIN,CEO,SALES_HEAD,MANAGEMENT,DEPARTMENT_HEAD`) — `HR` and `MANAGER` lost this. **New**: a `DEPARTMENT_HEAD` acting on a project outside their department scope (guessing an id, not just what's listed) now gets a 404 via `isProjectInDepartmentScope()`, on update/delete/add-members/update-member-hours | `ADMIN,CEO,SALES_HEAD,MANAGEMENT,DEPARTMENT_HEAD` (latter scoped to own dept's projects) |
 | PRJ-05 | `GET /api/projects/work-categories` | Read | Any authenticated |
-| PRJ-06 | `POST/PATCH/DELETE /api/projects/work-categories(/:id)` | Manage categories — still `requireManagement` (Management-6, **not** narrowed to the `projects` module — deliberate, work categories are org-wide taxonomy, not per-project) | Management (6) |
+| PRJ-06 | `POST/PATCH/DELETE /api/projects/work-categories(/:id)` | Manage categories. **Corrected 2026-09-28**: this row used to say `requireManagement`, but `project.routes.js` actually gates all three with `requireModule("projects")` — so `HR` can **not** manage work categories; reading them (PRJ-05) stays open to everyone | `ADMIN,CEO,MANAGEMENT,DEPARTMENT_HEAD` |
 | TASK-01 | `/tasks` page ("Tasks" / "My Tasks") | **FIXED 2026-09-23**: `task.routes.js` is now mounted at `/api/tasks` in `backend/src/index.js` (previously never required, so every call 404'd for every role). List/create/update/delete now actually work | All roles reach the page; API now works |
 | TASK-01b | **FIXED 2026-09-24**: create form silent no-op | Reported as "Tasks page not working" — the entire DB had zero `Project` rows, `createTask` required `projectId`, and the create-form submit handler silently no-op'd (`if (form.projectId && form.title.trim()) create.mutate()`) whenever nothing was selected, with an always-empty "Select project" dropdown — clicking "Create task" visibly did nothing, no error. The API itself was already correct end-to-end; this was a pure UX gap. **Superseded the same day by TASK-04** (project made fully optional) rather than just fixing the error message — confirm both: a missing **title** now shows a visible inline error ("Task title is required."), and a missing **project** no longer blocks submission at all | Any role reaching the create form |
 | TASK-02 | Task management actions | Create/update-others'-fields/delete gated by the `tasks` module (`ADMIN,CEO,MANAGEMENT,DEPARTMENT_HEAD` — `SALES_HEAD` had this too until its removal 2026-09-23, `MANAGER` never had it and was removed as a role entirely 2026-09-24) instead of a local hardcoded array — `HR` cannot create/delete tasks or reassign/reschedule someone else's, but can still update the `status`/`actualHours` of a task assigned to them (self-update path, unchanged) | `ADMIN,CEO,MANAGEMENT,DEPARTMENT_HEAD` (management actions); assignee (status/hours on own task) |
 | TASK-03 | `DEPARTMENT_HEAD` task scoping | Task list/create/update/delete for a `DEPARTMENT_HEAD` is scoped to tasks assigned to someone in their department **or** belonging to a project with a member from their department **or** — since TASK-04 made a task's project optional — a project-less, unassigned task the department head created themselves. **Reworked 2026-09-24** as `isTaskInDepartmentScope()` (was `isTaskProjectInDepartmentScope()`, which always returned `false` for a `projectId: null` task — a real bug TASK-04 would otherwise have introduced, since it would have 404'd a DEPARTMENT_HEAD trying to edit/delete *any* project-less task, even ones assigned to their own department). Acting on an out-of-scope task/project returns 404, not just omitted from lists | `DEPARTMENT_HEAD` |
-| TASK-04 | **New 2026-09-24**: Task no longer requires a Project | `Task.projectId` is now nullable (`String?`) in `schema.prisma`; `createTask` only requires `title`; a task can be assigned directly to an employee with no parent project. Also fixed two crashes this would otherwise have introduced: `createTask`/`updateTask`'s status-change/assignment notifications used to build their message as `` `${task.project.name}: ...` `` unconditionally, which throws on a null `project` — both now fall back to just the task title. **Manual step pending**: migration `20260924140000_task_project_optional` is not yet deployed to the live DB as of this writing — until `cd backend && npx prisma migrate deploy && npx prisma generate` actually runs, the live DB still enforces `NOT NULL` on `projectId`, so creating a project-less task will still fail at the DB layer even though the app code now allows it | Same as TASK-02 (create/update `projectId`, management-only) |
+| TASK-04 | **New 2026-09-24**: Task no longer requires a Project | `Task.projectId` is now nullable (`String?`) in `schema.prisma`; `createTask` only requires `title`; a task can be assigned directly to an employee with no parent project. Also fixed two crashes this would otherwise have introduced: `createTask`/`updateTask`'s status-change/assignment notifications used to build their message as `` `${task.project.name}: ...` `` unconditionally, which throws on a null `project` — both now fall back to just the task title. **2026-09-28 — fixed, passing**: migration `20260924140000_task_project_optional` was deployed but the Prisma client was stale, so `GET /api/tasks` returned 500 for ADMIN/CEO/MANAGEMENT once a project-less task existed. `npx prisma generate` was re-run the same day; re-test confirmed all roles now load tasks (the DB has 1 project-less task). Any backend process started *before* the regenerate still has the old client in memory and must be restarted | Same as TASK-02 (create/update `projectId`, management-only) |
 | TASK-05 | **New 2026-09-24**: full task-edit UI | `updateTask` already supported editing every field, but `Tasks.jsx` only ever exposed the status dropdown. Added an Edit (pencil) button next to Delete (both management-only) that swaps a task card into an inline form covering title/description/assignee/priority/due date/estimated+actual hours/project, via the same `PATCH /tasks/:id`. Status stays its own always-visible dropdown outside edit mode, since a plain assignee (not just management) can update status/actual-hours on their own task, and folding it into the management-only form would take that away | `ADMIN,CEO,MANAGEMENT,DEPARTMENT_HEAD` (edit/delete UI); assignee (status dropdown only) |
 | PERF-01 | `/performance` page ("Performance" / "My Performance") | **FIXED 2026-09-23**: `performance.routes.js` mounted at `/api/performance/:employeeId` — but that alone did **not** fully fix this page (see PERF-01b). | All roles reach the page |
 | PERF-01b | **FIXED 2026-09-24**: real 404 on submit, silent-empty list | Reported as "Performance page not working," screenshot showing "Route not found: POST /api/performance" on submit. Root cause: `performance.routes.js` only ever defined `GET/POST /performance/:employeeId` (for `Employee360.jsx`); the separate standalone `Performance.jsx` page was written against a flat-collection shape — `GET /performance` to list, `POST /performance` with `employeeId` in the body — that never existed server-side. The list call 404'd silently (React Query left `reviews` at its `[]` default, so the page just looked empty); the create call surfaced the visible "Route not found" error. Fixed by adding `listAllPerformanceReviews`/`createPerformanceReviewForEmployee` (org-wide `GET/POST /performance`, same visibility rule as the per-employee route) alongside the unchanged `GET/POST /:employeeId` — different path shapes on the same router, no conflict. Re-test end-to-end: list now populates and create actually succeeds | All roles (list/create per PERF-02's rule) |
@@ -457,6 +485,7 @@ pre-2026-09-24 history.
 | NOT-01 | `/notifications` page | List own notifications | Any authenticated |
 | NOT-02 | `GET /api/notifications`, `GET .../unread-count` | Data + badge count | Any authenticated |
 | NOT-03 | `POST /api/notifications/read-all`, `.../read-by-type`, `.../:id/read` | Mark-as-read actions | Any authenticated (own notifications) |
+| NOT-04 | **Fixed 2026-09-28**: clicking a notification opens the right page | Previously HR/MANAGEMENT got "New asset request" (and MANAGEMENT "New leave request") notifications linking to pages they can't open, so clicking bounced them to their own profile; employees' leave/asset decision notifications linked to management-only pages too. Verify: (a) the **whole row** is clickable, not just the icon; (b) new asset requests notify only `ADMIN,CEO,IT_MANAGER` and new leave requests only `ADMIN,CEO,HR,DEPARTMENT_HEAD`; (c) an employee's leave decision opens `/attendance/me` and an asset-request decision opens their own profile; (d) **old stored** notifications with `/asset-requests`/`/leave-requests` links still land somewhere the viewer can open (remapped client-side by `resolveNotificationLink`) | All roles |
 | ANN-01 | `/announcements` page | View org announcements | Any authenticated |
 | ANN-02 | `GET /dashboard/announcements` | Read | Any authenticated |
 | ANN-03 | `POST /dashboard/announcements`, `DELETE .../:id` | Create/delete an announcement — still `requireManagement` (Management-5, unchanged). **Fixed a frontend drift**: `Announcements.jsx`'s own `management` gate was hardcoded to `["ADMIN","CEO","MANAGER"]` — `MANAGER` was never actually part of the `MANAGEMENT_ROLES` bucket (see §0), so this hardcoded array both wrongly included a role that didn't belong and missed `SALES_HEAD/HR/MANAGEMENT/DEPARTMENT_HEAD` entirely; those roles could create/delete via the API but never saw the controls. Now uses the shared `isManagement()` util; confirm all 5 current Management roles see the create/delete controls (`SALES_HEAD` and `MANAGER` no longer exist to test) | Management (5) |
@@ -529,7 +558,9 @@ Run these as a dedicated pass after the module-by-module tests above:
 9. **Org-switch forgery**: unchanged, still enforced in
    `auth.middleware.js`. Also re-run AUTH-11b (org-switcher list vs.
    enforcement fix).
-10. **`.env` git-history check**: still open, unchanged.
+10. **`.env` git-history check**: **done 2026-09-28 — clean** (no real
+    `.env` ever committed; only placeholder values in `backend/.env.example`,
+    none matching the live secrets).
 11. **CEO count enforcement**: unchanged.
 12. **REMOVED 2026-09-24** — Finance Manager (`MANAGER`) narrow-scope
     regression: this item previously called for re-testing that a
@@ -591,8 +622,13 @@ new findings:
   was stale (it and this file's mention of `MANAGER` predate that
   build-out and the role's removal). It's now gated by the
   `payrollReports` module, `ADMIN`/`CEO` only.
-- **Three migrations from 2026-09-24 are not yet deployed to the live DB**
-  as of this writing (same "manual step, required" pattern as module 07
+- **Update 2026-09-28 — the three 2026-09-24 migrations below are all
+  deployed** (`prisma migrate status`: "Database schema is up to date!",
+  36 migrations), and `npx prisma generate` was re-run the same day — the
+  generated client now matches the schema (TASK-04 re-tested passing).
+  The historical notes below describe the pre-deploy state:
+- ~~Three migrations from 2026-09-24 are not yet deployed to the live DB~~
+  (same "manual step, required" pattern as module 07
   and the `SALES_HEAD`-removal migration — `cd backend && npx prisma
   migrate deploy && npx prisma generate`, all three can run in the same
   pass):

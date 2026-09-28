@@ -20,6 +20,24 @@ and 8 (check-in progress fill animation) have no standalone patch — they
 interleave with module 05's changes in the same files/functions, so they
 ship bundled inside module 05 (see that section below).
 
+> **Migration status (checked 2026-09-28)**: `npx prisma migrate status`
+> reports all 36 migrations applied — "Database schema is up to date!" —
+> including the three 2026-09-24 ones that notes further down still call
+> "pending" (`20260924120000_employee_form_submission_optional_fields`,
+> `20260924130000_remove_manager_role`, `20260924140000_task_project_optional`).
+> `npx prisma generate` had never completed after them, so the stale
+> client made `GET /api/tasks` 500 for ADMIN/CEO/MANAGEMENT once a
+> project-less task existed ("Error converting field \"projectId\" …
+> found incompatible value of \"null\""). **Resolved 2026-09-28**: the user
+> re-ran `npx prisma generate`; the generated JS client
+> (`node_modules/.prisma/client/index.js`) now matches the schema and a
+> re-run of the RBAC suite confirmed Tasks loads for every role. (The
+> engine `.dll.node` and the `schema.prisma` copy in that folder still
+> carry older timestamps — the EPERM lock blocked only that final rename,
+> which is harmless; the runtime uses the schema inlined in `index.js`.)
+> Any backend process started before the regenerate still has the old
+> client in memory and must be restarted.
+
 ## 01 — Security checklist
 
 Files: `backend/src/index.js`, new `backend/src/middleware/cache.middleware.js`,
@@ -780,7 +798,9 @@ Three fixes from a live chat request:
   npx prisma generate
   ```
   Until this runs, the public form's submit button will keep failing with
-  the same 500.
+  the same 500. **Update 2026-09-28**: migration confirmed deployed
+  (`prisma migrate status` up to date); only `prisma generate` still
+  outstanding — see the migration-status note at the top of this file.
 - **Notification bell moved out of the sidebar**: every role's nav rail in
   `Sidebar.jsx` had a "Notifications"/"Activity" entry buried among 10-20+
   other icons — easy to miss, and on desktop that sidebar entry was the
@@ -819,6 +839,8 @@ Two more fixes from the same live chat thread:
     generate` (this can run in the same pass as the still-outstanding
     `20260924120000_employee_form_submission_optional_fields` migration
     from earlier the same day — both are pending on the live DB).
+    **Update 2026-09-28**: both confirmed deployed; only `prisma generate`
+    still outstanding (see the note at the top of this file).
   - Removed `MANAGER` from `UserRole` in `schema.prisma`, from
     `MANAGEMENT_ROLES`/`ASSIGNABLE_ROLES`/`ROLE_MODULES` in both
     `utils/roles.js` files, and from `ROLE_LABELS` (frontend) — "Finance
@@ -966,6 +988,10 @@ someone without first creating a project.
   ```
   Until that runs, `createTask`/`updateTask` will still hit the live DB's
   `NOT NULL` constraint on `projectId` whenever one isn't given.
+  **Update 2026-09-28**: the migration *is* deployed (project-less tasks now
+  exist in the DB), but `prisma generate` never completed — so the stale
+  client now makes `GET /api/tasks` 500 for management roles as soon as it
+  reads one of those rows. See the note at the top of this file.
 - `backend/src/controllers/task.controller.js`:
   - `createTask` no longer requires `projectId` — only `title` is
     mandatory now. The project-lookup/DEPARTMENT_HEAD-scope check only
@@ -1037,11 +1063,139 @@ ADMIN/CEO can make changes to an ADMIN or CEO profile.
   write): HR edit CEO, MANAGEMENT edit CEO, ADMIN deactivate CEO, ADMIN
   demote CEO, ADMIN delete CEO → all 403.
 
+## Post-module addition: sidebar scroll indicator, 12-hour time, full timezone list
+
+- `frontend/src/components/Sidebar.jsx`: the nav list hides its native
+  scrollbar, so a thin custom scroll line (track + thumb mirroring scroll
+  position/size) now renders along the rail's right edge — only when the
+  list actually overflows (`useScrollIndicator` hook, `ResizeObserver`).
+  Desktop sidebar only; MobileNav unchanged.
+- New `frontend/src/utils/time.js` (`formatTime`, `formatDateTime`,
+  `formatClock`) — every time display now passes `hour12: true`
+  explicitly (browser default follows the OS locale, which gave a 24-hour
+  clock on many machines): Dashboard, Attendance, MyAttendance,
+  EmployeeAttendanceHistory, EmployeeProfile (check-in/out + "Shift"
+  field, e.g. "9:00 AM - 6:00 PM"), AuditLog, Announcements,
+  AttendanceDevices, OfflineAttendanceVerification. Native
+  `<input type="time">` pickers can't be forced to 12-hour (they follow
+  the OS), so each one (Settings shift/break, EmployeeProfile shift) shows
+  a 12-hour readout as its `hint`.
+- `frontend/src/utils/timezones.js`: added the missing `Europe` region
+  (Europe zones were all falling into "Other"), a `UTC` group, and a
+  merged base list so `UTC` and legacy aliases like `Asia/Calcutta` (which
+  Chrome's `Intl.supportedValuesOf` omits) are always present — 425 zones
+  total. Labels are now a consistent "City, Region (UTC±HH:MM)" computed
+  live (DST-aware), and zones within each group are sorted by offset.
+
+## Post-module fix: notifications opened the wrong page for some roles
+
+Reported: in a management profile, clicking a notification "didn't open
+and leads to somewhere else." Root cause: `notifyManagement` sent "New
+asset request" / "New leave request" to every `MANAGEMENT_ROLES` user, but
+HR/MANAGEMENT can't open `/asset-requests` and MANAGEMENT can't open
+`/leave-requests` — the route guards silently redirected them to their own
+profile. Employee-facing decision notifications had the same problem
+(linked to management-only pages).
+
+- `backend/src/utils/notifications.js`: `notifyManagement` takes an
+  optional `moduleKey` and then only notifies roles with that module.
+  Asset requests → `assetRequests` (ADMIN, CEO, IT_MANAGER — IT now gets
+  these; it didn't before); leave requests → `leave` (ADMIN, CEO, HR,
+  DEPARTMENT_HEAD). Tickets unchanged (still all management roles, IT
+  still not included — flagged to the user, not changed).
+- `leave.controller.js`: employee's leave-decision link → `/attendance/me`.
+  `asset-request.controller.js`: decision/fulfilled links →
+  `/employees/<employeeId>` (the profile lists their asset requests).
+- `frontend/src/pages/Notifications.jsx`: whole row is clickable (was only
+  the small icon), and `resolveNotificationLink` remaps already-stored
+  links the viewer can't open (`/asset-requests` without the module → own
+  profile; `/leave-requests` without the module → `/attendance/me`). At
+  the time of the fix, 4 of 11 stored rows with those links were
+  unreachable for their recipient.
+
+## Post-module fix: deletes fully remove the row; same email can be re-added
+
+Request: deleting something in the frontend must remove it from the DB,
+and a deleted user's email must be reusable. Audit of every delete path
+against the live DB's actual FK rules (`pg_constraint`):
+
+- Employee and asset deletes were already hard deletes, and almost every
+  FK to `User` is CASCADE (their attendance/leave/payroll/notifications/
+  certifications/etc.) or SET NULL (records they only touched — tickets,
+  audit log, reviewed-by fields, etc.). **Two RESTRICT FKs blocked it**:
+  `Announcement.createdById` (anyone who had ever posted an announcement
+  could never be deleted — the delete 500'd, the row and its email stayed)
+  and `EmployeeFormInvitation.createdById` (dead feature). Latent at the
+  time — 0 announcements existed — but would bite the first poster.
+  - New migration `20260928120000_announcement_creator_set_null`:
+    `createdById` nullable + `ON DELETE SET NULL` (announcement is kept,
+    author cleared — the UI already shows "Management" for a null
+    author). Schema: `createdById String?`, `createdBy User? … onDelete:
+    SetNull`. **Deployed** (`prisma migrate deploy`) and client
+    regenerated (engine-DLL rename hit the usual EPERM; JS client updated
+    fine, verified via `Prisma.dmmf`).
+  - `deleteEmployee` also `deleteMany`s the user's `EmployeeFormInvitation`
+    rows in the same transaction.
+- `cancelLeave` (`DELETE /leaves/:id`) now deletes the pending leave
+  instead of setting `status: "CANCELLED"` (matches `cancelRequest` for
+  asset requests, which already deleted). Returns 204.
+- Re-adding the same email/serial number needs no code change once the row
+  is truly gone — the `email`/`serialNumber` uniqueness is only against
+  existing rows.
+- Verified end-to-end inside a rolled-back transaction (nothing persisted):
+  delete a user who posted an announcement → user gone, announcement kept
+  with null author, notifications/leave cascaded, same email re-created
+  OK; delete an asset with lifecycle history → gone, same serial re-created
+  OK.
+- **Deliberately left as-is** (not deletes, or too destructive to change
+  without an explicit decision): marking an employee "Left Company" is a
+  status change — that user still exists and still holds their email;
+  removing a **sub-company** archives it (`archivedAt`) rather than hard-
+  deleting, since a hard delete would wipe every user/asset/department/
+  ticket/holiday/audit row in that org.
+
+## Automated RBAC test run (2026-09-28)
+
+There's no automated test suite in either app (`npm test` isn't
+configured). `TESTPLAN.md`'s API-checkable rows were run as a script
+against a local backend instance on port 4099 and the live DB, using
+locally-signed JWTs for real users of each role (DEPARTMENT_HEAD skipped:
+no live user holds it). Non-mutating by design: only GETs, plus write
+probes aimed at nonexistent ids (a guard that passes yields 404, never a
+write). **489 checks, 479 passed** on the first pass; one real bug (the
+stale-Prisma-client `GET /api/tasks` 500 above) was fixed by
+regenerating the client (it accounted for 3 of the 10 first-pass
+failures, one per management role), and the re-run gave **482
+passed**. The remaining 7 failures are test-plan
+expectations that don't match intentional code behavior — see the
+"2026-09-28 run" notes in `TESTPLAN.md` (ATT-13/16/17, ORG-02/03, LV-03,
+EMP-11). After aligning the script with those corrected expectations (and
+adding TASK-04/TASK-02 scoping, LV-03 own-balance, main-company-ADMIN
+ORG-02/03, PERM-06 checks), the final API run was **498/498 passed**. A
+separate static/unit pass (no DB, no network) was **100/100**:
+frontend↔backend `ROLE_MODULES`/`MANAGEMENT_ROLES`/`ASSIGNABLE_ROLES`
+parity, `UserRole` enum = the 7 current roles, no code references to
+`MANAGER`/`SALES_HEAD`, `App.jsx` route guards vs. TESTPLAN, removed
+Sales/Financial routes absent, MyAttendance eager + service-worker
+navigate-only fallback, Sidebar/MobileNav gating, `time.js` 12-hour
+formatting, `timezones.js` (425 zones, Europe/UTC/aliases, GCC labels),
+`resolveNotificationLink` cases, and every backend notification `link`
+resolving to a real frontend route. The 8 hardcoded role arrays that
+remain (e.g. org-switcher `["ADMIN","CEO","IT_MANAGER"]`, Dashboard's
+local `["ADMIN","CEO","HR"]`) were reviewed and all match documented
+intent. Not covered: DEPARTMENT_HEAD scoping, genuinely mutating actions
+(payroll generate/approve, real password resets, HR-edits-CEO), and
+UI-only rows.
+
 ## Known gaps flagged by whoever prepared these patches
 
-1. **`.env` git-history check** (brief §1): run
-   `git log --all --full-history -- backend/.env frontend/.env` against
-   this repo to confirm no secret was ever committed. Not yet done.
+1. **`.env` git-history check** (brief §1): **Done 2026-09-28 — clean.**
+   `git log --all --full-history` shows no real `.env` (backend, frontend,
+   `connector-org-a`, `connector-org-b`) was ever committed; only the two
+   `.env.example` files are tracked. A content search of all history for
+   `JWT_SECRET=`/`ENCRYPTION_KEY=`/credentialed `postgres://` URLs found
+   matches only in `backend/.env.example` (initial commit), and all four
+   values there are placeholders that differ from the live `backend/.env`.
 2. **JWT payload** (brief §1) carries `companyId` alongside
    `userId`/`organizationId`/`role` — kept intentionally because
    `auth.middleware.js` and `attendance-site.controller.js` fall back to

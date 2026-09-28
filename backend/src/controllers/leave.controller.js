@@ -367,12 +367,12 @@ async function cancelLeave(req, res, next) {
       return res.status(400).json({ error: "Only pending applications can be cancelled" })
     }
 
-    const updated = await prisma.leaveApplication.update({
-      where: { id },
-      data: { status: "CANCELLED" },
-    })
+    // Removed outright (same as cancelling an asset request) rather than
+    // kept as a CANCELLED row — a still-pending request has no approval
+    // history worth keeping.
+    await prisma.leaveApplication.delete({ where: { id } })
 
-    res.json(updated)
+    res.status(204).send()
   } catch (err) {
     next(err)
   }
