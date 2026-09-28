@@ -7,6 +7,7 @@ import PageHeader from "../components/ui/PageHeader"
 import SectionHeader from "../components/ui/SectionHeader"
 import IconChip from "../components/ui/IconChip"
 import EmptyState from "../components/ui/EmptyState"
+import HrReportGenerator from "../components/HrReportGenerator"
 
 const ANOMALY_META = {
   LOCATION: { icon: MapPin, tone: "pink", label: "Location mismatch" },
@@ -48,7 +49,7 @@ export default function HrReports() {
       <PageHeader
         backTo="/"
         title="HR Reports"
-        subtitle="Headcount, attendance, and leave at a glance."
+        subtitle="Headcount, attendance, and leave at a glance and generate detailed reports."
         actions={canSwitchScope && (
           <div className="flex rounded-full border border-border p-1 text-xs">
             <button
@@ -74,11 +75,19 @@ export default function HrReports() {
         <MetricCard icon={Gauge} tone="pink" label="Attendance rate" value={executive ? `${executive.attendanceRate}%` : "—"} />
       </section>
 
+      <section className="mt-5">
+        <HrReportGenerator />
+      </section>
+
       <section className="mt-5 grid gap-5 lg:grid-cols-2">
         <div className="card p-5">
-          <SectionHeader title="Today's Attendance Anomalies" showMenu />
+          <SectionHeader
+            title={`Today's Attendance Anomalies${anomalies.length > 5 ? ` (${anomalies.length})` : ""}`}
+            showMenu
+          />
           {anomalies.length > 0 ? (
-            <ul className="space-y-3">
+            // Five rows tall (5 × 36.5px rows + 4 × 12px gaps ≈ 231px); the rest scroll.
+            <ul className="max-h-[232px] space-y-3 overflow-y-auto pr-2 [scrollbar-width:thin]">
               {anomalies.map((a, i) => {
                 const meta = ANOMALY_META[a.type] || { icon: Clock, tone: "blue", label: a.type }
                 return (
@@ -114,7 +123,7 @@ export default function HrReports() {
 
       <section className="mt-5">
         <div className="card p-5">
-          <SectionHeader title={`Approved Leave — ${now.toLocaleDateString(undefined, { month: "long", year: "numeric" })}`} showMenu />
+          <SectionHeader title={`Approved Leave : ${now.toLocaleDateString(undefined, { month: "long", year: "numeric" })}`} showMenu />
           {leaveCalendar?.leaves?.length > 0 ? (
             <div className="space-y-2">
               {leaveCalendar.leaves.map((leave) => (

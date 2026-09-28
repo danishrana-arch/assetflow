@@ -1154,6 +1154,69 @@ against the live DB's actual FK rules (`pg_constraint`):
   deleting, since a hard delete would wipe every user/asset/department/
   ticket/holiday/audit row in that org.
 
+## Post-module addition: HR Reports — "Generate HR Report" module
+
+The HR Reports page kept all its existing cards and gained a report
+generator (`frontend/src/components/HrReportGenerator.jsx`, placed under
+the metric cards in `HrReports.jsx`).
+
+- **Backend**: new `backend/src/controllers/hr-report.controller.js` +
+  `routes/hr-report.routes.js`, mounted at `/api/reports/hr` behind
+  `requireAuth` + `requireModule("hrReports")` (ADMIN, CEO, HR) + `noStore`.
+  - `GET /api/reports/hr/options` — organizations/departments/employees/
+    sites for the filters, already limited to what the caller may see.
+  - `GET /api/reports/hr?type=…&from&to&organizationId&departmentId&employeeId&…&format=json|csv|xlsx`
+    — types `attendance`, `employees`, `leave`, `late-absence`,
+    `anomalies`, `headcount`. JSON returns `{columns, rows (first 500),
+    total, truncated, summary, meta}`; CSV/XLSX stream **all** rows built
+    by the exact same code path, so exports always match the preview.
+    Dates required for attendance/leave/late-absence/anomalies; max 366
+    days.
+- **Org scoping** (`authorizedOrganizations`): same rule as
+  `applyOrganizationScope` — CEO, or an ADMIN whose *home* org is the main
+  company, may pick any active org in the company or "all"; everyone else
+  (incl. main-company HR) gets their home org only. A foreign
+  `organizationId` → 403; employee/department filters are always ANDed
+  with the authorized org set, so another org's ids return 0 rows.
+- Reuses existing rules rather than new ones: worked time =
+  `workingMinutes ?? calculateWorkingMinutes()`; late = `status LATE` or
+  check-in after `shiftStart`/`shiftStartDefault` + `lateThresholdMinutes`
+  (org timezone); break = overlap of the attended span with the org's
+  `breakStart`–`breakEnd`; Late & Absence adds scheduled workdays with no
+  record (skipping holidays, approved leave, pre-joining days — same
+  "no record = absent" idea as the attendance sheet export). Times are
+  12-hour in the org timezone. **No "Employee ID" column** — it was
+  removed at the user's request: the app has no human-readable employee
+  code (only the internal cuid, plus attendance-device user IDs that just
+  13 of 32 employees have). If a real employee number is wanted later,
+  it needs a new `User` field + migration.
+- Print/PDF: `pdfkit` is a dependency but was never used anywhere, so
+  Print/PDF opens a print-formatted copy of the preview for the browser's
+  "Save as PDF" rather than adding a server-side PDF pipeline.
+- Existing exports (`/api/export/*`, `/api/attendance/export`) untouched.
+  No schema change, no migration.
+- Verified: 45/45 API checks (HR/sub-org ADMIN org-locked, CEO
+  company-wide, EMPLOYEE/MANAGEMENT 403, forged org 403, foreign employee
+  0 rows, validation, every type JSON+CSV+XLSX row counts equal, filters,
+  empty ranges, no-store, existing card endpoints) + company-wide totals
+  vs DB (attendance 225/225, employees 30/30, leave 1/1; 0 anomaly rows
+  exist in the DB yet) + 24/24 Playwright UI checks as a real HR user.
+
+### Follow-up: date-by-date reports, late/absent colours, 5-row anomalies card
+
+- `HrReports.jsx`: "Today's Attendance Anomalies" list is capped at 5 rows
+  (`max-h-[232px]` = 5 × 36.5px rows + 4 × 12px gaps) with its own
+  scrollbar; the header shows the total when there are more than 5.
+- Attendance, Late & Absence and Anomalies reports are **date-grouped**
+  (`DATE_GROUPED` in `hr-report.controller.js`): JSON returns
+  `groupBy: "date"` and up to 5000 preview rows; the preview pages one
+  date at a time (Prev/Next + date dropdown); Excel writes one sheet per
+  date; Print/PDF prints one section per date on its own page. CSV stays
+  flat.
+- Row colours (`rowTone()` backend / `_tone` in JSON): ABSENT → red,
+  LATE or "Late by N min" → yellow — in the preview, as Excel cell fills
+  (`FDE2E2` / `FFF4CC`, legend on "Report info"), and in print.
+
 ## Post-module addition: failed-login alerts + self-service password reset
 
 - **Failed-login tracking** (`auth.controller.js` `login`): new `User`

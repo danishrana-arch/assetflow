@@ -30,6 +30,7 @@ const employeeFormRoutes = require("./routes/employee-form.routes")
 const publicEmployeeFormRoutes = require("./routes/public-employee-form.routes")
 const notificationRoutes = require("./routes/notification.routes")
 const searchRoutes = require("./routes/search.routes")
+const hrReportRoutes = require("./routes/hr-report.routes")
 const { notFound, errorHandler } = require("./middleware/error.middleware")
 
 if (!process.env.JWT_SECRET) {
@@ -132,6 +133,7 @@ app.use("/api/employee-forms", employeeFormRoutes)
 app.use("/api/public/employee-forms", publicEmployeeFormRoutes)
 app.use("/api/notifications", notificationRoutes)
 app.use("/api/search", searchRoutes)
+app.use("/api/reports/hr", hrReportRoutes)
 
 app.use(notFound)
 app.use(errorHandler)

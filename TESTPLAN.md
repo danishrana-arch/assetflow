@@ -8,7 +8,13 @@ actual routing/guard code (`frontend/src/App.jsx`, `Sidebar.jsx`,
 assumed from feature names. Each row is "verify this works / is
 blocked as stated," not a full step-by-step script.
 
-**Last automated run: 2026-09-28** — 489 API checks (every role except
+**Latest run (2026-09-28, after the later additions)**: see **§17** —
+delete/re-add, failed-login alerts + password reset, HR report
+generator, Vite upgrade, session-refresh smoke: **723/723 checks passed**
+(API 86, browser 38, static 101, RBAC regression 498), plus the 3
+tooling checks (fresh Vite start, 37-route crawl, production build).
+
+**Earlier automated run: 2026-09-28** — 489 API checks (every role except
 `DEPARTMENT_HEAD`, which no live user holds), non-mutating, against the
 live DB: first pass **479 passed, 10 failed**; the one real failure,
 TASK-04 (`GET /api/tasks` 500 — stale Prisma client), was fixed by
@@ -368,7 +374,7 @@ Unchanged by this rewrite — included for completeness.
 | LV-03 | `GET /api/leaves/balance` | `employeeId` query param usable only by `leave`-module roles. **Corrected 2026-09-28**: a non-`leave`-module user passing another employee's ID is **not** rejected with 403 — the controller silently ignores the param and returns the caller's *own* balance (200). That's still safe (no data leaks); verify the response is the caller's own balance, not a 403 | Self (own) / `ADMIN,CEO,HR,DEPARTMENT_HEAD` (any) |
 | LV-04 | `GET /api/leaves/calendar` | Leave calendar view. Route guard now the `leave` module (`ADMIN,CEO,HR,DEPARTMENT_HEAD` — was Management-6, so `SALES_HEAD`/`MANAGEMENT`/`MANAGER` lost this). `DEPARTMENT_HEAD` sees only their own department's approved leave | `ADMIN,CEO,HR,DEPARTMENT_HEAD` (dept-scoped for the latter) |
 | LV-05 | `PATCH /api/leaves/:id/review` | Approve/reject. Route guard now the `leave` module. **A `DEPARTMENT_HEAD` reviewing a leave application outside their own department now gets a 404** (new scoping check) — confirm this, not just that the route itself is reachable | `ADMIN,CEO,HR,DEPARTMENT_HEAD` (dept-scoped for the latter) |
-| LV-06 | `DELETE /api/leaves/:id` | Cancel own pending leave | Self |
+| LV-06 | `DELETE /api/leaves/:id` | Cancel own pending leave. **Changed 2026-09-28**: now deletes the row (204) instead of keeping it as `CANCELLED` — see §17a | Self |
 | LV-07 | `/leave-calendar` route | Confirm it redirects to `/calendar` | All roles |
 | HOL-01 | `/holidays` page + `GET /api/holidays` | View org holiday list | Any authenticated (view) |
 | HOL-02 | `POST/DELETE /api/holidays` | Add/remove holidays. Route guard now the `leave` module (was Management-6) — `SALES_HEAD`/`MANAGEMENT`/`MANAGER` lost this | `ADMIN,CEO,HR,DEPARTMENT_HEAD` |
@@ -471,6 +477,7 @@ pre-2026-09-24 history.
 | RPT-01 | `/reports` page (generic, inventory-flavored report) | Route guard changed from `RequireManagement` (Management-6) to the `reports` module (`ADMIN,CEO,MANAGEMENT`) — `DEPARTMENT_HEAD/MANAGER` have no replacement report page; `HR` has its own (HR Reports, restored — see RPT-03) | `ADMIN,CEO,MANAGEMENT` |
 | RPT-02 | `GET /dashboard/repair-spend`, `.../attendance-anomalies` | Reporting data endpoints — still `requireManagement` (Management-6, unchanged) | Management (6) |
 | RPT-03 | `/reports/hr` (HR Reports) | Removed 2026-09-23 then restored the same day at the user's request. **Built out for real since** (see NAV-05c) — no longer a "Coming soon" placeholder | `ADMIN,CEO,HR` |
+| RPT-03b | **New 2026-09-28**: "Generate HR Report" (`GET /api/reports/hr`, `/options`) | 6 report types (Attendance, Employee, Leave, Late & Absence, Anomalies, Headcount) with type-specific filters; preview + record count; CSV/Excel export row count equals the generated total; Print/PDF via browser print. HR and sub-org ADMIN locked to their own org (foreign `organizationId` → 403, foreign employee id → 0 rows); CEO and main-company ADMIN can choose any org in the company or "all". Missing dates → 400 for date-based types; empty range → clean empty state. Existing HR cards unchanged | `ADMIN,CEO,HR` (`hrReports` module) |
 | RPT-04 | **REMOVED 2026-09-23**: `/reports/sales`, `/reports/financial` | These 2 placeholder pages were deleted along with their routes/nav links/module keys — confirm each URL now hits the SPA catch-all (redirects to `/`) rather than a blank/error page | N/A — feature removed |
 | EXP-01 | `/export` page | Route guard changed from `RequireManagement` to the `reports` module (`ADMIN,CEO,MANAGEMENT`) — narrower than before | `ADMIN,CEO,MANAGEMENT` |
 | EXP-02 | `GET /api/export/employees`, `/inventory`, `/departments`, `/tickets` | **Each of the 4 is now gated by its own matching module** instead of one blanket `requireManagement` check: `employees` → `ADMIN,CEO,HR,MANAGEMENT,DEPARTMENT_HEAD`; `inventory` → `ADMIN,CEO,IT_MANAGER`; `departments` → `ADMIN,CEO,DEPARTMENT_HEAD`; `tickets` → `ADMIN,CEO,IT_MANAGER`. Confirm a role that can reach `/export` (`MANAGEMENT`) can actually download the employees/inventory/departments/tickets exports it has modules for, and gets 403 on ones it doesn't (e.g. `MANAGEMENT` has no `inventory` module, so its inventory export call should 403 even though it can reach the page) | Per-module, see left |
@@ -596,6 +603,93 @@ Run these as a dedicated pass after the module-by-module tests above:
     drifted from the shared util/module map — all now call
     `hasModuleAccess`/`isManagement` instead. Spot-check a couple of these
     files directly to confirm no stray hardcoded array was missed.
+
+---
+
+## 17. Additions after the 2026-09-28 RBAC run — test cases & results
+
+Covers everything added after the "Last automated run" above: real
+deletes + re-adding the same email, failed-login alerts + forgot/reset
+password, the Vite plugin upgrade, the HR Reports leave-calendar URL fix,
+the HR report generator, and the session-refresh smoke test. **Run
+2026-09-28 — all passed.** Every run used temporary users/records that
+were deleted afterwards (or a rolled-back transaction); no real accounts
+or data were changed. DB checks count against `prisma` directly, so
+"matches DB" means the API returned exactly what's stored.
+
+| Suite | Checks | Result |
+|---|---|---|
+| A. Delete & re-add via real API (temp invited user) | 13 | 13/13 PASS |
+| B. Delete & re-add at DB level (rolled-back transaction) | 10 | 10/10 PASS |
+| C. Failed-login alert + password reset (API, temp user) | 18 | 18/18 PASS |
+| D. HR report generator (API, real HR/CEO/ADMIN users, read-only) | 45 → 53 after HRR-10–12 | 53/53 PASS |
+| F2. HR report UI re-run after HRR-09–12 (Playwright) + anomaly-card check with 24 anomalies | 32 + 2 | 34/34 PASS |
+| E. Login lockout banner + forgot/reset pages (Playwright) | 8 | 8/8 PASS |
+| F. HR report generator as a real HR user (Playwright) | 24 | 24/24 PASS |
+| G. Session-refresh E2E smoke (Playwright, temp user) | 6 | 6/6 PASS |
+| H–J. Fresh Vite start / crawl of all 37 routes / production build | 3 | PASS (0 Vite warnings, no crashes, build 5.0s) |
+| K. Static/unit regression | 101 | 101/101 PASS |
+| L. RBAC API regression (the original suite) | 498 | 498/498 PASS |
+
+### 17a. Deletes remove the row; same email can be re-added
+
+| ID | What to verify | Expected | 2026-09-28 |
+|---|---|---|---|
+| DEL-01 | Invite a new employee; invite the same email again while it exists | 201, then 409 "Duplicate value for field(s): email" | PASS |
+| DEL-02 | ADMIN deletes an employee who has **posted an announcement** and has leave requests | 204; `User` row gone; announcement kept with `createdById = null` (UI shows "Management"); their leave/notifications cascade-deleted; `/dashboard/announcements` still 200 | PASS |
+| DEL-03 | Invite the **same email** again after deletion, then log in with the new temp password | 201, login 200 | PASS |
+| DEL-04 | Delete an asset that has lifecycle history, then create one with the **same serial number** | Asset + history gone; same serial accepted | PASS (DB-level, rolled back) |
+| DEL-05 | "Left Company" status (not a delete) | User still exists and still holds the email — use Remove Employee to free it | By design, documented |
+| DEL-06 | Removing a **sub-company** | Still an archive (`archivedAt`), not a hard delete — would wipe every user/asset/record in that org | By design, not changed |
+| LV-06 (updated) | Employee cancels their own **pending** leave (`DELETE /api/leaves/:id`) | 204, row removed from DB (previously kept as `CANCELLED`) | PASS |
+
+### 17b. Failed-login alerts + forgot/reset password
+
+| ID | What to verify | Expected | 2026-09-28 |
+|---|---|---|---|
+| SEC-LOGIN-01 | 4 wrong passwords within 30 min | Each → 401 "Invalid email or password"; `failedLoginAttempts` = 4; owner gets an email (if SMTP set) + in-app `SECURITY` notification + `auth.failed_login_alert` audit row | PASS (SMTP not configured → in-app only, logged) |
+| SEC-LOGIN-02 | 5th failure within the 1-hour cooldown | No second alert; counter keeps counting | PASS |
+| SEC-LOGIN-03 | Wrong password vs. unknown email | Identical 401 body (no account enumeration) | PASS |
+| SEC-LOGIN-04 | Correct password after failures | 200 and counter reset to 0 | PASS |
+| SEC-LOGIN-05 | Login page after 3 vs 4 failed tries (same email) | No banner after 3; "Too many failed attempts" banner + "Reset my password" after 4; also shown on a 429 from the rate limiter; "Forgot password?" link always visible | PASS |
+| SEC-RESET-01 | `POST /auth/forgot-password` for a real vs unknown email | Same generic 200 message; one hashed (SHA-256) token stored, expires in 1 h; link emailed (or printed to backend console in dev when SMTP is off) | PASS |
+| SEC-RESET-02 | `POST /auth/reset-password` with bad token / short password / valid token / reused token | 400 / 400 / 200 / 400; can sign in with the new password | PASS |
+| SEC-RESET-03 | `/forgot-password` page (email prefilled from login) and `/reset-password` (bad token → "Request a new link"; no token → "Reset link missing") | As described, no page crashes | PASS |
+| SEC-RESET-04 | **Real email delivery** | Needs `SMTP_HOST/USER/PASS/FROM` + `APP_URL` in `backend/.env` | **Not testable yet** — SMTP not configured |
+
+### 17c. HR report generator (see also RPT-03b)
+
+| ID | What to verify | Expected | 2026-09-28 |
+|---|---|---|---|
+| HRR-01 | HR opens `/reports/hr` | Existing cards (Headcount, Present, Late, Attendance rate, Anomalies, Project Status, Approved Leave) still render; "Generate HR Report" card present | PASS |
+| HRR-02 | Attendance report, 2026-09-01 → 2026-09-28 | Rows returned, count equals DB; 12-hour check-in/out; worked/break/late/site columns | PASS (8 rows = DB 8) |
+| HRR-03 | Export CSV / Export Excel after generating | Downloaded row count = generated total; Excel has the report sheet + "Report info" sheet | PASS |
+| HRR-04 | Employee / Leave / Late & Absence / Anomalies / Headcount | Each generates (table or clean empty state), filters switch per type | PASS |
+| HRR-05 | Company-wide totals as CEO ("All authorized organizations") | Attendance 225 = DB, employees 30 = DB, leave 1 = DB | PASS (anomalies: 0 rows exist in DB — only the empty path is verified) |
+| HRR-06 | Org restrictions | HR & sub-org ADMIN locked to own org (selector disabled); foreign `organizationId` → 403; foreign employee id → 0 rows; CEO sees 7 orgs; EMPLOYEE/MANAGEMENT → 403; unauthenticated → 401 | PASS |
+| HRR-07 | Validation & empty results | Missing dates → 400 + inline error; From > To → 400; unknown type → 400; empty range → "No records match these filters", exports disabled; empty CSV still has header | PASS |
+| HRR-08 | Caching | Responses carry `Cache-Control: no-store` | PASS |
+| HRR-09 | **Added 2026-09-28**: "Today's Attendance Anomalies" card with many anomalies (tested with 24, ADMIN "Whole company") | Exactly 5 rows visible, the rest scroll inside the card (max-height 232px); header shows the count, e.g. "(24)"; scrolling reaches the last row | PASS |
+| HRR-10 | **Added 2026-09-28**: date-by-date report preview (Attendance, Late & Absence, Anomalies) | Preview shows one date at a time with Prev/Next + date dropdown ("Day 1 of 8 · N records"); every row on a page has the same date; Next moves to the next date. Employee/Leave/Headcount stay a single table | PASS (8 dates) |
+| HRR-11 | **Added 2026-09-28**: late = yellow, absent = red | Preview rows: LATE / "Late by N min" → yellow, ABSENT → red, with a legend; JSON `_tone` matches status for every row | PASS (4 late, 3 absent) |
+| HRR-13 | **Changed 2026-09-28**: "Employee ID" column removed | No report type (preview, CSV, Excel, print) has an "Employee ID" column — it only ever showed the internal system id | PASS (all 6 types checked) |
+| HRR-12 | **Added 2026-09-28**: Excel date-by-date + colours | Date-grouped reports export **one sheet per date** (named `YYYY-MM-DD`) + "Report info" (with a yellow/red legend); late rows filled yellow (`FFF4CC`), absent rows red (`FDE2E2`); total rows across date sheets = generated total. CSV stays a single flat file (CSV can't hold colours). Print/PDF: one section per date, each on a new page, same colours | PASS (8 sheets / 8 dates, 7/7 coloured rows) |
+
+### 17d. Frontend tooling & regressions
+
+| ID | What to verify | Expected | 2026-09-28 |
+|---|---|---|---|
+| FE-01 | Fresh `vite` dev-server start | No `esbuild`/`oxc`, `rollupOptions`, or `Invalid key "jsx"` warnings (`@vitejs/plugin-react` 6.1.1 on Vite 8.3.1) | PASS (0 warning lines) |
+| FE-02 | HR Reports "Approved Leave" card | Calls `/api/leaves/calendar` → 200 (was `/api/leave/calendar` → 404) | PASS |
+| FE-03 | Crawl all 37 routes as CEO | No Vite overlay, no error boundary, no page errors; only known items: `/api/alerts` 404 (gap #1), aborted `/health` warm-up on login, aborted map tiles when leaving Settings | PASS |
+| FE-04 | Production build | Succeeds | PASS (5.0s, was 15–18s) |
+| SMOKE-01 | Log in → dashboard → **browser refresh** → still logged in | Not redirected to `/login` | PASS |
+| SMOKE-02 | Second page (`/employees`) → refresh | Session survives | PASS |
+| SMOKE-03 | Logout, then open `/dashboard` directly | Session cleared, access blocked/redirected | PASS |
+
+**Still not covered by these runs**: real SMTP delivery (SEC-RESET-04);
+`DEPARTMENT_HEAD` rows (no live user); anomaly rows with real data (none
+exist yet); mobile-viewport layout of the new HR report card.
 
 ---
 
