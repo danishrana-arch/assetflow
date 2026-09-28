@@ -1,4 +1,4 @@
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { NavLink } from "react-router-dom"
 import {
   LayoutDashboard,
@@ -147,6 +147,43 @@ function RailItem({ to, label, icon: Icon, end, isDark, expanded, showNotificati
   )
 }
 
+// The nav hides its native scrollbar for a cleaner rail, so this draws a thin
+// line along the right edge instead: a faint track plus a thumb whose size and
+// position mirror the scroll state. Only rendered when the list actually
+// overflows, so short menus (e.g. the IT/employee branches) show nothing.
+function useScrollIndicator(ref) {
+  const [state, setState] = useState({ visible: false, top: 0, height: 0 })
+
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+
+    function update() {
+      const { scrollTop, scrollHeight, clientHeight } = el
+      if (scrollHeight <= clientHeight + 1) {
+        setState((s) => (s.visible ? { visible: false, top: 0, height: 0 } : s))
+        return
+      }
+      const height = Math.max((clientHeight / scrollHeight) * 100, 12)
+      const maxScroll = scrollHeight - clientHeight
+      const top = (scrollTop / maxScroll) * (100 - height)
+      setState({ visible: true, top, height })
+    }
+
+    update()
+    el.addEventListener("scroll", update, { passive: true })
+    const observer = new ResizeObserver(update)
+    observer.observe(el)
+    Array.from(el.children).forEach((child) => observer.observe(child))
+    return () => {
+      el.removeEventListener("scroll", update)
+      observer.disconnect()
+    }
+  }, [ref])
+
+  return state
+}
+
 // `expanded`/`onMouseEnter`/`onMouseLeave` are owned by DashboardLayout, not
 // this component — the page content needs to shift in sync with the rail
 // opening, so the hover-intent state has to live one level up where both
@@ -159,6 +196,9 @@ export default function Sidebar({ expanded, onMouseEnter, onMouseLeave }) {
   const isIT = user?.role === "IT_MANAGER"
   const isOwner = ["ADMIN", "CEO"].includes(user?.role)
   const isDark = mode === "dark"
+
+  const navRef = useRef(null)
+  const scrollIndicator = useScrollIndicator(navRef)
 
   const canManageAttendance =
     hasModuleAccess(user?.role, "attendance") || !!user?.canManageAttendance
@@ -225,9 +265,11 @@ export default function Sidebar({ expanded, onMouseEnter, onMouseLeave }) {
         </span>
       </div>
 
+      <div className="relative flex min-h-0 flex-1 flex-col">
       <nav
+        ref={navRef}
         className="
-          flex flex-1
+          flex flex-1 min-h-0
           flex-col items-center
           gap-1.5
           overflow-y-auto
@@ -426,6 +468,23 @@ export default function Sidebar({ expanded, onMouseEnter, onMouseLeave }) {
           </>
         )}
       </nav>
+
+      {scrollIndicator.visible && (
+        <div
+          aria-hidden="true"
+          className={`pointer-events-none absolute bottom-1 right-[5px] top-1 w-[3px] rounded-full ${
+            isDark ? "bg-black/10" : "bg-white/10"
+          }`}
+        >
+          <div
+            className={`absolute left-0 w-full rounded-full transition-[top] duration-100 ${
+              isDark ? "bg-black/40" : "bg-white/45"
+            }`}
+            style={{ top: `${scrollIndicator.top}%`, height: `${scrollIndicator.height}%` }}
+          />
+        </div>
+      )}
+      </div>
 
       {/* Bottom Controls — px-3 matches <nav>'s own padding so these icons
           land on the exact same vertical axis as the nav icons above. */}
