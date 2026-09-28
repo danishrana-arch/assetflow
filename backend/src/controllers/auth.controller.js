@@ -6,6 +6,51 @@ const { ASSIGNABLE_ROLES, MAX_CEO_COUNT } = require("../utils/roles")
 const { encryptField } = require("../utils/crypto")
 const { logAudit } = require("../utils/audit")
 const { isValidTimeZone } = require("../utils/timezone")
+const { sendEmail, appUrl, escapeHtml } = require("../utils/mailer")
+const { createNotification } = require("../utils/notifications")
+
+// Failed-login alerting: after MAX_FAILED_LOGINS wrong passwords within
+// FAILED_LOGIN_WINDOW_MS, the account owner is emailed (and gets an in-app
+// notification) that someone may be trying to access their account — at
+// most once per ALERT_COOLDOWN_MS so a sustained attack doesn't flood them.
+const MAX_FAILED_LOGINS = 4
+const FAILED_LOGIN_WINDOW_MS = 30 * 60 * 1000
+const ALERT_COOLDOWN_MS = 60 * 60 * 1000
+const RESET_TOKEN_TTL_MS = 60 * 60 * 1000
+
+const hashToken = (raw) => crypto.createHash("sha256").update(raw).digest("hex")
+
+async function sendFailedLoginAlert(user, { attempts, ip, userAgent }) {
+  const when = new Date().toUTCString()
+  const resetLink = `${appUrl()}/forgot-password`
+  await createNotification({
+    organizationId: user.organizationId,
+    recipientId: user.id,
+    type: "SECURITY",
+    title: "Multiple failed sign-in attempts",
+    message: `${attempts} wrong-password attempts on your account (last at ${when}${ip ? ` from ${ip}` : ""}). If this wasn't you, change your password.`,
+    link: "/profile",
+  }).catch(() => {})
+
+  return sendEmail({
+    to: user.email,
+    subject: "Someone is trying to access your AssetFlow account",
+    text:
+      `Hi ${user.name},\n\nWe noticed ${attempts} failed sign-in attempts on your AssetFlow account (${user.email}).\n` +
+      `Time: ${when}\n${ip ? `IP address: ${ip}\n` : ""}${userAgent ? `Device: ${userAgent}\n` : ""}\n` +
+      `If this was you, you can reset your password here: ${resetLink}\n` +
+      `If this wasn't you, we recommend resetting your password right away. Your account has not been changed.\n`,
+    html:
+      `<div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;color:#1f2937;line-height:1.6">` +
+      `<h2>Someone is trying to access your account</h2>` +
+      `<p>Hi ${escapeHtml(user.name)},</p>` +
+      `<p>We noticed <strong>${attempts} failed sign-in attempts</strong> on your AssetFlow account (${escapeHtml(user.email)}).</p>` +
+      `<p><strong>Time:</strong> ${escapeHtml(when)}${ip ? `<br><strong>IP address:</strong> ${escapeHtml(ip)}` : ""}${userAgent ? `<br><strong>Device:</strong> ${escapeHtml(userAgent)}` : ""}</p>` +
+      `<p>If this wasn't you, we recommend resetting your password right away. Your account has not been changed.</p>` +
+      `<p><a href="${resetLink}" style="display:inline-block;background:#111827;color:#fff;padding:10px 18px;border-radius:999px;text-decoration:none">Reset my password</a></p>` +
+      `</div>`,
+  })
+}
 
 
 function organizationSummary(organization) {
@@ -131,7 +176,34 @@ async function login(req, res, next) {
 
     const valid = await bcrypt.compare(password, user.password)
     if (!valid) {
+      const now = new Date()
+      const withinWindow = user.lastFailedLoginAt && now - user.lastFailedLoginAt < FAILED_LOGIN_WINDOW_MS
+      const attempts = (withinWindow ? user.failedLoginAttempts : 0) + 1
+      const shouldAlert =
+        attempts >= MAX_FAILED_LOGINS &&
+        (!user.securityAlertSentAt || now - user.securityAlertSentAt > ALERT_COOLDOWN_MS)
+
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { failedLoginAttempts: attempts, lastFailedLoginAt: now, ...(shouldAlert ? { securityAlertSentAt: now } : {}) },
+      })
+
+      if (shouldAlert) {
+        // Fire-and-forget: don't make the response slower (or its timing
+        // reveal anything) while SMTP runs.
+        sendFailedLoginAlert(user, { attempts, ip: req.ip, userAgent: req.get("user-agent") })
+          .then((sent) => { if (!sent) console.warn(`Failed-login alert for ${user.email}: SMTP not configured, in-app notification only`) })
+          .catch((e) => console.error(`Failed-login alert email for ${user.email} failed:`, e.message))
+        logAudit({ organizationId: user.organizationId, actorId: null, action: "auth.failed_login_alert", targetType: "User", targetId: user.id, note: `${attempts} failed attempts${req.ip ? ` from ${req.ip}` : ""}` })
+      }
+
+      // Same message whether or not the email exists — the frontend counts
+      // failures itself to decide when to offer "Forgot password?".
       return res.status(401).json({ error: "Invalid email or password" })
+    }
+
+    if (user.failedLoginAttempts || user.lastFailedLoginAt) {
+      await prisma.user.update({ where: { id: user.id }, data: { failedLoginAttempts: 0, lastFailedLoginAt: null } })
     }
 
     const token = signToken({ userId: user.id, organizationId: user.organizationId, companyId: user.organization.companyId, role: user.role })
@@ -342,4 +414,78 @@ async function resetPassword(req, res, next) {
   }
 }
 
-module.exports = { registerOrganization, login, inviteEmployee, me, changePassword, resetPassword }
+// Public "forgot password": emails a one-time reset link. Always answers
+// with the same generic message so it can't be used to discover which
+// emails have accounts.
+async function forgotPassword(req, res, next) {
+  try {
+    const email = String(req.body?.email || "").trim()
+    if (!email) return res.status(400).json({ error: "Email is required" })
+    const generic = { message: "If an account exists for that email, a password reset link has been sent." }
+
+    const user = await prisma.user.findUnique({ where: { email }, include: { organization: true } })
+    if (!user || user.status === "LEFT_COMPANY" || user.organization.archivedAt) return res.json(generic)
+
+    const raw = crypto.randomBytes(32).toString("hex")
+    await prisma.$transaction([
+      prisma.passwordResetToken.deleteMany({ where: { userId: user.id, usedAt: null } }),
+      prisma.passwordResetToken.create({
+        data: { userId: user.id, tokenHash: hashToken(raw), expiresAt: new Date(Date.now() + RESET_TOKEN_TTL_MS) },
+      }),
+    ])
+
+    const link = `${appUrl()}/reset-password?token=${raw}`
+    let sent = false
+    try {
+      sent = await sendEmail({
+        to: user.email,
+        subject: "Reset your AssetFlow password",
+        text: `Hi ${user.name},\n\nUse this link to set a new password (valid for 1 hour):\n${link}\n\nIf you didn't ask for this, you can ignore this email — your password won't change.\n`,
+        html:
+          `<div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;color:#1f2937;line-height:1.6">` +
+          `<h2>Reset your password</h2><p>Hi ${escapeHtml(user.name)},</p>` +
+          `<p>Click the button below to set a new password. This link is valid for 1 hour and can be used once.</p>` +
+          `<p><a href="${link}" style="display:inline-block;background:#111827;color:#fff;padding:10px 18px;border-radius:999px;text-decoration:none">Set a new password</a></p>` +
+          `<p style="color:#6b7280;font-size:13px">If you didn't ask for this, you can ignore this email — your password won't change.</p></div>`,
+      })
+    } catch (e) {
+      console.error(`Password reset email for ${user.email} failed:`, e.message)
+    }
+    if (!sent && process.env.NODE_ENV !== "production") {
+      console.warn(`[dev] SMTP not configured — password reset link for ${user.email}: ${link}`)
+    }
+
+    logAudit({ organizationId: user.organizationId, actorId: null, action: "auth.password_reset_requested", targetType: "User", targetId: user.id, note: sent ? "email sent" : "email not sent (SMTP not configured)" })
+    res.json(generic)
+  } catch (err) {
+    next(err)
+  }
+}
+
+// Completes the reset from the emailed link.
+async function resetPasswordWithToken(req, res, next) {
+  try {
+    const { token, password } = req.body || {}
+    if (!token || !password) return res.status(400).json({ error: "token and password are required" })
+    if (String(password).length < 8) return res.status(400).json({ error: "Password must be at least 8 characters" })
+
+    const record = await prisma.passwordResetToken.findUnique({ where: { tokenHash: hashToken(String(token)) }, include: { user: true } })
+    if (!record || record.usedAt || record.expiresAt < new Date()) {
+      return res.status(400).json({ error: "This reset link is invalid or has expired. Please request a new one." })
+    }
+
+    const hashed = await bcrypt.hash(String(password), 10)
+    await prisma.$transaction([
+      prisma.user.update({ where: { id: record.userId }, data: { password: hashed, failedLoginAttempts: 0, lastFailedLoginAt: null } }),
+      prisma.passwordResetToken.update({ where: { id: record.id }, data: { usedAt: new Date() } }),
+      prisma.passwordResetToken.deleteMany({ where: { userId: record.userId, usedAt: null } }),
+    ])
+
+    logAudit({ organizationId: record.user.organizationId, actorId: record.userId, action: "auth.password_reset_completed", targetType: "User", targetId: record.userId, note: "via emailed reset link" })
+    res.json({ message: "Your password has been updated. You can now sign in." })
+  } catch (err) {
+    next(err)
+  }
+}
+
+module.exports = { registerOrganization, login, inviteEmployee, me, changePassword, resetPassword, forgotPassword, resetPasswordWithToken }

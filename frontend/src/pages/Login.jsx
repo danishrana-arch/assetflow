@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
-import { Boxes, ShieldCheck, Sparkles } from "lucide-react"
+import { Boxes, ShieldAlert, ShieldCheck, Sparkles } from "lucide-react"
 import { useAuth } from "../context/AuthContext"
 import { useTheme } from "../context/ThemeContext"
 import { TextField } from "../components/ui/Field"
 import logoFull from "../assets/logo1.png"
 import { getApiRoot } from "../api/client"
+
+const MAX_FAILED_ATTEMPTS = 4
 
 export default function Login() {
   const { login } = useAuth()
@@ -16,8 +18,13 @@ export default function Login() {
   const [password, setPassword] = useState("")
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
+  // Wrong-password count for the email currently typed. Counted here, not
+  // returned by the API, so the backend never reveals whether an email has
+  // an account; the backend separately emails the real owner on repeats.
+  const [failedAttempts, setFailedAttempts] = useState(0)
 
   const isDark = mode === "dark"
+  const tooManyAttempts = failedAttempts >= MAX_FAILED_ATTEMPTS
 
   useEffect(() => {
     // Render/free-tier backends can sleep between requests. A tiny health
@@ -38,6 +45,11 @@ export default function Login() {
       navigate("/")
     } catch (err) {
       setError(err.response?.data?.error || "Login failed")
+      const status = err.response?.status
+      if (status === 401) setFailedAttempts((n) => n + 1)
+      // Rate limiter kicked in (too many attempts from this device) — go
+      // straight to offering a reset.
+      if (status === 429) setFailedAttempts(MAX_FAILED_ATTEMPTS)
     } finally {
       setLoading(false)
     }
@@ -314,7 +326,10 @@ export default function Login() {
               label="Email"
               type="email"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => {
+                setEmail(e.target.value)
+                setFailedAttempts(0)
+              }}
               placeholder="you@company.com"
               required
               autoComplete="email"
@@ -330,7 +345,39 @@ export default function Login() {
               autoComplete="current-password"
             />
 
-            {error && (
+            <div className="-mt-2 text-right">
+              <Link
+                to={`/forgot-password${email ? `?email=${encodeURIComponent(email)}` : ""}`}
+                className="text-xs font-semibold text-accent hover:underline"
+              >
+                Forgot password?
+              </Link>
+            </div>
+
+            {tooManyAttempts ? (
+              <div
+                role="alert"
+                className={`
+                  flex gap-3 rounded-2xl px-3.5 py-3 text-sm
+                  ${isDark ? "bg-amber-500/10 text-amber-200 border border-amber-400/15" : "bg-amber-50 text-amber-900 border border-amber-200"}
+                `}
+              >
+                <ShieldAlert size={18} className="mt-0.5 shrink-0" />
+                <div>
+                  <p className="font-semibold">Too many failed attempts</p>
+                  <p className="mt-0.5 text-xs leading-5 opacity-90">
+                    For your security, the account owner is notified by email about repeated failed sign-ins.
+                    If this is your account, reset your password instead of guessing.
+                  </p>
+                  <Link
+                    to={`/forgot-password${email ? `?email=${encodeURIComponent(email)}` : ""}`}
+                    className="mt-2 inline-block rounded-full bg-accent px-3.5 py-1.5 text-xs font-semibold text-white hover:opacity-90"
+                  >
+                    Reset my password
+                  </Link>
+                </div>
+              </div>
+            ) : error && (
               <div
                 className={`
                   rounded-2xl

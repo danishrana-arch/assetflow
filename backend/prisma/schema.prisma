@@ -171,7 +171,11 @@ model User {
   linkedinUrl                                                  String?
   shiftStart                                                   String?
   shiftEnd                                                     String?
-  announcementsCreated                                         Announcement[]            @relation("AnnouncementCreator")
+  failedLoginAttempts                                          Int                       @default(0)
+  lastFailedLoginAt                                            DateTime?
+  securityAlertSentAt                                          DateTime?
+  passwordResetTokens                                          PasswordResetToken[]
+  announcementsCreated                                        Announcement[]            @relation("AnnouncementCreator")
   assignedAssets                                               Asset[]                   @relation("AssignedAssets")
   assetRequests                                                AssetRequest[]            @relation("AssetRequestedBy")
   assetRequestsReviewed                                        AssetRequest[]            @relation("AssetRequestReviewer")
@@ -214,6 +218,20 @@ model User {
   manager                                                      User?                     @relation("ManagerReports", fields: [managerId], references: [id])
   reports                                                      User[]                    @relation("ManagerReports")
   organization                                                 Organization              @relation(fields: [organizationId], references: [id])
+}
+
+// One-time "forgot password" link. Only a SHA-256 hash of the token is
+// stored; the raw token only ever exists in the emailed link.
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 
 model Notification {

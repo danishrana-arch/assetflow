@@ -15,6 +15,8 @@ import MyAttendance from "./pages/MyAttendance"
 const Login = lazy(() => import("./pages/Login"))
 const Register = lazy(() => import("./pages/Register"))
 const Welcome = lazy(() => import("./pages/Welcome"))
+const ForgotPassword = lazy(() => import("./pages/ForgotPassword"))
+const ResetPassword = lazy(() => import("./pages/ResetPassword"))
 
 const Dashboard = lazy(() => import("./pages/Dashboard"))
 const Employees = lazy(() => import("./pages/Employees"))
@@ -181,6 +183,8 @@ export default function App() {
             <Route path="/" element={<Welcome />} />
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
+            <Route path="/forgot-password" element={<ForgotPassword />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
             <Route path="/employee-form/:token" element={<PublicEmployeeForm />} />
             <Route path="/*" element={<ProtectedShell />} />
           </Routes>

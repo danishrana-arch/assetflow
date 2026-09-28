@@ -1154,6 +1154,42 @@ against the live DB's actual FK rules (`pg_constraint`):
   deleting, since a hard delete would wipe every user/asset/department/
   ticket/holiday/audit row in that org.
 
+## Post-module addition: failed-login alerts + self-service password reset
+
+- **Failed-login tracking** (`auth.controller.js` `login`): new `User`
+  columns `failedLoginAttempts`, `lastFailedLoginAt`, `securityAlertSentAt`.
+  4 wrong passwords within 30 min → the account owner gets an email
+  ("Someone is trying to access your AssetFlow account", with time, IP,
+  device, and a reset link) plus an in-app `SECURITY` notification and an
+  `auth.failed_login_alert` audit row — at most once per hour. A correct
+  login resets the counter. The 401 body is identical for wrong password
+  vs. unknown email (no account enumeration).
+- **Login page** (`Login.jsx`): always shows a "Forgot password?" link;
+  after 4 failed attempts (counted client-side per typed email, or
+  immediately on a 429 from the rate limiter) shows a "Too many failed
+  attempts" banner with a "Reset my password" button.
+- **Forgot / reset password**: public `POST /auth/forgot-password`
+  (always the same generic response) emails a one-time link to
+  `/reset-password?token=…`, valid 1 hour; only a SHA-256 hash is stored
+  in the new `PasswordResetToken` table (cascade-deleted with the user).
+  `POST /auth/reset-password` sets the new password (≥8 chars), marks the
+  token used, clears other pending tokens and the failed-login counter.
+  Both behind the existing `authLimiter`. New public pages
+  `ForgotPassword.jsx` / `ResetPassword.jsx` (shared `components/AuthCard.jsx`).
+- New `backend/src/utils/mailer.js` (`sendEmail`, `appUrl`) — same SMTP_*
+  vars as the project-deadline job; new optional `APP_URL` env var.
+- Migration `20260928130000_failed_login_tracking_password_reset` —
+  **deployed** to the DB `backend/.env` points at (38/38 applied).
+- **SMTP is NOT configured in `backend/.env`** — until it is, the alert is
+  in-app only (logged as "SMTP not configured") and reset links can't
+  reach anyone; in development the reset link is printed to the backend
+  console instead.
+- Verified: 18/18 API checks (counter, alert once per cooldown, generic
+  responses, token hashing/expiry/single-use, reset + re-login) using a
+  temporary user that was deleted afterwards, plus 8/8 Playwright UI
+  checks (link, banner after 4th failure not 3rd, email prefill, generic
+  confirmation, bad/missing token handling).
+
 ## Automated RBAC test run (2026-09-28)
 
 There's no automated test suite in either app (`npm test` isn't

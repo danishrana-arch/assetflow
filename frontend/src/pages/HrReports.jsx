@@ -37,7 +37,7 @@ export default function HrReports() {
 
   const { data: leaveCalendar } = useQuery({
     queryKey: ["hr-reports-leave", now.getFullYear(), now.getMonth() + 1],
-    queryFn: () => api.get("/leave/calendar", { params: { year: now.getFullYear(), month: now.getMonth() + 1 } }).then((r) => r.data),
+    queryFn: () => api.get("/leaves/calendar", { params: { year: now.getFullYear(), month: now.getMonth() + 1 } }).then((r) => r.data),
   })
 
   const projectStatus = executive?.projectStatus || { NOT_STARTED: 0, IN_PROGRESS: 0, COMPLETED: 0 }
