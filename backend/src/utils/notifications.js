@@ -1,5 +1,5 @@
 const prisma = require("../lib/prisma")
-const { MANAGEMENT_ROLES } = require("./roles")
+const { MANAGEMENT_ROLES, ROLE_MODULES, hasModuleAccess } = require("./roles")
 
 async function createNotification({
   organizationId,
@@ -25,12 +25,19 @@ async function createNotification({
   })
 }
 
-async function notifyManagement({ organizationId, createdById, type, title, message, link }) {
+// `moduleKey` narrows recipients to roles that can actually open the linked
+// page (e.g. "assetRequests" -> ADMIN/CEO/IT_MANAGER, not HR/MANAGEMENT).
+// Without it, a management role lacking the module got a notification whose
+// link just bounced them back to their own profile.
+async function notifyManagement({ organizationId, createdById, type, title, message, link, moduleKey }) {
+  const roles = moduleKey
+    ? Object.keys(ROLE_MODULES).filter((role) => hasModuleAccess(role, moduleKey))
+    : MANAGEMENT_ROLES
   const users = await prisma.user.findMany({
     where: {
       organizationId,
       status: "ACTIVE",
-      role: { in: MANAGEMENT_ROLES },
+      role: { in: roles },
       ...(createdById ? { id: { not: createdById } } : {}),
     },
     select: { id: true },

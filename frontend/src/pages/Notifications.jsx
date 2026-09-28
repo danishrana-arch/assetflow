@@ -1,11 +1,28 @@
 import { useEffect } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Link } from "react-router-dom"
+import { Link, useNavigate } from "react-router-dom"
 import { Bell, ExternalLink, ShoppingBag, UserPlus, UserMinus, Wrench, CheckCircle2, ArrowUpCircle, ShieldAlert, Undo2, Trash2, StickyNote } from "lucide-react"
 import api from "../api/client"
 import PageHeader from "../components/ui/PageHeader"
 import IconChip from "../components/ui/IconChip"
 import EmptyState from "../components/ui/EmptyState"
+import { useAuth } from "../context/AuthContext"
+import { hasModuleAccess } from "../utils/roles"
+
+// Older notifications were saved with links some recipients can't open
+// (e.g. an employee's "leave approved" pointing at the management-only
+// /leave-requests page), which the route guards bounced back to the
+// viewer's profile. Map those to the page where that viewer actually sees
+// the item.
+function resolveNotificationLink(link, user) {
+  if (!link) return null
+  const path = link.split("?")[0]
+  if (path === "/asset-requests" && !hasModuleAccess(user?.role, "assetRequests")) {
+    return user?.id ? `/employees/${user.id}` : "/"
+  }
+  if (path === "/leave-requests" && !hasModuleAccess(user?.role, "leave")) return "/attendance/me"
+  return link
+}
 
 const EVENT_CONFIG = {
   PURCHASED: { icon: ShoppingBag, tone: "blue", label: "Purchased" },
@@ -34,6 +51,8 @@ function timeAgo(iso) {
 
 export default function Notifications() {
   const qc = useQueryClient()
+  const navigate = useNavigate()
+  const { user } = useAuth()
   const { data: notifications = [], isLoading: notificationsLoading } = useQuery({
     queryKey: ["notifications"],
     queryFn: () => api.get("/notifications").then((r) => r.data),
@@ -83,21 +102,36 @@ export default function Notifications() {
             <EmptyState title="No notifications" description="You're all caught up." />
           </div>
         )}
-        {!notificationsLoading && notifications.map((notification) => (
-          <div key={notification.id} className="flex items-start gap-3 border-b border-border px-5 py-4 last:border-b-0">
-            <IconChip icon={Bell} tone={notification.readAt ? "slate" : "pink"} size="md" />
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold text-ink">{notification.title}</p>
-              {notification.message && <p className="mt-0.5 text-xs leading-5 text-muted">{notification.message}</p>}
-              <p className="mt-1 text-[11px] text-muted-2">{timeAgo(notification.createdAt)}</p>
+        {!notificationsLoading && notifications.map((notification) => {
+          const target = resolveNotificationLink(notification.link, user)
+          return (
+            <div
+              key={notification.id}
+              role={target ? "link" : undefined}
+              tabIndex={target ? 0 : undefined}
+              onClick={target ? () => navigate(target) : undefined}
+              onKeyDown={target ? (e) => { if (e.key === "Enter") navigate(target) } : undefined}
+              className={`flex items-start gap-3 border-b border-border px-5 py-4 last:border-b-0 ${target ? "cursor-pointer transition-colors hover:bg-surface-2" : ""}`}
+            >
+              <IconChip icon={Bell} tone={notification.readAt ? "slate" : "pink"} size="md" />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold text-ink">{notification.title}</p>
+                {notification.message && <p className="mt-0.5 text-xs leading-5 text-muted">{notification.message}</p>}
+                <p className="mt-1 text-[11px] text-muted-2">{timeAgo(notification.createdAt)}</p>
+              </div>
+              {target && (
+                <Link
+                  to={target}
+                  onClick={(e) => e.stopPropagation()}
+                  className="shrink-0 rounded-full p-2 text-muted hover:bg-surface-2"
+                  title="Open"
+                >
+                  <ExternalLink size={15} />
+                </Link>
+              )}
             </div>
-            {notification.link && (
-              <Link to={notification.link} className="shrink-0 rounded-full p-2 text-muted hover:bg-surface-2" title="Open">
-                <ExternalLink size={15} />
-              </Link>
-            )}
-          </div>
-        ))}
+          )
+        })}
       </section>
 
       <section>

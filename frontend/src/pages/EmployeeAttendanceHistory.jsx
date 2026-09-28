@@ -14,7 +14,7 @@ function fmtDate(value) {
 
 function fmtTime(value) {
   if (!value) return null
-  return new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+  return new Date(value).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: true })
 }
 
 // Full check-in/check-out history for one employee, linked to from a button

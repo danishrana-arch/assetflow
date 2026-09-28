@@ -8,7 +8,7 @@ import EmptyState from "../components/ui/EmptyState"
 
 function fmt(dateStr) {
   return new Date(dateStr).toLocaleString(undefined, {
-    month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit",
+    month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", hour12: true,
   })
 }
 

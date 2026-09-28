@@ -6,6 +6,7 @@ import PageHeader from "../components/ui/PageHeader"
 import SectionHeader from "../components/ui/SectionHeader"
 import { TextField } from "../components/ui/Field"
 import { useAuth } from "../context/AuthContext"
+import { formatDateTime } from "../utils/time"
 
 const VENDORS = ["ZKTECO", "HIKVISION", "SUPREMA", "ANVIZ", "ESSL", "HTTP", "CUSTOM"]
 const MODES = ["PULL", "PUSH", "HTTP"]
@@ -267,7 +268,7 @@ function DeviceCard({ device, employees, onToken }) {
         <div>IP: <b className="text-ink">{device.ipAddress || "—"}</b></div>
         <div>Port: <b className="text-ink">{device.port || "—"}</b></div>
         <div>Door: <b className="text-ink">{device.doorEnabled ? `${device.unlockSeconds}s` : "Off"}</b></div>
-        <div>Last sync: <b className="text-ink">{device.lastSyncAt ? new Date(device.lastSyncAt).toLocaleString() : "Never"}</b></div>
+        <div>Last sync: <b className="text-ink">{device.lastSyncAt ? formatDateTime(device.lastSyncAt) : "Never"}</b></div>
       </div>
 
       <MappingsSection device={device} employees={employees} />

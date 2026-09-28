@@ -17,7 +17,7 @@ const STATUS_CONFIG = {
 
 function formatPunchTime(value) {
   if (!value) return "—"
-  return new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+  return new Date(value).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: true })
 }
 
 
@@ -260,7 +260,7 @@ export default function Attendance() {
                 <p className="truncate text-sm font-semibold text-ink">{row.name}</p>
                 <p className="truncate text-xs text-muted">{row.department || "—"}</p>
                 {row.time && (
-                  <p className="mt-0.5 text-xs text-muted-2">{new Date(row.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
+                  <p className="mt-0.5 text-xs text-muted-2">{formatPunchTime(row.time)}</p>
                 )}
                 <p className="mt-0.5 text-xs text-muted-2">
                   {formatPunchTime(row.checkInAt)} → {formatPunchTime(row.checkOutAt)}

@@ -10,6 +10,7 @@ import {
 import api from "../api/client"
 import { useAuth } from "../context/AuthContext"
 import { hasModuleAccess, canManageInventory, ROLE_LABELS } from "../utils/roles"
+import { formatTime, formatClock } from "../utils/time"
 import StatusBadge from "../components/StatusBadge"
 import ParticleText from "../components/ParticleText"
 import StatusPill from "../components/ui/StatusPill"
@@ -431,8 +432,8 @@ export default function EmployeeProfile() {
                 )}
               </div>
               <div className="text-xs text-muted">
-                {todayRecord.checkInAt ? new Date(todayRecord.checkInAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "-"}
-                {todayRecord.checkOutAt ? ` — ${new Date(todayRecord.checkOutAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : ""}
+                {todayRecord.checkInAt ? formatTime(todayRecord.checkInAt) : "-"}
+                {todayRecord.checkOutAt ? ` — ${formatTime(todayRecord.checkOutAt)}` : ""}
               </div>
             </div>
 
@@ -918,8 +919,8 @@ export default function EmployeeProfile() {
                   <TextField label="University" value={editForm.University} onChange={(e) => setEditForm((f) => ({ ...f, University: e.target.value }))} />
                   <TextField label="LinkedIn" value={editForm.linkedinUrl} onChange={(e) => setEditForm((f) => ({ ...f, linkedinUrl: e.target.value }))} placeholder="https://linkedin.com/in/..." />
                   <div className="grid grid-cols-2 gap-2">
-                    <TextField label="Shift Start" type="time" value={editForm.shiftStart} onChange={(e) => setEditForm((f) => ({ ...f, shiftStart: e.target.value }))} />
-                    <TextField label="Shift End" type="time" value={editForm.shiftEnd} onChange={(e) => setEditForm((f) => ({ ...f, shiftEnd: e.target.value }))} />
+                    <TextField label="Shift Start" type="time" value={editForm.shiftStart} hint={formatClock(editForm.shiftStart)} onChange={(e) => setEditForm((f) => ({ ...f, shiftStart: e.target.value }))} />
+                    <TextField label="Shift End" type="time" value={editForm.shiftEnd} hint={formatClock(editForm.shiftEnd)} onChange={(e) => setEditForm((f) => ({ ...f, shiftEnd: e.target.value }))} />
                   </div>
                 </>
               )}
@@ -931,8 +932,8 @@ export default function EmployeeProfile() {
                   <TextField label="Education" value={editForm.education} onChange={(e) => setEditForm((f) => ({ ...f, education: e.target.value }))} placeholder="e.g. BS Computer Science" />
                   <TextField label="University" value={editForm.University} onChange={(e) => setEditForm((f) => ({ ...f, University: e.target.value }))} />
                   <TextField label="LinkedIn URL" value={editForm.linkedinUrl} onChange={(e) => setEditForm((f) => ({ ...f, linkedinUrl: e.target.value }))} placeholder="https://www.linkedin.com/in/..." />
-                  <TextField label="Shift Start" type="time" value={editForm.shiftStart} onChange={(e) => setEditForm((f) => ({ ...f, shiftStart: e.target.value }))} />
-                  <TextField label="Shift End" type="time" value={editForm.shiftEnd} onChange={(e) => setEditForm((f) => ({ ...f, shiftEnd: e.target.value }))} />
+                  <TextField label="Shift Start" type="time" value={editForm.shiftStart} hint={formatClock(editForm.shiftStart)} onChange={(e) => setEditForm((f) => ({ ...f, shiftStart: e.target.value }))} />
+                  <TextField label="Shift End" type="time" value={editForm.shiftEnd} hint={formatClock(editForm.shiftEnd)} onChange={(e) => setEditForm((f) => ({ ...f, shiftEnd: e.target.value }))} />
                   <SelectField label="Department" value={editForm.departmentId} onChange={(e) => setEditForm((f) => ({ ...f, departmentId: e.target.value }))}>
                     <option value="">None</option>
                     {(departments || []).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
@@ -1089,7 +1090,7 @@ export default function EmployeeProfile() {
                         <FieldValue label="Education" value={employee.education} />
                         <FieldValue label="Current University" value={employee.currentUniversity} />
                         <FieldValue label="LinkedIn" value={employee.linkedinUrl} />
-                        <FieldValue label="Shift" value={employee.shiftStart && employee.shiftEnd ? `${employee.shiftStart} - ${employee.shiftEnd}` : employee.shiftStart || employee.shiftEnd} />
+                        <FieldValue label="Shift" value={employee.shiftStart && employee.shiftEnd ? `${formatClock(employee.shiftStart)} - ${formatClock(employee.shiftEnd)}` : formatClock(employee.shiftStart || employee.shiftEnd)} />
                         <FieldValue label="Date of Birth" value={fmtDate(employee.dob)} />
                         <FieldValue
                           label="Joining Date"

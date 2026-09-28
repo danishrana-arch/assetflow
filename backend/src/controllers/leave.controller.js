@@ -110,6 +110,7 @@ async function createLeave(req, res, next) {
       title: "New leave request",
       message: `${leave.type} leave from ${startDate} to ${endDate}.`,
       link: "/leave-requests",
+      moduleKey: "leave",
     })
 
     res.status(201).json(leave)
@@ -342,7 +343,7 @@ async function reviewLeave(req, res, next) {
       type: "LEAVE_REQUEST",
       title: `Leave request ${decision.toLowerCase()}`,
       message: `${leave.type} leave was ${decision.toLowerCase()}.${reviewNote ? ` ${reviewNote}` : ""}`,
-      link: "/leave-requests",
+      link: "/attendance/me",
     })
 
     res.json(updated)

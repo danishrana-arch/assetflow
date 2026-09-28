@@ -9,6 +9,7 @@ import PageHeader from "../components/ui/PageHeader"
 import SectionHeader from "../components/ui/SectionHeader"
 import { TextField } from "../components/ui/Field"
 import { TIMEZONE_GROUPS, timezoneLabel } from "../utils/timezones"
+import { formatClock } from "../utils/time"
 import { roleLabel } from "../utils/roles"
 import OfficeLocationMap from "../components/OfficeLocationMap"
 
@@ -424,9 +425,10 @@ export default function Settings() {
             </div>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 mt-4">
               <TextField
-                label="Default shift start (HH:mm)"
+                label="Default shift start"
                 type="time"
                 value={shiftStartDefault}
+                hint={formatClock(shiftStartDefault)}
                 onChange={(e) => setShiftStartDefault(e.target.value)}
               />
               <TextField
@@ -440,9 +442,10 @@ export default function Settings() {
             </div>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 mt-4">
               <TextField
-                label="Default shift end (HH:mm)"
+                label="Default shift end"
                 type="time"
                 value={shiftEndDefault}
+                hint={formatClock(shiftEndDefault)}
                 onChange={(e) => setShiftEndDefault(e.target.value)}
               />
               <div>
@@ -462,8 +465,8 @@ export default function Settings() {
               <p className="text-xs font-semibold uppercase tracking-wide text-muted">Office break</p>
               <p className="mt-1 text-xs text-muted">Punches during this period are ignored for check-in/check-out purposes. The break remains part of office time, so a checkout during the break cannot become the employee's timeout.</p>
               <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <TextField label="Break start" type="time" value={breakStart} onChange={(e) => setBreakStart(e.target.value)} />
-                <TextField label="Break end" type="time" value={breakEnd} onChange={(e) => setBreakEnd(e.target.value)} />
+                <TextField label="Break start" type="time" value={breakStart} hint={formatClock(breakStart)} onChange={(e) => setBreakStart(e.target.value)} />
+                <TextField label="Break end" type="time" value={breakEnd} hint={formatClock(breakEnd)} onChange={(e) => setBreakEnd(e.target.value)} />
               </div>
             </div>
             <p className="mt-2 text-xs text-muted-2">

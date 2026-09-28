@@ -134,9 +134,10 @@ const CATEGORY_ICON = {
 function formatTime(iso) {
   if (!iso) return ""
 
-  return new Date(iso).toLocaleTimeString([], {
+  return new Date(iso).toLocaleTimeString("en-US", {
     hour: "2-digit",
     minute: "2-digit",
+    hour12: true,
   })
 }
 

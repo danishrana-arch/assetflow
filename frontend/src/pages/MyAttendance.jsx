@@ -31,7 +31,7 @@ function fmt(dateStr) {
 }
 function fmtTime(dateStr, timezone) {
   if (!dateStr) return "—"
-  return new Date(dateStr).toLocaleTimeString([], { timeZone: timezone || undefined, hour: "2-digit", minute: "2-digit", second: "2-digit" })
+  return new Date(dateStr).toLocaleTimeString("en-US", { timeZone: timezone || undefined, hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: true })
 }
 
 export default function MyAttendance() {

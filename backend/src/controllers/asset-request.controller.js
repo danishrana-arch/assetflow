@@ -34,6 +34,7 @@ async function createRequest(req, res, next) {
       title: "New asset request",
       message: `${request.category}: ${request.reason}` ,
       link: "/asset-requests",
+      moduleKey: "assetRequests",
     })
 
     res.status(201).json(request)
@@ -106,7 +107,7 @@ async function reviewRequest(req, res, next) {
       type: "ASSET_REQUEST",
       title: `Asset request ${decision.toLowerCase()}`,
       message: `${request.category} request was ${decision.toLowerCase()}.${reviewNote ? ` ${reviewNote}` : ""}`,
-      link: "/asset-requests",
+      link: `/employees/${request.employeeId}`,
     })
 
     res.json(updated)
@@ -162,7 +163,7 @@ async function fulfillRequest(req, res, next) {
       type: "ASSET_REQUEST",
       title: "Asset request fulfilled",
       message: `${asset.name} has been assigned to you.`,
-      link: "/asset-requests",
+      link: `/employees/${request.employeeId}`,
     })
 
     res.json(updatedRequest)

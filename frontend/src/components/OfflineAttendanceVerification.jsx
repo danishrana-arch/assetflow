@@ -1,5 +1,6 @@
 import { useState } from "react"
 import { Camera, CheckCircle2, Download, MapPin, WifiOff } from "lucide-react"
+import { formatDateTime } from "../utils/time"
 
 function value(v, fallback = "Not available") {
   return v === null || v === undefined || v === "" ? fallback : v
@@ -31,7 +32,7 @@ export default function OfflineAttendanceVerification({ record, site }) {
       const lines = [
         `Employee: ${value(record.employeeName)}`,
         `Date: ${value(record.localDate)}`,
-        `Recorded time: ${new Date(record.localRecordedAt).toLocaleString()}`,
+        `Recorded time: ${formatDateTime(record.localRecordedAt, { second: "2-digit" })}`,
         `Time zone: ${value(record.timezone)}`,
         `Site: ${value(site?.name || record.siteName)}`,
         `Latitude: ${value(record.latitude)}`,
@@ -75,7 +76,7 @@ export default function OfflineAttendanceVerification({ record, site }) {
       <div className="grid gap-3 p-4 sm:grid-cols-2">
         <div className="rounded-2xl bg-surface-2 p-3">
           <p className="text-[10px] font-semibold uppercase tracking-wide text-muted">Recorded</p>
-          <p className="mt-1 text-sm font-semibold text-ink">{new Date(record.localRecordedAt).toLocaleString()}</p>
+          <p className="mt-1 text-sm font-semibold text-ink">{formatDateTime(record.localRecordedAt, { second: "2-digit" })}</p>
           <p className="mt-1 text-xs text-muted">{value(record.timezone)}</p>
         </div>
         <div className="rounded-2xl bg-surface-2 p-3">
