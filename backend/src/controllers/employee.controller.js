@@ -144,10 +144,28 @@ async function getEmployee(req, res, next) {
         certifications: { orderBy: { createdAt: "asc" } },
         tickets: { orderBy: { createdAt: "desc" } },
         lifecycleEvents: { orderBy: { occurredAt: "desc" }, take: 20, include: { asset: true } },
+        // The profile's Projects, Leave remaining and Recent payroll cards
+        // read these — they were never loaded, so the cards were always empty.
+        projectMemberships: {
+          orderBy: { createdAt: "desc" },
+          include: { project: { select: { id: true, name: true, status: true, deadline: true } } },
+        },
+        leaveApplications: {
+          where: { status: "APPROVED" },
+          orderBy: { startDate: "desc" },
+          select: { id: true, startDate: true, endDate: true, type: true, status: true },
+        },
+        payrollRecords: {
+          orderBy: [{ year: "desc" }, { month: "desc" }],
+          take: 5,
+          select: { id: true, month: true, year: true, netPay: true, status: true },
+        },
       },
     })
 
     if (!employee) return res.status(404).json({ error: "Employee not found" })
+    // Pay details only for the employee themselves and the payroll module.
+    if (!(userId === id || hasModuleAccess(role, "payroll"))) delete employee.payrollRecords
 
     // IT is intentionally asset-only. Never send payroll, salary, CNIC, DOB,
     // address, bank details, attendance, leave, or project data to an IT manager.
@@ -230,7 +248,6 @@ const MANAGEMENT_EDITABLE_FIELDS = [
   "email",
   "personalEmail",
   "phone",
-  "personalEmail",
   "fatherName",
   "education",
   "currentUniversity",
@@ -298,10 +315,26 @@ async function updateEmployee(req, res, next) {
       return res.status(403).json({ error: "You can only edit your own profile" })
     }
 
+    // Free-text fields: trimmed, and a blank value clears the field (null)
+    // rather than storing "" — so a cleared field reads back as empty.
+    const TEXT_FIELDS = ["name", "email", "education", "currentUniversity", "linkedinUrl", "skill", "bankName", "designation", "photoUrl"]
+    const clean = (value) => {
+      if (value === null || value === undefined) return value
+      const s = String(value).trim()
+      return s === "" ? null : s
+    }
+
     const data = {}
     for (const field of allowedFields) {
       if (req.body[field] === undefined) continue
-      if (field === "dob") data.dob = req.body.dob ? new Date(req.body.dob) : null
+      if (field === "name" || field === "email") {
+        const value = clean(req.body[field])
+        if (!value) return res.status(400).json({ error: field === "name" ? "Name is required" : "Company email is required" })
+        if (field === "email" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return res.status(400).json({ error: "Invalid company email" })
+        data[field] = value
+      }
+      else if (TEXT_FIELDS.includes(field)) data[field] = clean(req.body[field])
+      else if (field === "dob") data.dob = req.body.dob ? new Date(req.body.dob) : null
       else if (field === "joiningDate") data.joiningDate = req.body.joiningDate ? new Date(req.body.joiningDate) : null
       else if (field === "workLocationType") {
         if (!["OFFICE", "FIELD"].includes(req.body.workLocationType)) {
@@ -316,18 +349,19 @@ async function updateEmployee(req, res, next) {
         }
         data[field] = value
       }
-      else if (field === "cnic") data.cnic = encryptField(req.body.cnic)
-      else if (field === "bankAccountNumber") data.bankAccountNumber = encryptField(req.body.bankAccountNumber)
       else if (field === "personalEmail") {
         // Validate the raw value BEFORE encrypting — the regex can't run
         // against ciphertext.
-        if (req.body.personalEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(req.body.personalEmail))) {
+        const value = clean(req.body.personalEmail)
+        if (value && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
           return res.status(400).json({ error: "Invalid personal email" })
         }
-        data.personalEmail = req.body.personalEmail ? encryptField(req.body.personalEmail) : null
+        data.personalEmail = value ? encryptField(value) : null
       }
-      else if (["phone", "address", "fatherName"].includes(field)) {
-        data[field] = req.body[field] ? encryptField(req.body[field]) : null
+      // Encrypted PII: a blank value clears it instead of storing "".
+      else if (["cnic", "bankAccountNumber", "phone", "address", "fatherName"].includes(field)) {
+        const value = clean(req.body[field])
+        data[field] = value ? encryptField(value) : null
       }
       // Enum/foreign-key fields don't accept "" as a value — an empty
       // string from a "None" dropdown selection has to become null.
@@ -352,8 +386,10 @@ async function updateEmployee(req, res, next) {
     }
 
     if (data.email !== undefined) {
+      // User.email is unique across the whole database, not per org — an
+      // org-only check let a cross-org duplicate through to a 500.
       const emailTaken = await prisma.user.findFirst({
-        where: { email: data.email, organizationId, NOT: { id } },
+        where: { email: { equals: data.email, mode: "insensitive" }, NOT: { id } },
       })
       if (emailTaken) return res.status(409).json({ error: "That email is already in use" })
     }

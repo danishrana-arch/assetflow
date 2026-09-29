@@ -1318,6 +1318,45 @@ Per a live chat request (2026-09-29):
 - Existing records are not recalculated — only new check-ins/punches/
   admin saves apply the rule.
 
+## Post-module fix: Employee Profile "Detailed Information" (save + no duplicates)
+
+Per a live chat request (2026-09-29), `EmployeeProfile.jsx` + backend:
+
+- **Edit form**: Personal Email, Father Name, Education, University,
+  LinkedIn and Shift Start/End were each rendered twice (two blocks).
+  Now every field appears once, grouped (Contact / Employment / Personal /
+  Education / Payroll & bank) via a local `FormGroup`. **University never
+  saved** — its input was bound to `editForm.University` while the form
+  state and backend field are `currentUniversity`; fixed.
+- **Read-only view** showed only 6 fields, so most saved data was invisible
+  (and "Designation" fell back to `skill`, showing skill twice). Now shows
+  every saved field once, in the same groups (`DetailGroup`); department/
+  role/status/level/employee type are left to the chips above rather than
+  repeated. Personal/Education gated by `showPersonalDetails`, bank/salary
+  by `showFinancial` (existing lens, previously unused here).
+- **`updateEmployee`**: free-text fields trimmed, blank → `null` (blank
+  CNIC/bank account used to be stored as `""` via `encryptField("")`);
+  name/company email required + email format checked; the duplicate-email
+  check is now global and case-insensitive (`User.email` is globally
+  unique, so the old org-only check let a cross-org collision through to a
+  500). Removed the duplicate `personalEmail` in `MANAGEMENT_EDITABLE_FIELDS`.
+- **`getEmployee`** now loads `projectMemberships` (+ project), approved
+  `leaveApplications`, and the last 5 `payrollRecords` — the profile's
+  Projects / Leave remaining / Recent payroll cards read these but they
+  were never included, so those cards were always empty. Payroll is only
+  sent to the employee themselves or `payroll`-module roles (ADMIN/CEO);
+  the card is hidden when absent.
+- **Certifications**: `addCertification`/`updateCertification` reject a
+  duplicate (same name + institute, case-insensitive, same employee) with
+  409. Frontend assigns the new id to the draft on save (a second click
+  can't create a copy), keeps unsaved drafts across refetches, and shows
+  save errors.
+- Verified 35/35 against the live DB: every field saved and read back
+  identically, blanks → null, blank name 400, cross-org email 409,
+  duplicate cert 409, HR gets no payroll. The test employee was restored
+  to its exact original stored values afterward (and the test cert
+  deleted). No schema change.
+
 ## Automated RBAC test run (2026-09-28)
 
 There's no automated test suite in either app (`npm test` isn't

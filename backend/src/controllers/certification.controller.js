@@ -13,6 +13,20 @@ async function isProtectedProfileForRequester(req, employeeId) {
 
 const PROTECTED_PROFILE_ERROR = { error: "Only an Admin or CEO can edit an Admin or CEO profile" }
 
+// Same certificate name + institute (case-insensitive) on the same
+// employee counts as a duplicate.
+function findDuplicateCertification(employeeId, name, institute, excludeId) {
+  return prisma.certification.findFirst({
+    where: {
+      employeeId,
+      name: { equals: name.trim(), mode: "insensitive" },
+      institute: { equals: institute.trim(), mode: "insensitive" },
+      ...(excludeId ? { NOT: { id: excludeId } } : {}),
+    },
+    select: { id: true },
+  })
+}
+
 function parseDate(value) {
   if (!value) return null
   const date = new Date(value)
@@ -53,6 +67,10 @@ async function addCertification(req, res, next) {
     if (issuedDate && issued === undefined) return res.status(400).json({ error: "Invalid issued date" })
     if (expiryDate && expiry === undefined) return res.status(400).json({ error: "Invalid expiry date" })
     if (issued && expiry && expiry < issued) return res.status(400).json({ error: "Expiry date cannot be before issued date" })
+
+    if (await findDuplicateCertification(employeeId, name, institute)) {
+      return res.status(409).json({ error: "This certification is already on the profile" })
+    }
 
     const certification = await prisma.certification.create({
       data: {
@@ -106,6 +124,10 @@ async function updateCertification(req, res, next) {
     if (issuedDate && issued === undefined) return res.status(400).json({ error: "Invalid issued date" })
     if (expiryDate && expiry === undefined) return res.status(400).json({ error: "Invalid expiry date" })
     if (issued && expiry && expiry < issued) return res.status(400).json({ error: "Expiry date cannot be before issued date" })
+
+    if (await findDuplicateCertification(employeeId, name, institute, certificationId)) {
+      return res.status(409).json({ error: "This certification is already on the profile" })
+    }
 
     const certification = await prisma.certification.update({
       where: { id: certificationId },

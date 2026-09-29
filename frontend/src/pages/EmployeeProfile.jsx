@@ -3,7 +3,7 @@ import { useParams, Link, useNavigate } from "react-router-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   BadgeCheck, Plus, X, Boxes, Ticket as TicketIcon, Activity, UserX, Pencil, Check,
-  Mail, Phone, KeyRound, ChevronDown, ChevronUp, Laptop, PackageSearch, MapPin,
+  Mail, Phone, KeyRound, Laptop, PackageSearch, MapPin,
   Calendar, Users as ManagerIcon, Briefcase, Send, AlertTriangle, Save, Minus,
   BriefcaseBusiness, UserRoundCheck, CalendarRange, ShieldCheck,
 } from "lucide-react"
@@ -30,6 +30,24 @@ const WORK_LOCATION_LABEL = { OFFICE: "Office", FIELD: "Field / Remote" }
 function fmtDate(value) {
   if (!value) return undefined
   return new Date(value).toLocaleDateString(undefined, { timeZone: "UTC", month: "short", day: "numeric", year: "numeric" })
+}
+
+function DetailGroup({ title, children }) {
+  return (
+    <div className="border-t border-border pt-3 first:border-t-0 first:pt-0">
+      <p className="mb-2.5 text-[10px] font-bold uppercase tracking-wider text-muted-2">{title}</p>
+      <div className="space-y-3">{children}</div>
+    </div>
+  )
+}
+
+function FormGroup({ title, children }) {
+  return (
+    <fieldset className="grid grid-cols-1 gap-3 border-t border-border pt-3 first:border-t-0 first:pt-0">
+      <legend className="mb-1 text-[10px] font-bold uppercase tracking-wider text-muted-2">{title}</legend>
+      {children}
+    </fieldset>
+  )
 }
 
 // Categorizes an assigned asset into a tab. Anything whose category name
@@ -77,7 +95,6 @@ export default function EmployeeProfile() {
   const [showRequestForm, setShowRequestForm] = useState(false)
   const [requestCategory, setRequestCategory] = useState("")
   const [requestReason, setRequestReason] = useState("")
-  const [detailsOpen, setDetailsOpen] = useState(false)
   const [assetTab, setAssetTab] = useState("ALL")
   const [usageDrafts, setUsageDrafts] = useState({}) // { [assetId]: { notUsing: bool, actual: string } }
   const [usageSubmitted, setUsageSubmitted] = useState({}) // { [assetId]: true }
@@ -104,7 +121,9 @@ export default function EmployeeProfile() {
 
   useEffect(() => {
     if (!employee) return
-    setCertificateDrafts((employee.certifications || []).map((certificate) => ({
+    // Rebuild from the server's list, keeping any not-yet-saved drafts so a
+    // refetch (e.g. after saving the profile) doesn't wipe them.
+    setCertificateDrafts((current) => [...(employee.certifications || []).map((certificate) => ({
       id: certificate.id,
       name: certificate.name || "",
       institute: certificate.institute || "",
@@ -113,7 +132,7 @@ export default function EmployeeProfile() {
       issuedDate: certificate.issuedDate ? certificate.issuedDate.slice(0, 10) : "",
       expiryDate: certificate.expiryDate ? certificate.expiryDate.slice(0, 10) : "",
       notes: certificate.notes || "",
-    })))
+    })), ...current.filter((draft) => !draft.id)])
   }, [employee])
 
   // ADMIN/CEO can reset anyone's password. HR can reset anyone's except an
@@ -184,13 +203,20 @@ export default function EmployeeProfile() {
     onSuccess: invalidate,
   })
 
+  const [certificateError, setCertificateError] = useState("")
   const saveCertification = useMutation({
     mutationFn: ({ certificateId, data }) => certificateId
       ? api.patch(`/employees/${id}/certifications/${certificateId}`, data)
       : api.post(`/employees/${id}/certifications`, data),
-    onSuccess: () => {
+    onSuccess: (res, { index }) => {
+      setCertificateError("")
+      // Give a new draft its real id right away, so a second click updates
+      // it instead of creating a duplicate, and the refetch doesn't keep a
+      // second unsaved copy of it.
+      setCertificateDrafts((items) => items.map((item, i) => (i === index ? { ...item, id: res.data.id } : item)))
       queryClient.invalidateQueries({ queryKey: ["employee", id] })
     },
+    onError: (err) => setCertificateError(err.response?.data?.error || "Could not save certification"),
   })
 
   const deleteCertification = useMutation({
@@ -302,6 +328,8 @@ export default function EmployeeProfile() {
     setEditError("")
     setEditing(true)
   }
+
+  const setField = (key) => (e) => setEditForm((f) => ({ ...f, [key]: e.target.value }))
 
   function handleSaveEdit(e) {
     e.preventDefault()
@@ -481,7 +509,7 @@ export default function EmployeeProfile() {
       </section>
       <section className="mb-5 grid gap-4 lg:grid-cols-2">
         <div className="card p-5"><SectionHeader title="Projects & time"/><div className="mt-3 space-y-2">{(employee.projectMemberships||[]).slice(0,6).map(m=><div key={m.id} className="flex items-center justify-between rounded-2xl bg-surface-2 p-3"><div className="min-w-0"><p className="truncate text-sm font-semibold text-ink">{m.project?.name}</p><p className="text-xs text-muted">{m.project?.status?.replaceAll("_"," ")} · {Number(m.hoursSpent||0).toFixed(1)}h</p></div>{m.project?.deadline&&<span className="text-[11px] text-muted">Due {new Date(m.project.deadline).toLocaleDateString()}</span>}</div>)}{!(employee.projectMemberships||[]).length&&<p className="text-sm text-muted">No project assignments.</p>}</div></div>
-        <div className="card p-5"><SectionHeader title="Recent payroll"/><div className="mt-3 space-y-2">{(employee.payrollRecords||[]).slice(0,5).map(p=><div key={p.id} className="flex items-center justify-between rounded-2xl bg-surface-2 p-3"><div><p className="text-sm font-semibold text-ink">{p.month}/{p.year}</p><p className="text-xs text-muted">{p.status}</p></div><span className="text-sm font-semibold text-ink">PKR {Number(p.netPay||0).toLocaleString()}</span></div>)}{!(employee.payrollRecords||[]).length&&<p className="text-sm text-muted">No payroll records.</p>}</div></div>
+        {employee.payrollRecords !== undefined && <div className="card p-5"><SectionHeader title="Recent payroll"/><div className="mt-3 space-y-2">{(employee.payrollRecords||[]).slice(0,5).map(p=><div key={p.id} className="flex items-center justify-between rounded-2xl bg-surface-2 p-3"><div><p className="text-sm font-semibold text-ink">{p.month}/{p.year}</p><p className="text-xs text-muted">{p.status}</p></div><span className="text-sm font-semibold text-ink">PKR {Number(p.netPay||0).toLocaleString()}</span></div>)}{!(employee.payrollRecords||[]).length&&<p className="text-sm text-muted">No payroll records.</p>}</div></div>}
       </section>
 
       {/* Attendance History — links out to its own page rather than listing
@@ -906,96 +934,78 @@ export default function EmployeeProfile() {
 
           {editing ? (
             <form onSubmit={handleSaveEdit} className="grid grid-cols-1 gap-4">
-              {canEditFully && (
-                <TextField label="Full name" value={editForm.name} onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))} />
-              )}
-              <TextField label="Company Email" type="email" value={editForm.email} onChange={(e) => setEditForm((f) => ({ ...f, email: e.target.value }))} />
-              <TextField label="Phone" value={editForm.phone} onChange={(e) => setEditForm((f) => ({ ...f, phone: e.target.value }))} />
-              {canEditFully && (
-                <>
-                  <TextField label="Personal Email" type="email" value={editForm.personalEmail} onChange={(e) => setEditForm((f) => ({ ...f, personalEmail: e.target.value }))} />
-                  <TextField label="Father Name" value={editForm.fatherName} onChange={(e) => setEditForm((f) => ({ ...f, fatherName: e.target.value }))} />
-                  <TextField label="Education" value={editForm.education} onChange={(e) => setEditForm((f) => ({ ...f, education: e.target.value }))} />
-                  <TextField label="University" value={editForm.University} onChange={(e) => setEditForm((f) => ({ ...f, University: e.target.value }))} />
-                  <TextField label="LinkedIn" value={editForm.linkedinUrl} onChange={(e) => setEditForm((f) => ({ ...f, linkedinUrl: e.target.value }))} placeholder="https://linkedin.com/in/..." />
-                  <div className="grid grid-cols-2 gap-2">
-                    <TextField label="Shift Start" type="time" value={editForm.shiftStart} hint={formatClock(editForm.shiftStart)} onChange={(e) => setEditForm((f) => ({ ...f, shiftStart: e.target.value }))} />
-                    <TextField label="Shift End" type="time" value={editForm.shiftEnd} hint={formatClock(editForm.shiftEnd)} onChange={(e) => setEditForm((f) => ({ ...f, shiftEnd: e.target.value }))} />
-                  </div>
-                </>
-              )}
+              {/* Each field appears exactly once, grouped the same way as the
+                  read-only view below. */}
+              <FormGroup title="Contact">
+                {canEditFully && <TextField label="Full name" value={editForm.name} onChange={setField("name")} required />}
+                <TextField label="Company Email" type="email" value={editForm.email} onChange={setField("email")} required />
+                <TextField label="Phone" value={editForm.phone} onChange={setField("phone")} />
+                {canEditFully && <TextField label="Personal Email" type="email" value={editForm.personalEmail} onChange={setField("personalEmail")} />}
+              </FormGroup>
               {canEditFully && (
                 <>
-                  <TextField label="Designation / Title" value={editForm.designation} onChange={(e) => setEditForm((f) => ({ ...f, designation: e.target.value }))} placeholder="e.g. Senior Backend Engineer" />
-                  <TextField label="Personal Email" type="email" value={editForm.personalEmail} onChange={(e) => setEditForm((f) => ({ ...f, personalEmail: e.target.value }))} />
-                  <TextField label="Father Name" value={editForm.fatherName} onChange={(e) => setEditForm((f) => ({ ...f, fatherName: e.target.value }))} />
-                  <TextField label="Education" value={editForm.education} onChange={(e) => setEditForm((f) => ({ ...f, education: e.target.value }))} placeholder="e.g. BS Computer Science" />
-                  <TextField label="University" value={editForm.University} onChange={(e) => setEditForm((f) => ({ ...f, University: e.target.value }))} />
-                  <TextField label="LinkedIn URL" value={editForm.linkedinUrl} onChange={(e) => setEditForm((f) => ({ ...f, linkedinUrl: e.target.value }))} placeholder="https://www.linkedin.com/in/..." />
-                  <TextField label="Shift Start" type="time" value={editForm.shiftStart} hint={formatClock(editForm.shiftStart)} onChange={(e) => setEditForm((f) => ({ ...f, shiftStart: e.target.value }))} />
-                  <TextField label="Shift End" type="time" value={editForm.shiftEnd} hint={formatClock(editForm.shiftEnd)} onChange={(e) => setEditForm((f) => ({ ...f, shiftEnd: e.target.value }))} />
-                  <SelectField label="Department" value={editForm.departmentId} onChange={(e) => setEditForm((f) => ({ ...f, departmentId: e.target.value }))}>
-                    <option value="">None</option>
-                    {(departments || []).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-                  </SelectField>
-                  <SelectField label="Role" value={editForm.role} disabled={!canChangeRoleAndStatus} onChange={(e) => setEditForm((f) => ({ ...f, role: e.target.value }))}>
-                    {Object.entries(ROLE_LABELS)
-                      .filter(([value]) => ["ADMIN", "CEO", "HR", "MANAGEMENT", "DEPARTMENT_HEAD", "IT_MANAGER", "EMPLOYEE"].includes(value))
-                      .filter(([value]) => value !== "CEO" || employee.role === "CEO" || (managerOptions || []).filter((m) => m.role === "CEO").length < 3)
-                      .map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                  </SelectField>
-                  <SelectField label="Reporting Manager" value={editForm.managerId} onChange={(e) => setEditForm((f) => ({ ...f, managerId: e.target.value }))}>
-                    <option value="">None</option>
-                    {(managerOptions || []).filter((manager) => manager.id !== employee.id).map((manager) => (
-                      <option key={manager.id} value={manager.id}>{manager.name} — {ROLE_LABELS[manager.role] || manager.role}</option>
-                    ))}
-                  </SelectField>
-                  <SelectField label="Status" value={editForm.status} disabled={employee.role === "CEO" && user?.role !== "CEO"} onChange={(e) => setEditForm((f) => ({ ...f, status: e.target.value }))}>
-                    <option value="ACTIVE">Active</option>
-                    <option value="ON_LEAVE">On Leave</option>
-                    <option value="LEFT_COMPANY">Left Company</option>
-                  </SelectField>
-                  <SelectField
-                    label="Employee type"
-                    value={editForm.workLocationType}
-                    onChange={(e) => setEditForm((f) => ({ ...f, workLocationType: e.target.value }))}
-                  >
-                    <option value="OFFICE">Office (attendance geofence applies)</option>
-                    <option value="FIELD">Field / Remote (exempt from geofence)</option>
-                  </SelectField>
-                  <TextField label="CNIC" value={editForm.cnic} onChange={(e) => setEditForm((f) => ({ ...f, cnic: e.target.value }))} placeholder="XXXXX-XXXXXXX-X" hint="Stored encrypted" />
-                  <TextField label="Date of birth" type="date" value={editForm.dob} onChange={(e) => setEditForm((f) => ({ ...f, dob: e.target.value }))} />
-                  <TextField label="Joining date" type="date" value={editForm.joiningDate} onChange={(e) => setEditForm((f) => ({ ...f, joiningDate: e.target.value }))} />
-                  <TextField label="Location / Residence" value={editForm.address} onChange={(e) => setEditForm((f) => ({ ...f, address: e.target.value }))} />
-                  <TextField label="Skill" value={editForm.skill} onChange={(e) => setEditForm((f) => ({ ...f, skill: e.target.value }))} />
-                  <SelectField label="Level" value={editForm.seniorityLevel} onChange={(e) => setEditForm((f) => ({ ...f, seniorityLevel: e.target.value }))}>
-                    <option value="">None</option>
-                    <option value="INTERN">Intern</option>
-                    <option value="JUNIOR">Junior</option>
-                    <option value="SENIOR">Senior</option>
-                    <option value="LEAD">Lead</option>
-                  </SelectField>
-                  <TextField
-                    label="Base Salary (PKR / month)"
-                    type="number"
-                    min="25000"
-                    step="5000"
-                    value={editForm.baseSalary}
-                    onChange={(e) => setEditForm((f) => ({ ...f, baseSalary: e.target.value }))}
-                    hint="Minimum PKR 25,000 used to generate this employee's payroll"
-                  />
-                  <TextField
-                    label="Bank Name"
-                    value={editForm.bankName}
-                    onChange={(e) => setEditForm((f) => ({ ...f, bankName: e.target.value }))}
-                    placeholder="e.g. HBL, Meezan Bank"
-                  />
-                  <TextField
-                    label="Bank Account Number"
-                    value={editForm.bankAccountNumber}
-                    onChange={(e) => setEditForm((f) => ({ ...f, bankAccountNumber: e.target.value }))}
-                    hint="Stored encrypted used for payroll disbursement"
-                  />
+                  <FormGroup title="Employment">
+                    <TextField label="Designation / Title" value={editForm.designation} onChange={setField("designation")} placeholder="e.g. Senior Backend Engineer" />
+                    <SelectField label="Department" value={editForm.departmentId} onChange={setField("departmentId")}>
+                      <option value="">None</option>
+                      {(departments || []).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                    </SelectField>
+                    <SelectField label="Reporting Manager" value={editForm.managerId} onChange={setField("managerId")}>
+                      <option value="">None</option>
+                      {(managerOptions || []).filter((manager) => manager.id !== employee.id).map((manager) => (
+                        <option key={manager.id} value={manager.id}>{manager.name} — {ROLE_LABELS[manager.role] || manager.role}</option>
+                      ))}
+                    </SelectField>
+                    <SelectField label="Role" value={editForm.role} disabled={!canChangeRoleAndStatus} onChange={setField("role")}>
+                      {Object.entries(ROLE_LABELS)
+                        .filter(([value]) => ["ADMIN", "CEO", "HR", "MANAGEMENT", "DEPARTMENT_HEAD", "IT_MANAGER", "EMPLOYEE"].includes(value))
+                        .filter(([value]) => value !== "CEO" || employee.role === "CEO" || (managerOptions || []).filter((m) => m.role === "CEO").length < 3)
+                        .map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                    </SelectField>
+                    <SelectField label="Status" value={editForm.status} disabled={employee.role === "CEO" && user?.role !== "CEO"} onChange={setField("status")}>
+                      <option value="ACTIVE">Active</option>
+                      <option value="ON_LEAVE">On Leave</option>
+                      <option value="LEFT_COMPANY">Left Company</option>
+                    </SelectField>
+                    <SelectField label="Employee type" value={editForm.workLocationType} onChange={setField("workLocationType")}>
+                      <option value="OFFICE">Office (attendance geofence applies)</option>
+                      <option value="FIELD">Field / Remote (exempt from geofence)</option>
+                    </SelectField>
+                    <SelectField label="Level" value={editForm.seniorityLevel} onChange={setField("seniorityLevel")}>
+                      <option value="">None</option>
+                      {Object.entries(LEVEL_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                    </SelectField>
+                    <TextField label="Skill" value={editForm.skill} onChange={setField("skill")} />
+                    <TextField label="Joining date" type="date" value={editForm.joiningDate} onChange={setField("joiningDate")} />
+                    <div className="grid grid-cols-2 gap-2">
+                      <TextField label="Shift Start" type="time" value={editForm.shiftStart} hint={formatClock(editForm.shiftStart)} onChange={setField("shiftStart")} />
+                      <TextField label="Shift End" type="time" value={editForm.shiftEnd} hint={formatClock(editForm.shiftEnd)} onChange={setField("shiftEnd")} />
+                    </div>
+                  </FormGroup>
+                  <FormGroup title="Personal">
+                    <TextField label="Father Name" value={editForm.fatherName} onChange={setField("fatherName")} />
+                    <TextField label="CNIC" value={editForm.cnic} onChange={setField("cnic")} placeholder="XXXXX-XXXXXXX-X" hint="Stored encrypted" />
+                    <TextField label="Date of birth" type="date" value={editForm.dob} onChange={setField("dob")} />
+                    <TextField label="Location / Residence" value={editForm.address} onChange={setField("address")} />
+                  </FormGroup>
+                  <FormGroup title="Education">
+                    <TextField label="Education" value={editForm.education} onChange={setField("education")} placeholder="e.g. BS Computer Science" />
+                    <TextField label="University" value={editForm.currentUniversity} onChange={setField("currentUniversity")} />
+                    <TextField label="LinkedIn URL" value={editForm.linkedinUrl} onChange={setField("linkedinUrl")} placeholder="https://www.linkedin.com/in/..." />
+                  </FormGroup>
+                  <FormGroup title="Payroll & bank">
+                    <TextField
+                      label="Base Salary (PKR / month)"
+                      type="number"
+                      min="25000"
+                      step="5000"
+                      value={editForm.baseSalary}
+                      onChange={setField("baseSalary")}
+                      hint="Minimum PKR 25,000 used to generate this employee's payroll"
+                    />
+                    <TextField label="Bank Name" value={editForm.bankName} onChange={setField("bankName")} placeholder="e.g. HBL, Meezan Bank" />
+                    <TextField label="Bank Account Number" value={editForm.bankAccountNumber} onChange={setField("bankAccountNumber")} hint="Stored encrypted used for payroll disbursement" />
+                  </FormGroup>
                 </>
               )}
               {editError && <p className="text-sm text-danger">{editError}</p>}
@@ -1005,12 +1015,45 @@ export default function EmployeeProfile() {
             </form>
           ) : (
             <div className="space-y-3.5">
-              <FieldValue label="Company Email" value={employee.email} />
-              <FieldValue label="Personal Email" value={employee.personalEmail} />
-              <FieldValue label="Phone" value={employee.phone} />
-              <FieldValue label="Designation" value={employee.designation || employee.skill} />
-              <FieldValue label="Department" value={employee.department?.name} />
-              <FieldValue label="Reporting Manager" value={employee.manager?.name} />
+              {/* Department, role, status, level and employee type are already
+                  shown as chips above, so they aren't repeated here. */}
+              <DetailGroup title="Contact">
+                <FieldValue label="Company Email" value={employee.email} />
+                <FieldValue label="Phone" value={employee.phone} />
+                <FieldValue label="Personal Email" value={employee.personalEmail} />
+              </DetailGroup>
+              <DetailGroup title="Employment">
+                <FieldValue label="Designation" value={employee.designation} />
+                <FieldValue label="Reporting Manager" value={employee.manager?.name} />
+                <FieldValue label="Skill" value={employee.skill} />
+                <FieldValue label="Joining date" value={fmtDate(employee.joiningDate)} />
+                <FieldValue label="Shift" value={employee.shiftStart || employee.shiftEnd ? `${formatClock(employee.shiftStart) || "—"} - ${formatClock(employee.shiftEnd) || "—"}` : null} />
+              </DetailGroup>
+              {showPersonalDetails && (
+                <>
+                  <DetailGroup title="Personal">
+                    <FieldValue label="Father Name" value={employee.fatherName} />
+                    <FieldValue label="CNIC" value={employee.cnic} />
+                    <FieldValue label="Date of birth" value={fmtDate(employee.dob)} />
+                    <FieldValue label="Location / Residence" value={employee.address} />
+                  </DetailGroup>
+                  <DetailGroup title="Education">
+                    <FieldValue label="Education" value={employee.education} />
+                    <FieldValue label="University" value={employee.currentUniversity} />
+                    <FieldValue
+                      label="LinkedIn"
+                      value={employee.linkedinUrl && <a href={employee.linkedinUrl} target="_blank" rel="noreferrer" className="break-all text-accent hover:underline">{employee.linkedinUrl}</a>}
+                    />
+                  </DetailGroup>
+                </>
+              )}
+              {showFinancial && (
+                <DetailGroup title="Payroll & bank">
+                  <FieldValue label="Base Salary" value={employee.baseSalary != null && employee.baseSalary !== "" ? `PKR ${Number(employee.baseSalary).toLocaleString()} / month` : null} />
+                  <FieldValue label="Bank Name" value={employee.bankName} />
+                  <FieldValue label="Bank Account Number" value={employee.bankAccountNumber} />
+                </DetailGroup>
+              )}
 
             {canManageCertifications && (
               <div className="mt-5 w-full border-t border-border pt-4 text-left">
@@ -1057,7 +1100,7 @@ export default function EmployeeProfile() {
                           </button>
                           <button
                             type="button"
-                            onClick={() => saveCertification.mutate({ certificateId: certificate.id, data: certificate })}
+                            onClick={() => saveCertification.mutate({ certificateId: certificate.id, data: certificate, index })}
                             disabled={saveCertification.isPending || !certificate.name.trim() || !certificate.institute.trim()}
                             className="flex items-center gap-1.5 rounded-full bg-accent px-3 py-1.5 text-[11px] font-semibold text-white disabled:opacity-50"
                           >
@@ -1067,55 +1110,11 @@ export default function EmployeeProfile() {
                       </div>
                     </div>
                   ))}
+                  {certificateError && <p className="text-xs text-danger">{certificateError}</p>}
                   {certificateDrafts.length === 0 && <p className="text-xs text-muted">No certifications added. Use + to add one.</p>}
                 </div>
               </div>
             )}
-              {/* Collapsible "more details" card — DOB, joining date,
-                  location and other less-frequently-needed fields. */}
-              <div className="!mt-4 overflow-hidden rounded-2xl border border-border">
-                <button
-                  type="button"
-                  onClick={() => setDetailsOpen((v) => !v)}
-                  className="flex w-full items-center justify-between px-3.5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted hover:text-ink"
-                >
-                  More details
-                  {detailsOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                </button>
-                {detailsOpen && (
-                  <div className="space-y-3.5 border-t border-border bg-surface-2 px-3.5 py-4">
-                    {showPersonalDetails ? (
-                      <>
-                        <FieldValue label="Father Name" value={employee.fatherName} />
-                        <FieldValue label="Education" value={employee.education} />
-                        <FieldValue label="Current University" value={employee.currentUniversity} />
-                        <FieldValue label="LinkedIn" value={employee.linkedinUrl} />
-                        <FieldValue label="Shift" value={employee.shiftStart && employee.shiftEnd ? `${formatClock(employee.shiftStart)} - ${formatClock(employee.shiftEnd)}` : formatClock(employee.shiftStart || employee.shiftEnd)} />
-                        <FieldValue label="Date of Birth" value={fmtDate(employee.dob)} />
-                        <FieldValue
-                          label="Joining Date"
-                          value={fmtDate(employee.joiningDate) || fmtDate(employee.createdAt)}
-                        />
-                        <FieldValue label="Location" value={employee.address} />
-                        <FieldValue label="CNIC" value={employee.cnic} />
-                        <FieldValue label="Level" value={level && LEVEL_LABEL[level]} />
-                      </>
-                    ) : (
-                      <FieldValue
-                        label="Joining Date"
-                        value={fmtDate(employee.joiningDate) || fmtDate(employee.createdAt)}
-                      />
-                    )}
-                    {showFinancial && (
-                      <>
-                        <FieldValue label="Base Salary" value={employee.baseSalary != null ? `PKR ${Number(employee.baseSalary).toLocaleString(undefined, { minimumFractionDigits: 2 })} / month` : undefined} />
-                        <FieldValue label="Bank" value={employee.bankName} />
-                        <FieldValue label="Account Number" value={employee.bankAccountNumber} />
-                      </>
-                    )}
-                  </div>
-                )}
-              </div>
             </div>
           )}
             </>
