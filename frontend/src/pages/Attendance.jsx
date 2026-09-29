@@ -21,8 +21,11 @@ function formatPunchTime(value) {
 }
 
 
+// Display-only: LATE is set by the server's late rule, not a button.
+const LATE_CONFIG = { label: "Late", tone: "yellow" }
+
 function statusPill(status) {
-  const cfg = STATUS_CONFIG[status] || { label: status, tone: "slate" }
+  const cfg = STATUS_CONFIG[status] || (status === "LATE" ? LATE_CONFIG : { label: status, tone: "slate" })
   return <StatusPill tone={cfg.tone}>{cfg.label}</StatusPill>
 }
 
@@ -74,7 +77,7 @@ function LocationFlag({ row }) {
         {row.autoFlagged
           ? row.distanceMeters != null
             ? `${row.distanceMeters}m away · View exact location`
-            : "Outside office · View exact location"
+            : "Outside site · View exact location"
           : "View exact location"}
       </a>
       <p className="text-[10px] text-muted-2">
@@ -171,7 +174,7 @@ export default function Attendance() {
     )
   }
 
-  const presentCount = rows.filter((r) => r.status === "PRESENT").length
+  const presentCount = rows.filter((r) => r.status === "PRESENT" || r.status === "LATE").length
 
   return (
     <div>

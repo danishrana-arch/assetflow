@@ -167,7 +167,7 @@ export default function AttendanceSites() {
                   <option value="">No project / permanent office</option>
                   {projects.map((project) => <option key={project.id} value={project.id}>{project.name} · {project.status}</option>)}
                 </select>
-                {selectedProject && <span className="mt-1 block text-[10px] text-muted-2">Employees assigned to this project can automatically use this attendance site. Completed projects are excluded.</span>}
+                {selectedProject && <span className="mt-1 block text-[10px] text-muted-2">Employees in this project are automatically assigned to this site and must check in from inside it. Completed projects are excluded.</span>}
               </label>
 
               <label className="block">
@@ -182,7 +182,7 @@ export default function AttendanceSites() {
                 <span className="mt-1 block text-[10px] text-muted-2">Attendance, breaks, late time and end-of-day calculations use this site's time zone.</span>
               </label>
 
-              <label className="block"><span className="mb-1 block text-xs font-semibold text-muted">Geofence mode</span><select value={form.geofenceMode} onChange={(e) => setForm((f) => ({ ...f, geofenceMode: e.target.value }))} className="field w-full"><option value="STRICT">Strict — block outside check-in</option><option value="WARNING">Warning — record anomaly</option><option value="DISABLED">Disabled</option></select></label>
+              <label className="block"><span className="mb-1 block text-xs font-semibold text-muted">Geofence mode</span><select value={form.geofenceMode} onChange={(e) => setForm((f) => ({ ...f, geofenceMode: e.target.value }))} className="field w-full"><option value="STRICT">Strict — outside check-in = Absent, blocks outside check-out</option><option value="WARNING">Standard — outside check-in = Absent, check-out flagged</option><option value="DISABLED">Disabled — check in from anywhere</option></select></label>
 
               <label className="block"><span className="mb-1 block text-xs font-semibold text-muted">Radius fallback (m)</span><input type="number" min="25" max="5000" value={form.radiusMeters} onChange={(e) => setForm((f) => ({ ...f, radiusMeters: e.target.value }))} className="field w-full" /></label>
               <label className="block"><span className="mb-1 block text-xs font-semibold text-muted">Outside grace (min)</span><input type="number" min="5" max="720" value={form.outsideGraceMinutes} onChange={(e) => setForm((f) => ({ ...f, outsideGraceMinutes: e.target.value }))} className="field w-full" /></label>
@@ -234,6 +234,22 @@ export default function AttendanceSites() {
                   <div className="rounded-2xl bg-surface-2 p-3"><p className="text-[10px] uppercase tracking-wide text-muted">Project</p><p className="mt-1 text-xs font-semibold text-ink">{site.projectName || "Permanent site"}</p></div>
                   <div className="rounded-2xl bg-surface-2 p-3"><p className="text-[10px] uppercase tracking-wide text-muted">Time zone</p><p className="mt-1 text-xs font-semibold text-ink">{site.timezone || DEFAULT_TZ}</p></div>
                   <div className="rounded-2xl bg-surface-2 p-3"><p className="text-[10px] uppercase tracking-wide text-muted">Outside grace</p><p className="mt-1 text-xs font-semibold text-ink">{site.outsideGraceMinutes || 60} min</p></div>
+                </div>
+                <div className="mt-4">
+                  <p className="mb-2 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted"><Users size={12} /> Employees on this site</p>
+                  {(site.employees || []).length ? (
+                    <div className="flex flex-wrap gap-1.5">
+                      {site.employees.map((emp) => (
+                        <span key={emp.id} className="inline-flex items-center gap-1 rounded-full bg-surface-2 px-2.5 py-1 text-xs font-medium text-ink">
+                          {emp.name}
+                          {emp.viaProject && <span className="rounded-full bg-chip-green-bg px-1.5 text-[9px] font-semibold uppercase text-chip-green-fg">Project</span>}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-2">{site.projectId ? "No members in the linked project yet — add employees to the project to assign them here." : "No employees assigned yet. Link a project to assign its members."}</p>
+                  )}
+                  {(site.employees || []).length > 0 && <p className="mt-2 text-[10px] text-muted-2">These employees can only check in from inside this site. Work from home is disabled for them, and a check-in from outside is marked Absent with their location recorded.</p>}
                 </div>
               </div>
             )

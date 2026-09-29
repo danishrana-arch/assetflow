@@ -5,11 +5,42 @@ const { toDateOnly } = require("../utils/date")
 const { workingMinutesPerDay, expectedWeeklyMinutes, isScheduledWorkday } = require("../utils/work-schedule")
 const { distanceMeters } = require("../utils/geo")
 const { siteDistance } = require("../utils/site-geofence")
-const { dateKeyInTimeZone, localMinutes, parseHHMM } = require("../utils/timezone")
+const { dateKeyInTimeZone } = require("../utils/timezone")
+const { isLateCheckIn, resolveArrivalStatus, formatTime12 } = require("../utils/attendance-rules")
 
 function startOfDay(dateStr, timeZone) {
   if (dateStr) return toDateOnly(dateStr)
   return toDateOnly(dateKeyInTimeZone(new Date(), timeZone || "UTC"))
+}
+
+// Active sites an employee is bound to — assigned directly, or a member of
+// the site's linked (non-completed) project. Same rule as
+// listAssignedSites in attendance-site.controller.js.
+function findAssignedSites(db, organizationId, userId) {
+  return db.$queryRaw`
+    SELECT DISTINCT s.* FROM "AttendanceSite" s
+    LEFT JOIN "AttendanceSiteEmployee" se ON se."siteId"=s.id AND se."employeeId"=${userId}
+    LEFT JOIN "Project" p ON p.id=s."projectId"
+    WHERE s."organizationId"=${organizationId} AND s.active=TRUE
+      AND (s."projectId" IS NULL OR p.status::text <> 'COMPLETED')
+      AND (se."employeeId" IS NOT NULL OR EXISTS (SELECT 1 FROM "ProjectMember" pm WHERE pm."projectId"=s."projectId" AND pm."employeeId"=${userId}))
+  `
+}
+
+// Picks the site to attribute a location to: an inside match first, else
+// the nearest one. `eligible` is true when the location satisfies any
+// assigned site (inside it, or the site has its geofence DISABLED).
+function matchAssignedSite(sites, latitude, longitude) {
+  let best = null
+  let eligible = false
+  for (const site of sites) {
+    const result = siteDistance(site, latitude, longitude)
+    if (result.inside || site.geofenceMode === "DISABLED") eligible = true
+    if (!best || (result.inside && !best.inside) || (result.inside === best.inside && result.distance < best.distance)) {
+      best = { site, distance: result.distance, inside: result.inside }
+    }
+  }
+  return { ...best, eligible }
 }
 
 async function getDailyAttendance(req, res, next) {
@@ -104,7 +135,7 @@ async function markAttendance(req, res, next) {
     const { organizationId, userId } = req.user
     const { employeeId, status, date } = req.body
 
-    const validStatuses = ["PRESENT", "ABSENT", "LEAVE"]
+    const validStatuses = ["PRESENT", "LATE", "ABSENT", "LEAVE"]
     if (!employeeId || !validStatuses.includes(status)) {
       return res.status(400).json({ error: `employeeId and status (${validStatuses.join(", ")}) are required` })
     }
@@ -112,15 +143,20 @@ async function markAttendance(req, res, next) {
     const employee = await prisma.user.findFirst({ where: { id: employeeId, organizationId } })
     if (!employee) return res.status(404).json({ error: "Employee not found" })
 
-    const day = startOfDay(date, (await prisma.organization.findUnique({ where: { id: organizationId }, select: { timezone: true } }))?.timezone)
+    const org = await prisma.organization.findUnique({ where: { id: organizationId }, select: { timezone: true, shiftStartDefault: true, lateThresholdMinutes: true } })
+    const day = startOfDay(date, org?.timezone)
+    const existing = await prisma.attendanceRecord.findUnique({ where: { employeeId_date: { employeeId, date: day } }, select: { checkInAt: true } })
+    // Marking Present on a day with a recorded check-in still applies the
+    // late rule — a 10:16 arrival on a 10:00 + 15 min shift stays LATE.
+    const finalStatus = resolveArrivalStatus(status, existing?.checkInAt, employee, org)
 
     // An admin setting the status directly is an explicit override — any
     // prior "auto-flagged as absent due to location" marker no longer
     // applies, since a human has now made the call.
     const record = await prisma.attendanceRecord.upsert({
       where: { employeeId_date: { employeeId, date: day } },
-      update: { status, markedById: userId, autoFlagged: false },
-      create: { organizationId, employeeId, date: day, status, markedById: userId },
+      update: { status: finalStatus, markedById: userId, autoFlagged: false },
+      create: { organizationId, employeeId, date: day, status: finalStatus, markedById: userId },
     })
 
     res.json(record)
@@ -134,7 +170,10 @@ async function saveDayAttendance(req, res, next) {
     const { organizationId, userId } = req.user
     const { date, records } = req.body
 
-    const validStatuses = ["PRESENT", "ABSENT", "LEAVE"]
+    // LATE is accepted because the admin page sends each row's current
+    // status back on Save — rejecting it made any day with a late arrival
+    // impossible to save.
+    const validStatuses = ["PRESENT", "LATE", "ABSENT", "LEAVE"]
     if (!Array.isArray(records) || records.length === 0) {
       return res.status(400).json({ error: "records must be a non-empty array of { employeeId, status }" })
     }
@@ -144,17 +183,25 @@ async function saveDayAttendance(req, res, next) {
       }
     }
 
-    const org = await prisma.organization.findUnique({ where: { id: organizationId }, select: { timezone: true } })
+    const org = await prisma.organization.findUnique({ where: { id: organizationId }, select: { timezone: true, shiftStartDefault: true, lateThresholdMinutes: true } })
     const day = startOfDay(date, org?.timezone)
+    const employeeIds = records.map((r) => r.employeeId)
+    const [employees, existing] = await Promise.all([
+      prisma.user.findMany({ where: { id: { in: employeeIds }, organizationId }, select: { id: true, shiftStart: true } }),
+      prisma.attendanceRecord.findMany({ where: { employeeId: { in: employeeIds }, date: day }, select: { employeeId: true, checkInAt: true } }),
+    ])
+    const employeeById = new Map(employees.map((e) => [e.id, e]))
+    const checkInByEmployee = new Map(existing.map((r) => [r.employeeId, r.checkInAt]))
 
     const results = await prisma.$transaction(
-      records.map((r) =>
-        prisma.attendanceRecord.upsert({
+      records.map((r) => {
+        const status = resolveArrivalStatus(r.status, checkInByEmployee.get(r.employeeId), employeeById.get(r.employeeId), org)
+        return prisma.attendanceRecord.upsert({
           where: { employeeId_date: { employeeId: r.employeeId, date: day } },
-          update: { status: r.status, markedById: userId, autoFlagged: false },
-          create: { organizationId, employeeId: r.employeeId, date: day, status: r.status, markedById: userId },
+          update: { status, markedById: userId, autoFlagged: false },
+          create: { organizationId, employeeId: r.employeeId, date: day, status, markedById: userId },
         })
-      )
+      })
     )
 
     res.json({ date: day.toISOString().slice(0, 10), saved: results.length })
@@ -221,7 +268,7 @@ async function exportAttendanceSheet(req, res, next) {
           employee: emp.name, department: emp.department?.name || "", date: dayKey,
           status: record?.status || "ABSENT", site: (record?.siteId && siteNameById.get(record.siteId)) || "",
           locationMode: record?.locationMode || "",
-          checkIn: record?.checkInAt ? record.checkInAt.toISOString() : "", checkOut: record?.checkOutAt ? record.checkOutAt.toISOString() : "",
+          checkIn: formatTime12(record?.checkInAt, tz), checkOut: formatTime12(record?.checkOutAt, tz),
           workingMinutes: record?.workingMinutes ?? "",
           source: record?.source || "MANUAL", offline: record?.offlineRecorded ? "YES" : "NO",
           latitude: record?.latitude == null ? "" : Number(record.latitude), longitude: record?.longitude == null ? "" : Number(record.longitude),
@@ -244,7 +291,7 @@ async function exportAttendanceSheet(req, res, next) {
     const workbook=new ExcelJS.Workbook()
     workbook.creator="AssetFlow"
     const columns=[
-      {header:"Employee",key:"employee",width:24},{header:"Department",key:"department",width:18},{header:"Date",key:"date",width:13},{header:"Status",key:"status",width:15},{header:"Site",key:"site",width:24},{header:"Location Mode",key:"locationMode",width:15},{header:"Check In",key:"checkIn",width:24},{header:"Check Out",key:"checkOut",width:24},{header:"Working Minutes",key:"workingMinutes",width:17},{header:"Source",key:"source",width:13},{header:"Offline",key:"offline",width:10},{header:"Latitude",key:"latitude",width:14},{header:"Longitude",key:"longitude",width:14},{header:"GPS Accuracy",key:"gpsAccuracy",width:15},{header:"Check-in Distance",key:"distanceMeters",width:18},
+      {header:"Employee",key:"employee",width:24},{header:"Department",key:"department",width:18},{header:"Date",key:"date",width:13},{header:"Status",key:"status",width:15},{header:"Site",key:"site",width:24},{header:"Location Mode",key:"locationMode",width:15},{header:"Check In",key:"checkIn",width:14},{header:"Check Out",key:"checkOut",width:14},{header:"Working Minutes",key:"workingMinutes",width:17},{header:"Source",key:"source",width:13},{header:"Offline",key:"offline",width:10},{header:"Latitude",key:"latitude",width:14},{header:"Longitude",key:"longitude",width:14},{header:"GPS Accuracy",key:"gpsAccuracy",width:15},{header:"Check-in Distance",key:"distanceMeters",width:18},
     ]
     // One sheet per calendar day, named by that day (e.g. "2026-09-17") —
     // a single-day export still yields exactly one sheet, unchanged from before.
@@ -288,44 +335,45 @@ async function markSelfAttendance(req, res, next) {
     const existing=await prisma.attendanceRecord.findUnique({ where:{ employeeId_date:{employeeId:userId,date:today} } })
     if (existing?.status==='LEAVE') return res.status(400).json({ error:'Today is already recorded as leave' })
 
+    // An employee bound to an attendance site (directly or through the site's
+    // project) can only check in from inside that site: WFH is not offered
+    // to them, and a check-in from outside is recorded as ABSENT with the
+    // exact location kept so management can review it.
+    const assignedSites=await findAssignedSites(prisma, organizationId, userId)
+    const siteBound=assignedSites.length>0
+    if (status==='PRESENT' && isWfh && siteBound) {
+      return res.status(403).json({ error:`You are assigned to the attendance site "${assignedSites[0].name}". Work from home is not available — check in from inside the site.` })
+    }
+
     // WFH skips the geofence check entirely — no location is required or used.
     const hasCoords=!isWfh && Number.isFinite(Number(latitude)) && Number.isFinite(Number(longitude))
     const isMobileDevice=/Android|iPhone|iPad|iPod|Windows Phone|Mobile/i.test(String(req.headers['user-agent']||''))
+    if (status==='PRESENT' && siteBound && !hasCoords) return res.status(400).json({ error:'Location is required — you are assigned to an attendance site. Allow location access and try again.' })
     if (status==='PRESENT' && isMobileDevice && !hasCoords && !isWfh) return res.status(400).json({ error:'Location is required to mark attendance from a mobile or tablet' })
 
-    let chosenSite=null, chosenDistance=null, assignedSites=[]
-    if (hasCoords) {
-      assignedSites=await prisma.$queryRaw`
-        SELECT DISTINCT s.* FROM "AttendanceSite" s
-        LEFT JOIN "AttendanceSiteEmployee" se ON se."siteId"=s.id AND se."employeeId"=${userId}
-        WHERE s."organizationId"=${organizationId} AND s.active=TRUE
-          AND (se."employeeId" IS NOT NULL OR EXISTS (SELECT 1 FROM "ProjectMember" pm WHERE pm."projectId"=s."projectId" AND pm."employeeId"=${userId}))
-      `
-      for (const site of assignedSites) {
-        const result = siteDistance(site, Number(latitude), Number(longitude))
-        if (!chosenSite || (result.inside && !siteDistance(chosenSite, Number(latitude), Number(longitude)).inside) || (!result.inside && chosenDistance != null && result.distance < chosenDistance)) { chosenSite=site; chosenDistance=result.distance }
-      }
+    let chosenSite=null, chosenDistance=null, chosenInside=false, outsideSite=false
+    if (hasCoords && siteBound) {
+      const match=matchAssignedSite(assignedSites, Number(latitude), Number(longitude))
+      chosenSite=match.site; chosenDistance=match.distance; chosenInside=match.inside
       if (siteId) {
         const requested=assignedSites.find(s=>s.id===String(siteId))
         if (!requested) return res.status(403).json({ error:'The selected site is not assigned to you' })
-        chosenSite=requested
-        chosenDistance=siteDistance(requested, Number(latitude), Number(longitude)).distance
+        const result=siteDistance(requested, Number(latitude), Number(longitude))
+        if (result.inside || !chosenInside) { chosenSite=requested; chosenDistance=result.distance; chosenInside=result.inside }
       }
+      outsideSite=status==='PRESENT' && !match.eligible
     }
 
     const officeGeofenceActive=organization.geofenceEnabled && organization.officeLatitude!=null && organization.officeLongitude!=null && employee.workLocationType!=='FIELD'
-    const assignedSiteMode=assignedSites.length>0 && employee.workLocationType!=='FIELD'
     let finalStatus=status, autoFlagged=false
-    // Being outside the geofence blocks the check-in outright — it must
-    // never silently record the day as ABSENT. The employee stays
-    // unmarked and can simply move into range and try again.
-    if (status==='PRESENT' && hasCoords && assignedSiteMode) {
-      const eligible=assignedSites.some(site => site.geofenceMode === 'DISABLED' || siteDistance(site, Number(latitude), Number(longitude)).inside)
-      const strictRequired=assignedSites.some(site => site.geofenceMode === 'STRICT')
-      if (!eligible && strictRequired) {
-        return res.status(403).json({ error: 'You are outside the assigned site radius. Move within the site boundary and try again — attendance was not marked.' })
+    if (outsideSite) {
+      // Never downgrade a check-in that was already accepted today.
+      if (existing?.checkInAt && existing.status!=='ABSENT') {
+        return res.status(403).json({ error:'You are outside your assigned site, and you have already checked in today.' })
       }
-    } else if (status==='PRESENT' && officeGeofenceActive && hasCoords) {
+      finalStatus='ABSENT'
+      autoFlagged=true
+    } else if (status==='PRESENT' && !siteBound && officeGeofenceActive && hasCoords) {
       const distance=distanceMeters(Number(latitude),Number(longitude),Number(organization.officeLatitude),Number(organization.officeLongitude))
       chosenDistance=distance
       if (distance > Number(organization.geofenceRadiusMeters)) {
@@ -334,16 +382,18 @@ async function markSelfAttendance(req, res, next) {
     }
 
     const now=new Date()
-    const shiftStartStr=(employee.shiftStart && employee.shiftStart.trim()) || organization.shiftStartDefault || '09:00'
-    if (status==='PRESENT' && !autoFlagged && localMinutes(now,organization.timezone||'UTC') > parseHHMM(shiftStartStr)+Number(organization.lateThresholdMinutes||15)) finalStatus='LATE'
+    if (status==='PRESENT' && !autoFlagged && isLateCheckIn(now, employee, organization)) finalStatus='LATE'
     const locationData=hasCoords
       ? {latitude:Number(latitude),longitude:Number(longitude),distanceMeters:chosenDistance==null?null:Math.round(chosenDistance),siteId:chosenSite?.id||null}
       : {latitude:null,longitude:null,distanceMeters:null,siteId:null}
 
+    // An outside-site attempt is recorded as ABSENT without a check-in time,
+    // so the employee can still check in properly once inside the site.
+    const checkInAt=outsideSite ? null : now
     const record=await prisma.attendanceRecord.upsert({
       where:{employeeId_date:{employeeId:userId,date:today}},
-      update:{status:finalStatus,markedById:userId,autoFlagged,checkInAt:now,locationMode:mode,...locationData},
-      create:{organizationId,employeeId:userId,date:today,status:finalStatus,markedById:userId,autoFlagged,checkInAt:now,locationMode:mode,...locationData},
+      update:{status:finalStatus,markedById:userId,autoFlagged,checkInAt,locationMode:mode,...locationData},
+      create:{organizationId,employeeId:userId,date:today,status:finalStatus,markedById:userId,autoFlagged,checkInAt,locationMode:mode,...locationData},
     })
     if (hasCoords) {
       const presenceId=`ape_${Date.now().toString(36)}_${crypto.randomBytes(5).toString('hex')}`
@@ -351,11 +401,23 @@ async function markSelfAttendance(req, res, next) {
         INSERT INTO "AttendancePresenceEvent"
           ("id","organizationId","employeeId","attendanceId","siteId","eventType","recordedAt","latitude","longitude","gpsAccuracy","distanceMeters","inside","clientEventId","metadata")
         VALUES
-          (${presenceId},${organizationId},${userId},${record.id},${chosenSite?.id||null},${chosenSite && siteDistance(chosenSite, Number(latitude), Number(longitude)).inside ? 'GEOFENCE_ENTER':'GEOFENCE_EXIT'},${now},${Number(latitude)},${Number(longitude)},${req.body?.gpsAccuracy!=null?Number(req.body.gpsAccuracy):null},${chosenDistance},${chosenSite ? siteDistance(chosenSite, Number(latitude), Number(longitude)).inside : null},${req.body?.clientEventId||null},${JSON.stringify({source:'CHECK_IN',siteName:chosenSite?.name||null})}::jsonb)
+          (${presenceId},${organizationId},${userId},${record.id},${chosenSite?.id||null},${chosenInside ? 'GEOFENCE_ENTER':'GEOFENCE_EXIT'},${now},${Number(latitude)},${Number(longitude)},${req.body?.gpsAccuracy!=null?Number(req.body.gpsAccuracy):null},${chosenDistance},${chosenSite ? chosenInside : null},${req.body?.clientEventId||null},${JSON.stringify({source:'CHECK_IN',siteName:chosenSite?.name||null})}::jsonb)
         ON CONFLICT ("clientEventId") DO NOTHING
       `
     }
-    res.json({ ...record, requestedStatus:status, autoFlagged, site:chosenSite ? {id:chosenSite.id,name:chosenSite.name,distanceMeters:Math.round(chosenDistance),radiusMeters:Number(chosenSite.radiusMeters)} : null })
+    let message=null
+    if (outsideSite) {
+      message=`You are ${Math.round(chosenDistance)}m outside your assigned site (${chosenSite.name}). You have been marked ABSENT and your location was recorded. Move inside the site and check in again.`
+      await prisma.$executeRaw`
+        INSERT INTO "AttendanceAnomaly"
+          ("id","organizationId","employeeId","attendanceId","siteId","type","severity","message","metadata")
+        VALUES
+          (${`an_${Date.now().toString(36)}_${crypto.randomBytes(4).toString('hex')}`},${organizationId},${userId},${record.id},${chosenSite.id},'OUTSIDE_SITE','HIGH',
+           ${`Check-in attempted ${Math.round(chosenDistance)}m outside assigned site (${chosenSite.name}) — marked ABSENT`},
+           ${JSON.stringify({ distanceMeters: Math.round(chosenDistance), latitude: Number(latitude), longitude: Number(longitude) })}::jsonb)
+      `
+    }
+    res.json({ ...record, requestedStatus:status, autoFlagged, outsideSite, message, site:chosenSite ? {id:chosenSite.id,name:chosenSite.name,distanceMeters:Math.round(chosenDistance),radiusMeters:Number(chosenSite.radiusMeters),inside:chosenInside} : null })
   } catch(err) { next(err) }
 }
 
@@ -405,7 +467,7 @@ async function syncOfflineAttendance(req, res, next) {
 
     // Same reasoning as markSelfAttendance — always resolve the employee's
     // real home organization, not the switched-scope req.user.organizationId.
-    const employee = await prisma.user.findUnique({ where: { id: userId }, select: { organizationId: true } })
+    const employee = await prisma.user.findUnique({ where: { id: userId }, select: { organizationId: true, shiftStart: true } })
     if (!employee) return res.status(404).json({ error: "Employee not found" })
     const organizationId = employee.organizationId
 
@@ -486,28 +548,32 @@ async function syncOfflineAttendance(req, res, next) {
             let siteId = event.siteId ? String(event.siteId) : null
             let distance = null
             let anomaly = null
+            let outsideSite = false
+
+            // Same site-bound rules as markSelfAttendance: no WFH, location
+            // required, and an outside check-in is recorded as ABSENT.
+            const assignedSites = status === "CHECK_IN" || status === "CHECK_OUT" ? await findAssignedSites(tx, organizationId, userId) : []
+            if (status === "CHECK_IN" && assignedSites.length) {
+              if (isWfh) throw new Error(`Work from home is not available — you are assigned to the attendance site "${assignedSites[0].name}"`)
+              if (!hasCoords) throw new Error("Location is required — you are assigned to an attendance site")
+            }
 
             if (hasCoords) {
-              const assigned = await tx.$queryRaw`
-                SELECT DISTINCT s.* FROM "AttendanceSite" s
-                LEFT JOIN "AttendanceSiteEmployee" se ON se."siteId"=s.id AND se."employeeId"=${userId}
-                WHERE s."organizationId"=${organizationId} AND s.active=TRUE
-                  AND (se."employeeId" IS NOT NULL OR EXISTS (SELECT 1 FROM "ProjectMember" pm WHERE pm."projectId"=s."projectId" AND pm."employeeId"=${userId}))
-              `
-              let best=null
-              for (const site of assigned) {
-                const result=siteDistance(site, Number(event.latitude), Number(event.longitude))
-                if (!best || (result.inside && !best.inside) || (result.inside === best.inside && result.distance < best.distance)) best={site,distance:result.distance,inside:result.inside}
-              }
+              const assigned = assignedSites
+              const best = assigned.length ? matchAssignedSite(assigned, Number(event.latitude), Number(event.longitude)) : null
               if (siteId && !assigned.some(s=>s.id===siteId)) throw new Error("Attendance site is not assigned to this employee")
               if (best) {
                 siteId=best.site.id
                 distance=best.distance
                 const inside=best.inside
-                if ((status === "CHECK_IN" || status === "CHECK_OUT") && best.site.geofenceMode === "STRICT" && !inside) {
+                if (status === "CHECK_IN" && !best.eligible) {
+                  outsideSite = true
+                } else if (status === "CHECK_OUT" && best.site.geofenceMode === "STRICT" && !inside) {
                   throw new Error(`Outside all assigned site geofences (${Math.round(distance)}m from nearest site)`)
                 }
-                if (!inside) anomaly={type:"OUTSIDE_SITE",severity:"HIGH",message:`Attendance location is ${Math.round(distance)}m from nearest assigned site (${best.site.name})`}
+                if (!inside) anomaly={type:"OUTSIDE_SITE",severity:"HIGH",message:outsideSite
+                  ? `Check-in attempted ${Math.round(distance)}m outside assigned site (${best.site.name}) — marked ABSENT`
+                  : `Attendance location is ${Math.round(distance)}m from nearest assigned site (${best.site.name})`}
               } else if (status === "CHECK_IN") {
                 throw new Error("No active attendance site is assigned to this employee")
               }
@@ -538,12 +604,13 @@ async function syncOfflineAttendance(req, res, next) {
                 ON CONFLICT ("clientEventId") DO NOTHING
               `
             } else if (status === "CHECK_IN") {
-              let finalStatus = "PRESENT"
-              const shiftStartStr = event.shiftStart || org?.shiftStartDefault || "09:00"
-              const threshold = Number(org?.lateThresholdMinutes || 15)
-              const mins = localMinutes(recordedAt, org?.timezone || "UTC")
-              const shiftMins = parseHHMM(shiftStartStr)
-              if (mins > shiftMins + threshold) finalStatus = "LATE"
+              let finalStatus = isLateCheckIn(recordedAt, employee, org) ? "LATE" : "PRESENT"
+              if (outsideSite) {
+                if (attendance?.checkInAt && attendance.status !== "ABSENT") throw new Error("Outside the assigned site, and already checked in for this day")
+                finalStatus = "ABSENT"
+              }
+              const checkInAt = outsideSite ? null : recordedAt
+              const roundedDistance = distance == null ? null : Math.round(distance)
 
               const verificationHash = crypto
                 .createHash("sha256")
@@ -560,11 +627,12 @@ async function syncOfflineAttendance(req, res, next) {
                 update: {
                   status: finalStatus,
                   markedById: userId,
-                  checkInAt: recordedAt,
+                  autoFlagged: outsideSite,
+                  checkInAt,
                   locationMode,
                   latitude: hasCoords ? Number(event.latitude) : null,
                   longitude: hasCoords ? Number(event.longitude) : null,
-                  distanceMeters: distance,
+                  distanceMeters: roundedDistance,
                 },
                 create: {
                   organizationId,
@@ -572,11 +640,12 @@ async function syncOfflineAttendance(req, res, next) {
                   date: day,
                   status: finalStatus,
                   markedById: userId,
-                  checkInAt: recordedAt,
+                  autoFlagged: outsideSite,
+                  checkInAt,
                   locationMode,
                   latitude: hasCoords ? Number(event.latitude) : null,
                   longitude: hasCoords ? Number(event.longitude) : null,
-                  distanceMeters: distance,
+                  distanceMeters: roundedDistance,
                 },
               })
 
@@ -594,7 +663,7 @@ async function syncOfflineAttendance(req, res, next) {
                 WHERE id=${attendance.id}
               `
             } else {
-              if (!attendance) throw new Error("Cannot check out offline before a check-in exists")
+              if (!attendance?.checkInAt) throw new Error("Cannot check out offline before a check-in exists")
 
               await tx.$executeRaw`
                 UPDATE "AttendanceRecord"

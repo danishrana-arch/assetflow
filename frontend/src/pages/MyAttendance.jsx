@@ -81,13 +81,16 @@ export default function MyAttendance() {
 
   const primarySite = useMemo(() => sites.find((s) => s.isPrimary) || sites[0] || null, [sites])
   const activeSite = primarySite
+  // Assigned to a site (directly or via its project): check-in only from
+  // inside the site, no work-from-home option.
+  const siteBound = sites.length > 0
   const effectiveCheckInAt = attendance?.today?.checkInAt || offlineToday.checkInAt
   const effectiveCheckOutAt = attendance?.today?.checkOutAt || offlineToday.checkOutAt
   const todayStatus = attendance?.today?.status || offlineToday.status
   const isOnLeaveToday = todayStatus === "LEAVE"
   // Once today's attendance is on record, the day's mode is whatever was
   // used at check-in — the selector below only matters before that.
-  const effectiveLocationMode = attendance?.today?.locationMode || locationMode
+  const effectiveLocationMode = attendance?.today?.locationMode || (siteBound ? "OFFICE" : locationMode)
 
   function nearestSite(latitude, longitude) {
     return nearestAssignedSite(sites, latitude, longitude)
@@ -105,9 +108,9 @@ export default function MyAttendance() {
     const checkIn = [...todayEvents].reverse().find((event) => event.type === "CHECK_IN")
     const checkOut = [...todayEvents].reverse().find((event) => event.type === "CHECK_OUT")
     setOfflineToday({
-      checkInAt: checkIn?.localRecordedAt || null,
+      checkInAt: checkIn && !checkIn.outsideSite ? checkIn.localRecordedAt : null,
       checkOutAt: checkOut?.localRecordedAt || null,
-      status: checkIn ? "PRESENT" : null,
+      status: checkIn ? (checkIn.outsideSite ? "ABSENT" : "PRESENT") : null,
     })
     return queue
   }
@@ -184,6 +187,7 @@ export default function MyAttendance() {
     let position = null
     let nearest = null
     let site = null
+    let outsideSite = false
     if (!isWfh) {
       setLocating(true)
       try {
@@ -203,7 +207,10 @@ export default function MyAttendance() {
       nearest = nearestSite(position.coords.latitude, position.coords.longitude)
       site = nearest?.site || primarySite
       const inside = nearest?.inside ?? false
-      if (site && site.geofenceMode === "STRICT" && !inside) {
+      // A check-in from outside the assigned site still goes through — the
+      // server records it as ABSENT together with the employee's location.
+      outsideSite = type === "CHECK_IN" && siteBound && !inside && !sites.some((s) => s.geofenceMode === "DISABLED")
+      if (type === "CHECK_OUT" && site && site.geofenceMode === "STRICT" && !inside) {
         resetCheckInFill()
         setLocationError(site?.boundary?.length >= 3
           ? `You are outside the assigned site boundary. Move inside the marked project area and try again.`
@@ -224,6 +231,7 @@ export default function MyAttendance() {
       distanceMeters: nearest?.distance != null ? Math.round(nearest.distance) : null,
       siteId: site?.id || null,
       siteName: isWfh ? "Work from home" : (site?.name || "Unassigned / no site"),
+      outsideSite,
       deviceId: getAttendanceDeviceId(),
       networkType: navigator.connection?.effectiveType || (navigator.onLine ? "online" : "offline"),
       clientEventId: `att-${globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : `${Date.now()}-${Math.random()}`}`,
@@ -234,7 +242,7 @@ export default function MyAttendance() {
     if (navigator.onLine) {
       try {
         if (type === "CHECK_IN") {
-          await api.post("/attendance/self/mark", {
+          const { data } = await api.post("/attendance/self/mark", {
             status: "PRESENT",
             latitude: event.latitude,
             longitude: event.longitude,
@@ -243,7 +251,12 @@ export default function MyAttendance() {
             locationMode: event.locationMode,
             clientEventId: event.clientEventId,
           })
-          finishCheckInFill()
+          if (data?.outsideSite) {
+            resetCheckInFill()
+            setLocationError(data.message || "You are outside your assigned site. You have been marked ABSENT and your location was recorded.")
+          } else {
+            finishCheckInFill()
+          }
         } else {
           // Checkout is intentionally queued through the offline-safe endpoint.
           // This preserves the exact recorded timestamp rather than using server receipt time.
@@ -274,8 +287,9 @@ export default function MyAttendance() {
       employeeName: user?.name || "Current employee",
       timezone,
       siteName: event.siteName,
-      status: type === "CHECK_IN" ? "PRESENT" : "PENDING",
+      status: type === "CHECK_IN" ? (outsideSite ? "ABSENT" : "PRESENT") : "PENDING",
     })
+    if (outsideSite) setLocationError("You are outside your assigned site. This check-in will be recorded as ABSENT with your location once it syncs.")
   }
 
   const submitLeave = useMutation({
@@ -352,7 +366,13 @@ export default function MyAttendance() {
                 </div>
               )}
 
-              {!effectiveCheckInAt && (
+              {!effectiveCheckInAt && siteBound && (
+                <p className="mb-4 rounded-2xl bg-chip-yellow-bg px-3 py-2.5 text-xs font-medium text-chip-yellow-fg">
+                  You are assigned to {sites.length > 1 ? "project sites" : `"${activeSite?.name}"`}. Attendance can only be marked from inside the site — work from home is not available. Checking in from outside marks you Absent and records your location.
+                </p>
+              )}
+
+              {!effectiveCheckInAt && !siteBound && (
                 <div className="mb-4">
                   <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted">Today's mode</p>
                   <div className="flex gap-1.5">

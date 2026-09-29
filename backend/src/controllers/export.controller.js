@@ -1,5 +1,11 @@
 const ExcelJS = require("exceljs")
 const prisma = require("../lib/prisma")
+const { formatDateTime12 } = require("../utils/attendance-rules")
+
+async function orgTimeZone(organizationId) {
+  const org = await prisma.organization.findUnique({ where: { id: organizationId }, select: { timezone: true } })
+  return org?.timezone || "UTC"
+}
 
 async function sendWorkbook(res, filename, sheetName, columns, rows) {
   const workbook = new ExcelJS.Workbook()
@@ -9,7 +15,7 @@ async function sendWorkbook(res, filename, sheetName, columns, rows) {
   sheet.getRow(1).font = { bold: true }
 
   res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-  res.setHeader("Content-Disposition", `attachment filename="${filename}"`)
+  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`)
   await workbook.xlsx.write(res)
   res.end()
 }
@@ -53,6 +59,7 @@ async function exportInventory(req, res, next) {
       where: { organizationId },
       include: { assignedTo: true, department: true },
     })
+    const tz = await orgTimeZone(organizationId)
 
     await sendWorkbook(
       res,
@@ -66,6 +73,7 @@ async function exportInventory(req, res, next) {
         { header: "Assigned To", key: "assignedTo", width: 22 },
         { header: "Department", key: "department", width: 20 },
         { header: "Warranty End", key: "warrantyEnd", width: 16 },
+        { header: "Added On", key: "createdAt", width: 22 },
       ],
       assets.map((a) => ({
         name: a.name,
@@ -75,6 +83,7 @@ async function exportInventory(req, res, next) {
         assignedTo: a.assignedTo?.name || "",
         department: a.department?.name || "",
         warrantyEnd: a.warrantyEnd ? a.warrantyEnd.toISOString().slice(0, 10) : "",
+        createdAt: formatDateTime12(a.createdAt, tz),
       }))
     )
   } catch (err) {
@@ -113,6 +122,7 @@ async function exportTickets(req, res, next) {
       where: { organizationId },
       include: { raisedBy: true, asset: true },
     })
+    const tz = await orgTimeZone(organizationId)
 
     await sendWorkbook(
       res,
@@ -124,7 +134,7 @@ async function exportTickets(req, res, next) {
         { header: "Status", key: "status", width: 14 },
         { header: "Raised By", key: "raisedBy", width: 22 },
         { header: "Asset", key: "asset", width: 24 },
-        { header: "Created", key: "createdAt", width: 16 },
+        { header: "Created", key: "createdAt", width: 22 },
       ],
       tickets.map((t) => ({
         subject: t.subject,
@@ -132,7 +142,7 @@ async function exportTickets(req, res, next) {
         status: t.status,
         raisedBy: t.raisedBy?.name || "",
         asset: t.asset?.name || "",
-        createdAt: t.createdAt.toISOString().slice(0, 10),
+        createdAt: formatDateTime12(t.createdAt, tz),
       }))
     )
   } catch (err) {

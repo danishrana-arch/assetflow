@@ -89,6 +89,8 @@ async function listSites(req, res, next) {
     const scope = await getOrganizationScope(req)
     if (!scope) return res.status(404).json({ error: "Organization not found" })
 
+    // "employees" = everyone bound to the site: assigned directly, or a
+    // member of the linked project (same rule check-in uses).
     const sites = await prisma.$queryRaw`
       SELECT
         s.*,
@@ -96,17 +98,27 @@ async function listSites(req, res, next) {
         u.name AS "managerName",
         p.name AS "projectName",
         p.status::text AS "projectStatus",
-        COUNT(se."employeeId")::int AS "employeeCount"
+        COALESCE((
+          SELECT json_agg(json_build_object('id', eu.id, 'name', eu.name, 'viaProject', b."viaProject", 'direct', b."direct") ORDER BY eu.name)
+          FROM (
+            SELECT x.eid, bool_or(x.src = 'PROJECT') AS "viaProject", bool_or(x.src = 'SITE') AS "direct"
+            FROM (
+              SELECT se."employeeId" AS eid, 'SITE' AS src FROM "AttendanceSiteEmployee" se WHERE se."siteId" = s.id
+              UNION ALL
+              SELECT pm."employeeId", 'PROJECT' FROM "ProjectMember" pm WHERE s."projectId" IS NOT NULL AND pm."projectId" = s."projectId"
+            ) x
+            GROUP BY x.eid
+          ) b
+          JOIN "User" eu ON eu.id = b.eid AND eu.status = 'ACTIVE'
+        ), '[]'::json) AS "employees"
       FROM "AttendanceSite" s
       JOIN "Organization" o ON o.id = s."organizationId"
       LEFT JOIN "User" u ON u.id = s."managerId"
       LEFT JOIN "Project" p ON p.id = s."projectId"
-      LEFT JOIN "AttendanceSiteEmployee" se ON se."siteId" = s.id
       WHERE s."organizationId" IN (${Prisma.join(scope.organizationIds)})
-      GROUP BY s.id, o.name, u.name, p.name, p.status
       ORDER BY s."active" DESC, o.name ASC, s.name ASC
     `
-    res.json(sites)
+    res.json(sites.map((site) => ({ ...site, employeeCount: Array.isArray(site.employees) ? site.employees.length : 0 })))
   } catch (err) {
     next(err)
   }

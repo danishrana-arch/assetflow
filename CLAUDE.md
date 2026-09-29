@@ -1253,6 +1253,71 @@ the metric cards in `HrReports.jsx`).
   checks (link, banner after 4th failure not 3rd, email prefill, generic
   confirmation, bad/missing token handling).
 
+## Post-module addition: site-bound attendance (project members, no WFH, outside = ABSENT)
+
+Per a live chat request (2026-09-29):
+
+- **Site card lists its employees**: `listSites` (`attendance-site.controller.js`)
+  now returns `employees` (`{id,name,viaProject,direct}`) — direct
+  `AttendanceSiteEmployee` rows **plus** members of the linked project —
+  and `employeeCount` is that list's length (it previously counted direct
+  assignments only, so a project-linked site showed 0). Shown as chips on
+  each card in `AttendanceSites.jsx` (with a "Project" tag).
+- **Site-bound employees** (assigned directly or via the site's
+  non-completed project — shared `findAssignedSites()` in
+  `attendance.controller.js`, now also excluding completed-project sites,
+  matching `listAssignedSites`), in both `markSelfAttendance` and
+  `syncOfflineAttendance`:
+  - WFH check-in → 403 / rejected. `MyAttendance.jsx` hides the WFH
+    selector for them and shows a notice instead.
+  - Location is required (even on desktop).
+  - Check-in from outside every assigned site (unless a site's geofence
+    is `DISABLED`) → recorded as **ABSENT**, `autoFlagged`, with
+    lat/lng/distance/site saved and an `OUTSIDE_SITE` anomaly — but
+    `checkInAt` stays null, so they can check in again once inside
+    (upgrading the day to PRESENT/LATE). Never downgrades an
+    already-accepted check-in. This replaces the old "STRICT blocks the
+    check-in outright, never marks ABSENT" behavior; STRICT vs WARNING now
+    only differ for check-out (STRICT still blocks an outside check-out).
+  - Applies regardless of `workLocationType` (the old `FIELD` exemption
+    no longer applies to site-bound employees).
+- Admin daily view already shows the recorded location for auto-flagged
+  rows (`LocationFlag` in `Attendance.jsx`, "Xm away · View exact location").
+- No schema change. Verified: build passes; `listSites` against the live DB
+  returns the project member; WFH (403) and no-location (400) rejections
+  for a real project member. The outside-site ABSENT write path was not
+  executed against the live DB.
+
+## Post-module addition: one late rule for every source, 12-hour export times
+
+Per a live chat request (2026-09-29):
+
+- New `backend/src/utils/attendance-rules.js`: `isLateCheckIn` /
+  `resolveArrivalStatus` (late when the check-in's local minute is past
+  shift start + `lateThresholdMinutes` — employee `shiftStart` wins over
+  `shiftStartDefault`; 10:00 + 15 → 10:15:59 on time, 10:16 LATE; a
+  threshold of 0 is honored now, the old `|| 15` turned it into 15), plus
+  `formatTime12` / `formatDateTime12` for sheets.
+- Used by: `markSelfAttendance`, `syncOfflineAttendance` (previously used a
+  client-supplied `event.shiftStart` instead of the employee's own shift),
+  **biometric** `syncAttendanceFromPunches` (covers PULL and ADMS — it
+  always wrote `PRESENT` before, never LATE), and admin
+  `markAttendance`/`saveDayAttendance` (marking Present on a day with a
+  recorded check-in resolves to LATE if that check-in was late).
+- **Bug fixed**: `saveDayAttendance` rejected `LATE`, but `Attendance.jsx`
+  sends each row's current status back on Save — so any day with a late
+  arrival couldn't be saved (400). `LATE` is now accepted. `Attendance.jsx`
+  shows a yellow "Late" pill (display-only, no new button) and counts LATE
+  as present in the header.
+- Exports: attendance sheet (xlsx + csv) Check In/Out are now 12-hour in
+  the org timezone (were raw ISO/UTC); Export page Tickets "Created" is
+  date + 12-hour time; Inventory gained an "Added On" date + 12-hour
+  column. Also fixed `export.controller.js`'s `Content-Disposition` missing
+  `;` (downloads got the wrong filename). HR report exports were already
+  12-hour.
+- Existing records are not recalculated — only new check-ins/punches/
+  admin saves apply the rule.
+
 ## Automated RBAC test run (2026-09-28)
 
 There's no automated test suite in either app (`npm test` isn't

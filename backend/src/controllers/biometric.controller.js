@@ -2,6 +2,7 @@ const crypto = require("crypto")
 const prisma = require("../lib/prisma")
 const { encryptField, decryptField } = require("../utils/crypto")
 const { dateKeyInTimeZone, isWithinBreak, localDateKeyToUtc } = require("../utils/timezone")
+const { isLateCheckIn } = require("../utils/attendance-rules")
 
 const VENDORS = ["ZKTECO", "HIKVISION", "SUPREMA", "ANVIZ", "ESSL", "HTTP", "CUSTOM"]
 const MODES = ["PULL", "PUSH", "HTTP"]
@@ -23,7 +24,7 @@ function punchFingerprint({ deviceId, externalUserId, occurredAt }) {
 async function syncAttendanceFromPunches({ organizationId, employeeId, deviceId, occurredAt }) {
   const organization = await prisma.organization.findUnique({
     where: { id: organizationId },
-    select: { timezone: true, breakStart: true, breakEnd: true },
+    select: { timezone: true, breakStart: true, breakEnd: true, shiftStartDefault: true, lateThresholdMinutes: true },
   })
   const timeZone = organization?.timezone || "UTC"
   const dateKey = dateKeyInTimeZone(occurredAt, timeZone)
@@ -95,10 +96,14 @@ async function syncAttendanceFromPunches({ organizationId, employeeId, deviceId,
     }
   }
 
+  // Same late rule as app check-in: shift start + late threshold.
+  const employee = await prisma.user.findUnique({ where: { id: employeeId }, select: { shiftStart: true } })
+  const status = isLateCheckIn(checkInAt, employee, organization) ? "LATE" : "PRESENT"
+
   await prisma.attendanceRecord.upsert({
     where: { employeeId_date: { employeeId, date } },
-    update: { status: "PRESENT", source: "BIOMETRIC", biometricDeviceId: deviceId, checkInAt, checkOutAt, workingMinutes },
-    create: { organizationId, employeeId, date, status: "PRESENT", source: "BIOMETRIC", biometricDeviceId: deviceId, checkInAt, checkOutAt, workingMinutes },
+    update: { status, source: "BIOMETRIC", biometricDeviceId: deviceId, checkInAt, checkOutAt, workingMinutes },
+    create: { organizationId, employeeId, date, status, source: "BIOMETRIC", biometricDeviceId: deviceId, checkInAt, checkOutAt, workingMinutes },
   })
 }
 
