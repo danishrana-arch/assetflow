@@ -68,7 +68,7 @@ export default function PublicEmployeeForm() {
       <div className="mx-auto w-full max-w-3xl">
         <div className="card overflow-hidden">
           <div className="border-b border-border p-6 sm:p-8">
-            <div className="flex items-center gap-3"><div className="flex h-10 w-10 items-center justify-center rounded-xl bg-surface-2"><FileText size={19} className="text-accent" /></div><div><p className="text-xs font-semibold uppercase tracking-wide text-muted">AssetFlow</p><h1 className="text-xl font-semibold text-ink sm:text-2xl">{formInfo.title}</h1></div></div>
+            <div className="flex items-center gap-3"><div className="flex h-10 w-10 items-center justify-center rounded-xl bg-surface-2"><FileText size={19} className="text-accent" /></div><div><p className="text-xs font-semibold uppercase tracking-wide text-muted">ManagementDock</p><h1 className="text-xl font-semibold text-ink sm:text-2xl">{formInfo.title}</h1></div></div>
             <p className="mt-4 max-w-2xl text-sm leading-6 text-muted">Please provide accurate information. The organization will use these details to create and maintain your employee record.</p>
           </div>
 

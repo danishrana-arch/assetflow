@@ -289,7 +289,7 @@ async function exportAttendanceSheet(req, res, next) {
     }
 
     const workbook=new ExcelJS.Workbook()
-    workbook.creator="AssetFlow"
+    workbook.creator="ManagementDock"
     const columns=[
       {header:"Employee",key:"employee",width:24},{header:"Department",key:"department",width:18},{header:"Date",key:"date",width:13},{header:"Status",key:"status",width:15},{header:"Site",key:"site",width:24},{header:"Location Mode",key:"locationMode",width:15},{header:"Check In",key:"checkIn",width:14},{header:"Check Out",key:"checkOut",width:14},{header:"Working Minutes",key:"workingMinutes",width:17},{header:"Source",key:"source",width:13},{header:"Offline",key:"offline",width:10},{header:"Latitude",key:"latitude",width:14},{header:"Longitude",key:"longitude",width:14},{header:"GPS Accuracy",key:"gpsAccuracy",width:15},{header:"Check-in Distance",key:"distanceMeters",width:18},
     ]

@@ -34,9 +34,9 @@ async function sendFailedLoginAlert(user, { attempts, ip, userAgent }) {
 
   return sendEmail({
     to: user.email,
-    subject: "Someone is trying to access your AssetFlow account",
+    subject: "Someone is trying to access your ManagementDock account",
     text:
-      `Hi ${user.name},\n\nWe noticed ${attempts} failed sign-in attempts on your AssetFlow account (${user.email}).\n` +
+      `Hi ${user.name},\n\nWe noticed ${attempts} failed sign-in attempts on your ManagementDock account (${user.email}).\n` +
       `Time: ${when}\n${ip ? `IP address: ${ip}\n` : ""}${userAgent ? `Device: ${userAgent}\n` : ""}\n` +
       `If this was you, you can reset your password here: ${resetLink}\n` +
       `If this wasn't you, we recommend resetting your password right away. Your account has not been changed.\n`,
@@ -44,7 +44,7 @@ async function sendFailedLoginAlert(user, { attempts, ip, userAgent }) {
       `<div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;color:#1f2937;line-height:1.6">` +
       `<h2>Someone is trying to access your account</h2>` +
       `<p>Hi ${escapeHtml(user.name)},</p>` +
-      `<p>We noticed <strong>${attempts} failed sign-in attempts</strong> on your AssetFlow account (${escapeHtml(user.email)}).</p>` +
+      `<p>We noticed <strong>${attempts} failed sign-in attempts</strong> on your ManagementDock account (${escapeHtml(user.email)}).</p>` +
       `<p><strong>Time:</strong> ${escapeHtml(when)}${ip ? `<br><strong>IP address:</strong> ${escapeHtml(ip)}` : ""}${userAgent ? `<br><strong>Device:</strong> ${escapeHtml(userAgent)}` : ""}</p>` +
       `<p>If this wasn't you, we recommend resetting your password right away. Your account has not been changed.</p>` +
       `<p><a href="${resetLink}" style="display:inline-block;background:#111827;color:#fff;padding:10px 18px;border-radius:999px;text-decoration:none">Reset my password</a></p>` +
@@ -439,7 +439,7 @@ async function forgotPassword(req, res, next) {
     try {
       sent = await sendEmail({
         to: user.email,
-        subject: "Reset your AssetFlow password",
+        subject: "Reset your ManagementDock password",
         text: `Hi ${user.name},\n\nUse this link to set a new password (valid for 1 hour):\n${link}\n\nIf you didn't ask for this, you can ignore this email — your password won't change.\n`,
         html:
           `<div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;color:#1f2937;line-height:1.6">` +

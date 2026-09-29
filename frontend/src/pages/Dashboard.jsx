@@ -682,7 +682,7 @@ export default function Dashboard() {
             <p className="mt-1.5 max-w-xl text-xs leading-5 text-muted sm:text-sm">
               {user?.role === "IT_MANAGER"
                 ? "Monitor inventory, assigned assets, requests, and support activity."
-                : "Here's your overview of what's happening across AssetFlow today."}
+                : "Here's your overview of what's happening across ManagementDock today."}
             </p>
 
             {isManagement &&
@@ -1645,7 +1645,7 @@ export default function Dashboard() {
 
 
       {/* ======================================================
-          ASSETFLOW PARTICLE BANNER
+          MANAGEMENTDOCK PARTICLE BANNER
       ======================================================= */}
 
       <div
@@ -1668,7 +1668,7 @@ export default function Dashboard() {
         <div className="h-[120px] w-full sm:h-[160px] lg:h-[200px]">
 
           <ParticleText
-            text={(organization?.name && organization.name.trim() ? organization.name : "ASSETFLOW").toUpperCase()}
+            text={(organization?.name && organization.name.trim() ? organization.name : "MANAGEMENTDOCK").toUpperCase()}
             height={200}
             repelRadius={155}
             repelStrength={210}

@@ -244,7 +244,7 @@ export default function Sidebar({ expanded, onMouseEnter, onMouseLeave }) {
         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full">
           <img
             src={logoFull}
-            alt="AssetFlow"
+            alt="ManagementDock"
             className="
               h-9 w-9
               object-contain
@@ -261,7 +261,7 @@ export default function Sidebar({ expanded, onMouseEnter, onMouseLeave }) {
             ${expanded ? "max-w-[160px] opacity-100" : "max-w-0 opacity-0"}
           `}
         >
-          AssetFlow
+          ManagementDock
         </span>
       </div>
 

@@ -1,5 +1,12 @@
 const prisma = require("../lib/prisma")
 
+// Department names are unique per organization (@@unique([organizationId, name])).
+function duplicateName(err, res) {
+  if (err?.code !== "P2002") return false
+  res.status(409).json({ error: "A department with this name already exists" })
+  return true
+}
+
 async function listDepartments(req, res, next) {
   try {
     const { organizationId, role, departmentId } = req.user
@@ -36,7 +43,7 @@ async function createDepartment(req, res, next) {
       include: { manager: { select: { id: true, name: true, email: true, role: true } }, _count: { select: { employees: true, assets: true } } },
     })
     res.status(201).json(department)
-  } catch (err) { next(err) }
+  } catch (err) { if (!duplicateName(err, res)) next(err) }
 }
 
 async function updateDepartment(req, res, next) {
@@ -59,7 +66,7 @@ async function updateDepartment(req, res, next) {
     }
     const department = await prisma.department.update({ where: { id: existing.id }, data, include: { manager: { select: { id: true, name: true, email: true, role: true } }, _count: { select: { employees: true, assets: true } } } })
     res.json(department)
-  } catch (err) { next(err) }
+  } catch (err) { if (!duplicateName(err, res)) next(err) }
 }
 
 async function deleteDepartment(req, res, next) {

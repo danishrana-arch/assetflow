@@ -375,7 +375,7 @@ export default function Settings() {
                   <input
                     value={subOrganizationName}
                     onChange={(e) => { setSubOrganizationName(e.target.value); setOrganizationError("") }}
-                    placeholder="e.g. AssetFlow Lahore Office"
+                    placeholder="e.g. ManagementDock Lahore Office"
                     className="field min-w-0 flex-1"
                   />
                   <button
@@ -673,7 +673,7 @@ export default function Settings() {
             <span className="rounded-full bg-chip-green-bg px-3 py-1.5 text-[11px] font-semibold text-chip-green-fg">All features enabled</span>
           </div>
           <p className="mt-4 text-xs text-muted">
-            Billing is currently disabled. Every AssetFlow feature is available to all organizations at no cost.
+            Billing is currently disabled. Every ManagementDock feature is available to all organizations at no cost.
           </p>
         </div>
       </div>

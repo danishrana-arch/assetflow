@@ -392,7 +392,7 @@ function addReportSheet(workbook, name, columns, rows) {
 
 async function sendXlsx(res, filename, title, columns, rows, meta, { byDate = false } = {}) {
   const workbook = new ExcelJS.Workbook()
-  workbook.creator = "AssetFlow"
+  workbook.creator = "ManagementDock"
   if (byDate && rows.length) {
     // One sheet per date, named by the date (same convention as the
     // attendance sheet export).

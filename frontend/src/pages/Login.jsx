@@ -113,7 +113,7 @@ export default function Login() {
             >
               <img
                 src={logoFull}
-                alt="AssetFlow logo"
+                alt="ManagementDock logo"
                 className="h-8 w-8 object-contain"
               />
             </div>
@@ -128,7 +128,7 @@ export default function Login() {
                 }
               `}
             >
-              AssetFlow
+              ManagementDock
             </span>
           </div>
 
@@ -240,7 +240,7 @@ export default function Login() {
               }
             `}
           >
-            © {new Date().getFullYear()} AssetFlow
+            © {new Date().getFullYear()} ManagementDock
           </p>
         </div>
 
@@ -271,7 +271,7 @@ export default function Login() {
             >
               <img
                 src={logoFull}
-                alt="AssetFlow logo"
+                alt="ManagementDock logo"
                 className="h-7 w-7 object-contain"
               />
             </div>
@@ -286,7 +286,7 @@ export default function Login() {
                 }
               `}
             >
-              AssetFlow
+              ManagementDock
             </span>
           </div>
 

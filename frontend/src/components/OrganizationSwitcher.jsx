@@ -36,7 +36,7 @@ export default function OrganizationSwitcher({ compact = false }) {
         </span>
         <div className="min-w-0">
           <p className="truncate text-[9px] font-semibold uppercase tracking-[0.14em] text-muted-2">Organization</p>
-          <p className="truncate text-sm font-semibold text-ink">{organization?.name || "AssetFlow"}</p>
+          <p className="truncate text-sm font-semibold text-ink">{organization?.name || "ManagementDock"}</p>
         </div>
       </div>
     )

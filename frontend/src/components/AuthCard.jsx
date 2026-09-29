@@ -14,8 +14,8 @@ export default function AuthCard({ title, subtitle, children }) {
         className={`w-full max-w-md rounded-[28px] p-8 shadow-xl ${isDark ? "bg-[#151a19] border border-white/5" : "bg-white"}`}
       >
         <Link to="/login" className="mb-6 flex items-center gap-2.5">
-          <img src={logoFull} alt="AssetFlow" className="h-9 w-9 rounded-xl object-contain" />
-          <span className={`text-base font-bold tracking-tight ${isDark ? "text-white" : "text-[#202525]"}`}>AssetFlow</span>
+          <img src={logoFull} alt="ManagementDock" className="h-9 w-9 rounded-xl object-contain" />
+          <span className={`text-base font-bold tracking-tight ${isDark ? "text-white" : "text-[#202525]"}`}>ManagementDock</span>
         </Link>
         <h1 className={`text-2xl font-semibold ${isDark ? "text-white" : "text-[#202525]"}`} style={{ letterSpacing: "-0.02em" }}>
           {title}

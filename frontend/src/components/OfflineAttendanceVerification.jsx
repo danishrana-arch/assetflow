@@ -23,7 +23,7 @@ export default function OfflineAttendanceVerification({ record, site }) {
 
       ctx.fillStyle = "#111313"
       ctx.font = "700 42px Arial"
-      ctx.fillText("AssetFlow Attendance Verification", 70, 90)
+      ctx.fillText("ManagementDock Attendance Verification", 70, 90)
 
       ctx.font = "700 30px Arial"
       ctx.fillText(record.type === "CHECK_OUT" ? "CHECK OUT RECORDED" : "CHECK IN RECORDED", 70, 155)
@@ -47,10 +47,10 @@ export default function OfflineAttendanceVerification({ record, site }) {
 
       ctx.font = "600 23px Arial"
       ctx.fillText("This image is an additional employee-held verification view.", 70, 790)
-      ctx.fillText("The authoritative record is the AssetFlow attendance event after synchronization.", 70, 830)
+      ctx.fillText("The authoritative record is the ManagementDock attendance event after synchronization.", 70, 830)
 
       const link = document.createElement("a")
-      link.download = `AssetFlow-Attendance-${record.clientEventId || Date.now()}.png`
+      link.download = `ManagementDock-Attendance-${record.clientEventId || Date.now()}.png`
       link.href = canvas.toDataURL("image/png")
       link.click()
     } finally {

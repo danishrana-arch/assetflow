@@ -1357,6 +1357,37 @@ Per a live chat request (2026-09-29), `EmployeeProfile.jsx` + backend:
   to its exact original stored values afterward (and the test cert
   deleted). No schema change.
 
+## Post-module addition: full CRUD on the Departments page
+
+Per a live chat request (2026-09-29). `Departments.jsx` rewritten (same
+look): Create (unchanged), Read (cards + a per-card "View employees" list
+via `GET /employees?department=`, gated by the `employees` module), Update
+(pencil → inline rename + manager editor), Delete (confirm now states how
+many employees/assets will be left without a department — FKs are
+`ON DELETE SET NULL`, so they're unassigned, not deleted), plus a name
+search when there are more than 3 departments. Edit/delete stay ADMIN/CEO
+only (route guards unchanged).
+- **Bug fixed**: the manager-option employee list only loaded while the
+  "Add Department" form was open, so every card's manager dropdown was
+  empty otherwise. Now loads whenever the viewer can edit.
+- `department.controller.js`: a duplicate name (`@@unique([organizationId,
+  name])`) on create/rename now returns 409 "A department with this name
+  already exists" instead of a raw 500.
+- Verified against the live DB with a temporary department (deleted
+  afterward): create, duplicate 409, rename + clear manager, blank 400,
+  delete 204.
+
+## Post-module fix: Company Calendar leave visibility
+
+Per a live chat request (2026-09-29): `getCalendarEvents`
+(`dashboard.controller.js`, `GET /dashboard/events` — feeds both
+`AdvancedCalendar.jsx` and the Dashboard events widget) returned every
+approved leave, including the reason, to every role. Now ADMIN/CEO/HR see
+all leave; every other role (incl. MANAGEMENT/DEPARTMENT_HEAD/IT_MANAGER/
+EMPLOYEE) sees only their own. Birthdays/holidays/deadlines/company events
+unchanged. The separate leave calendar (`GET /leave/calendar`, `leave`
+module) is untouched. Verified 5/5 against a real approved leave.
+
 ## Automated RBAC test run (2026-09-28)
 
 There's no automated test suite in either app (`npm test` isn't

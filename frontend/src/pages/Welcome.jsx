@@ -444,12 +444,12 @@ export default function Welcome() {
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.05] p-1.5 sm:h-10 sm:w-10">
             <img
               src={logoFull}
-              alt="AssetFlow"
+              alt="ManagementDock"
               className="h-full w-full object-contain"
             />
           </div>
           <span className="truncate text-sm font-semibold tracking-wide text-white/90 sm:text-base">
-            AssetFlow
+            ManagementDock
           </span>
         </Link>
       </header>
@@ -480,7 +480,7 @@ export default function Welcome() {
           <h1 className="text-[40px] font-bold leading-[1.05] tracking-tight sm:text-5xl lg:text-6xl">
             Welcome to
             <br />
-            <span className="text-amber-300">AssetFlow</span>
+            <span className="text-amber-300">ManagementDock</span>
           </h1>
 
           <p className="mt-4 max-w-md text-sm leading-6 text-white/45 sm:text-base">
@@ -525,7 +525,7 @@ export default function Welcome() {
           ==================================================== */}
 
       <p className="relative z-10 pb-6 text-center text-[10px] text-white/20">
-        © {new Date().getFullYear()} AssetFlow. All rights reserved.
+        © {new Date().getFullYear()} ManagementDock. All rights reserved.
       </p>
 
     </main>

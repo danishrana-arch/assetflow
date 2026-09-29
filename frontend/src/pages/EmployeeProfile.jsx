@@ -411,7 +411,7 @@ export default function EmployeeProfile() {
       >
         <div className="h-[120px] w-full sm:h-[160px] lg:h-[200px]">
           <ParticleText
-            text={(employee?.organization?.name && employee.organization.name.trim() ? employee.organization.name : "ASSETFLOW").toUpperCase()}
+            text={(employee?.organization?.name && employee.organization.name.trim() ? employee.organization.name : "MANAGEMENTDOCK").toUpperCase()}
             height={200}
             repelRadius={155}
             repelStrength={210}
@@ -541,7 +541,7 @@ export default function EmployeeProfile() {
       )}
 
       {/**/}
-      {/* Contact panel + content, matching the AssetFlow contact-detail layout */}
+      {/* Contact panel + content, matching the ManagementDock contact-detail layout */}
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
         {/* LEFT — wider column: assets, tickets, activity */}
         <div className="space-y-5 lg:order-1 lg:col-span-2">

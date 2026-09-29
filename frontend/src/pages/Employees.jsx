@@ -253,9 +253,9 @@ export default function Employees() {
       {created && (
         <div className="mb-5 card flex flex-wrap items-center justify-between gap-3 border-l-[6px] border-l-chip-green-fg p-5">
           <div>
-            <p className="text-sm font-semibold text-ink">Employee added — {created.email}</p>
+            <p className="text-sm font-semibold text-ink">Employee added : {created.email}</p>
             <p className="mt-0.5 text-sm text-muted">
-              Temporary password: <span className="font-mono text-ink">{created.tempPassword}</span> — share it so they can log in.
+              Temporary password: <span className="font-mono text-ink">{created.tempPassword}</span> , share it so they can log in.
             </p>
           </div>
           <button
@@ -282,7 +282,7 @@ export default function Employees() {
               type="email"
               value={form.email}
               onChange={(e) => { setEmailTouched(true); updateField("email", e.target.value) }}
-              hint={organization?.slug ? `Suggested from ${organization.name}'s domain — edit freely` : undefined}
+              hint={organization?.slug ? `Suggested from ${organization.name}'s domain edit freely` : undefined}
               required
             />
             <TextField

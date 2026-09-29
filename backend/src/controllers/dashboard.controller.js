@@ -376,7 +376,10 @@ function calendarDate(year, month, day) {
 
 async function getCalendarEvents(req, res, next) {
   try {
-    const { organizationId } = req.user
+    const { organizationId, userId, role } = req.user
+    // Other people's leave (who is off, and why) is only for ADMIN/CEO/HR;
+    // every other role sees just their own leave on the calendar.
+    const canSeeAllLeave = ["ADMIN", "CEO", "HR"].includes(role)
     const range = req.query.range === "month" ? "month" : "week"
     const now = new Date()
     const requestedYear = Number(req.query.year)
@@ -413,7 +416,7 @@ async function getCalendarEvents(req, res, next) {
         orderBy: { deadline: "asc" },
       }),
       prisma.leaveApplication.findMany({
-        where: { organizationId, status: "APPROVED", startDate: { lte: end }, endDate: { gte: start } },
+        where: { organizationId, status: "APPROVED", startDate: { lte: end }, endDate: { gte: start }, ...(canSeeAllLeave ? {} : { employeeId: userId }) },
         select: { id: true, employeeId: true, startDate: true, endDate: true, type: true, reason: true, employee: { select: { name: true } } },
         orderBy: { startDate: "asc" },
       }),

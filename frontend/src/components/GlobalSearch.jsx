@@ -67,9 +67,9 @@ export default function GlobalSearch({ className = "" }) {
             setOpen(true)
           }}
           onFocus={() => setOpen(true)}
-          placeholder="Search AssetFlow..."
+          placeholder="Search ManagementDock..."
           className="min-w-0 flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-muted-2"
-          aria-label="Search AssetFlow"
+          aria-label="Search ManagementDock"
         />
         {query && (
           <button

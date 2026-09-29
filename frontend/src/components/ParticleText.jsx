@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react"
 
 export default function ParticleText({
-  text = "ASSETFLOW",
+  text = "MANAGEMENTDOCK",
   height = 200,
   dotColor = "rgba(255,255,255,0.92)",
   accentColor = "#d39700e7",

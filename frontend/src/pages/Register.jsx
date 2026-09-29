@@ -56,11 +56,11 @@ export default function Register() {
             <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/80 p-1.5">
   <img
     src={logoFull}
-    alt="AssetFlow"
+    alt="ManagementDock"
     className="h-full w-full object-contain"
   />
 </div>
-            <span className="text-lg font-semibold text-ink">AssetFlow</span>
+            <span className="text-lg font-semibold text-ink">ManagementDock</span>
           </div>
 
           <div className="space-y-6">
@@ -73,7 +73,7 @@ export default function Register() {
             </p>
           </div>
 
-          <p className="text-xs text-muted-2">© {new Date().getFullYear()} AssetFlow</p>
+          <p className="text-xs text-muted-2">© {new Date().getFullYear()} ManagementDock</p>
         </div>
 
         {/* Right — form */}
