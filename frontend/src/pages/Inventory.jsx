@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import { useMutation, useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query"
-import { Link } from "react-router-dom"
+import { Link, useSearchParams } from "react-router-dom"
 import { Search, Plus, X, Boxes, Laptop2, MonitorSmartphone, Smartphone, Keyboard, PenLine, Upload, Download, Trash2 } from "lucide-react"
 import api from "../api/client"
 import StatusBadge from "../components/StatusBadge"
@@ -49,16 +49,41 @@ export default function Inventory() {
   const fileInputRef = useRef(null)
   const queryClient = useQueryClient()
 
-  useEffect(() => { setPage(1) }, [debouncedQ, category])
+  // Dashboard stat cards deep-link here: ?view=all (Total Assets) lists every
+  // asset without picking a category; ?warranty=expiring (Warranty Alerts)
+  // lists assets whose warranty ends in the next 30 days.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const showAll = searchParams.get("view") === "all"
+  const warrantyExpiring = searchParams.get("warranty") === "expiring"
+  const listActive = !!category || showAll || warrantyExpiring
+
+  function setParam(key, value) {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      if (value) next.set(key, value)
+      else next.delete(key)
+      return next
+    }, { replace: true })
+  }
+
+  useEffect(() => { setPage(1) }, [debouncedQ, category, showAll, warrantyExpiring])
 
   const { data, isLoading, isFetching } = useQuery({
-    queryKey: ["assets", debouncedQ, category, page],
+    queryKey: ["assets", debouncedQ, category, page, warrantyExpiring],
     queryFn: () =>
-      api.get("/assets", { params: { q: debouncedQ, category, page, pageSize: PAGE_SIZE } }).then((r) => r.data),
+      api.get("/assets", {
+        params: {
+          q: debouncedQ,
+          category: category || undefined,
+          warranty: warrantyExpiring ? "expiring" : undefined,
+          page,
+          pageSize: PAGE_SIZE,
+        },
+      }).then((r) => r.data),
     placeholderData: keepPreviousData,
-     enabled: !!category,
+    enabled: listActive,
   })
-  const assets = category ? data?.data || [] : []
+  const assets = listActive ? data?.data || [] : []
   const { data: departments } = useQuery({
     queryKey: ["departments"],
     queryFn: () => api.get("/departments").then((r) => r.data),
@@ -228,10 +253,16 @@ export default function Inventory() {
       )}
 
       <div className="mb-5 flex flex-wrap gap-2 items-center">
+        <button
+          onClick={() => { setCategory(""); setParam("view", "all") }}
+          className={showAll && !category ? "folder-tab-active" : "tab-pill"}
+        >
+          All
+        </button>
         {(categories || []).map((c) => (
           <button
             key={c.name}
-            onClick={() => setCategory(c.name)}
+            onClick={() => { setCategory(c.name); setParam("view", null) }}
             className={category === c.name ? "folder-tab-active" : "tab-pill"}
           >
             {c.name}
@@ -248,6 +279,19 @@ export default function Inventory() {
           >
             <Trash2 size={14} />
           </button>
+        )}
+        {warrantyExpiring && (
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-chip-yellow-bg px-3 py-1.5 text-xs font-semibold text-chip-yellow-fg">
+            Warranty expiring in 30 days
+            <button
+              type="button"
+              onClick={() => setParam("warranty", null)}
+              className="rounded-full p-0.5 hover:bg-black/5"
+              aria-label="Clear warranty filter"
+            >
+              <X size={12} />
+            </button>
+          </span>
         )}
       </div>
 
@@ -300,7 +344,7 @@ export default function Inventory() {
         </form>
       )}
 
-      {!category ? (
+      {!listActive ? (
         <EmptyState
           icon={Boxes}
           title="Pick a category to see its assets"

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Save, Download, CheckCircle2, XCircle, Palmtree, MapPin, AlertTriangle, ShieldAlert } from "lucide-react"
+import { useSearchParams } from "react-router-dom"
+import { Save, Download, CheckCircle2, XCircle, Palmtree, MapPin, AlertTriangle, ShieldAlert, X } from "lucide-react"
 import api from "../api/client"
 import { useAuth } from "../context/AuthContext"
 import PageHeader from "../components/ui/PageHeader"
@@ -20,6 +21,18 @@ function formatPunchTime(value) {
   return new Date(value).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: true })
 }
 
+
+// ?status= filters. "present" includes LATE, same as the header count.
+// "absent" uses the dashboard snapshot's rule: nobody on a future day, and
+// on a non-working day only an explicitly marked absence.
+const STATUS_FILTERS = {
+  present: { label: "Present", match: (r) => r.status === "PRESENT" || r.status === "LATE" },
+  late: { label: "Late", match: (r) => r.status === "LATE" },
+  absent: {
+    label: "Absent",
+    match: (r, ctx) => r.status === "ABSENT" && !ctx.isFuture && (ctx.scheduled || !!r.recordId),
+  },
+}
 
 // Display-only: LATE is set by the server's late rule, not a button.
 const LATE_CONFIG = { label: "Late", tone: "yellow" }
@@ -99,11 +112,15 @@ export default function Attendance() {
   const canWrite = !!(permission?.canCreate || permission?.canUpdate)
   const canResolve = !!permission?.canUpdate
 
-  const [date] = useState(() => new Date().toISOString().slice(0, 10))
-  const [exportRange, setExportRange] = useState(() => {
-    const today = new Date().toISOString().slice(0, 10)
-    return { startDate: today, endDate: today }
-  })
+  // The dashboard's Attendance Snapshot tiles deep-link here with
+  // ?date=YYYY-MM-DD and ?status=present|late|absent (display filter only —
+  // Save still sends every row).
+  const [searchParams, setSearchParams] = useSearchParams()
+  const dateParam = searchParams.get("date")
+  const [today] = useState(() => new Date().toISOString().slice(0, 10))
+  const date = dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam) ? dateParam : today
+  const statusFilter = STATUS_FILTERS[searchParams.get("status")] ? searchParams.get("status") : null
+  const [exportRange, setExportRange] = useState(() => ({ startDate: date, endDate: date }))
   const [rows, setRows] = useState([])
   const [dirty, setDirty] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -175,6 +192,19 @@ export default function Attendance() {
   }
 
   const presentCount = rows.filter((r) => r.status === "PRESENT" || r.status === "LATE").length
+  const filterCtx = {
+    scheduled: data?.schedule?.isScheduledWorkday !== false,
+    isFuture: !!data?.date && data.date > new Intl.DateTimeFormat("en-CA", { timeZone: data?.schedule?.timezone || undefined }).format(new Date()),
+  }
+  const visibleRows = statusFilter ? rows.filter((r) => STATUS_FILTERS[statusFilter].match(r, filterCtx)) : rows
+
+  function clearStatusFilter() {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      next.delete("status")
+      return next
+    }, { replace: true })
+  }
 
   return (
     <div>
@@ -228,6 +258,16 @@ export default function Attendance() {
       />
 
       {isLoading && <p className="text-sm text-muted">Loading...</p>}
+      {statusFilter && (
+        <div className="mb-4 flex items-center gap-2">
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-accent-soft px-3 py-1.5 text-xs font-semibold text-accent-ink">
+            Showing: {STATUS_FILTERS[statusFilter].label}{!isLoading && ` (${visibleRows.length})`}
+            <button type="button" onClick={clearStatusFilter} className="rounded-full p-0.5 hover:bg-black/5" aria-label="Show all employees">
+              <X size={12} />
+            </button>
+          </span>
+        </div>
+      )}
       {anomalies.length > 0 && (
         <div className="mb-5 card overflow-hidden">
           <div className="flex items-center justify-between gap-3 border-b border-border px-5 py-4">
@@ -255,7 +295,7 @@ export default function Attendance() {
 
 
       <div className="space-y-3 md:hidden">
-        {rows.map((row) => (
+        {visibleRows.map((row) => (
           <div key={row.employeeId} className="card p-4">
             <div className="flex items-center gap-3">
               <Avatar name={row.name} size="sm" />
@@ -303,7 +343,7 @@ export default function Attendance() {
             )}
           </div>
         ))}
-        {rows.length === 0 && !isLoading && <EmptyState title="No active employees" />}
+        {visibleRows.length === 0 && !isLoading && <EmptyState title={statusFilter ? `No ${STATUS_FILTERS[statusFilter].label.toLowerCase()} employees on this day` : "No active employees"} />}
       </div>
 
       <div className="hidden card overflow-hidden md:block">
@@ -321,7 +361,7 @@ export default function Attendance() {
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => (
+            {visibleRows.map((row) => (
               <tr key={row.employeeId} className="border-b border-border last:border-0 hover:bg-surface-2">
                 <td className="px-5 py-3.5">
                   <div className="flex items-center gap-3">
@@ -368,8 +408,8 @@ export default function Attendance() {
                 )}
               </tr>
             ))}
-            {rows.length === 0 && !isLoading && (
-              <tr><td colSpan={canWrite ? 7 : 6} className="px-5 py-10 text-center text-muted">No active employees.</td></tr>
+            {visibleRows.length === 0 && !isLoading && (
+              <tr><td colSpan={canWrite ? 7 : 6} className="px-5 py-10 text-center text-muted">{statusFilter ? `No ${STATUS_FILTERS[statusFilter].label.toLowerCase()} employees on this day.` : "No active employees."}</td></tr>
             )}
           </tbody>
         </table>

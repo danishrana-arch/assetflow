@@ -2,6 +2,7 @@ import {
   ArrowUpRight,
   ArrowDownRight,
 } from "lucide-react"
+import { Link } from "react-router-dom"
 
 export default function StatCard({
   label,
@@ -10,7 +11,10 @@ export default function StatCard({
   icon: Icon,
   tone = "blue",
   trend,
+  to,
 }) {
+  // With `to`, the whole card is a link to that page.
+  const Wrapper = to ? Link : "div"
   const tones = {
     blue: {
       iconBg: "bg-[#DCE7FF] dark:bg-[#18345F]",
@@ -43,8 +47,10 @@ export default function StatCard({
   const isDown = trend?.direction === "down"
 
   return (
-    <div
+    <Wrapper
+      {...(to ? { to, "aria-label": `${label}: ${value}. Open ${label}` } : {})}
       className="
+        block
         relative
         min-w-0
         h-[148px]
@@ -76,6 +82,10 @@ export default function StatCard({
 
         lg:h-[158px]
         lg:px-6
+
+        focus-visible:outline-none
+        focus-visible:ring-2
+        focus-visible:ring-accent
       "
     >
 
@@ -279,6 +289,6 @@ export default function StatCard({
 
       </div>
 
-    </div>
+    </Wrapper>
   )
 }

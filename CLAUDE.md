@@ -1388,6 +1388,110 @@ EMPLOYEE) sees only their own. Birthdays/holidays/deadlines/company events
 unchanged. The separate leave calendar (`GET /leave/calendar`, `leave`
 module) is untouched. Verified 5/5 against a real approved leave.
 
+## Post-module addition: dashboard greeting + org-timezone clock
+
+Per a live chat request (2026-09-29), `Dashboard.jsx` header:
+- Greeting follows the org's local time (`organization.timezone`): 05–12
+  "Good Morning", 12–17 "Good Afternoon", otherwise "Good Evening".
+- Removed the "Current organization / All organizations" scope select
+  (dashboard is always `scope=organization` now); in its place,
+  `components/DashboardClock.jsx` — flip-clock: four split-flap digit
+  cards `[0][7] [5][6]` (12-hour, zero-padded, no seconds; a digit animates
+  a real top/bottom flap flip when it changes), coloured from the theme
+  tokens (`--surface-2` card, `--ink` digits — cream/dark in light mode,
+  dark/light in dark mode). Small AM/PM at the top-right of the digits; the
+  full weekday (`Tuesday`) and date (`29 Sep, 2026`) centred underneath —
+  all computed from the org timezone. `DashboardSky` (same file)
+  is a static, realistic SVG sun (limb-darkened gradient disk, corona glow,
+  turbulence granulation; colour warms at dawn/dusk) or full moon (maria,
+  craters, surface grain, edge shading) from 18:30–06:00, ~150% of the
+  header card's height and centred on its right edge so about half the disk
+  is clipped (half-clipped corner icon on mobile). Everything ticks once a
+  minute.
+
+## Post-module addition: clickable dashboard asset stat cards
+
+Per a live chat request (2026-09-29): `StatCard` takes an optional `to`
+prop (whole card becomes a `Link`). On the dashboard, only for roles with
+the `inventory` module (same check as `RequireInventoryAccess`):
+Total Assets → `/inventory?view=all`, Assigned Assets → `/assignments`,
+Warranty Alerts → `/inventory?warranty=expiring`.
+- `Inventory.jsx` reads those params: new "All" tab (lists every asset
+  without picking a category — previously a category was mandatory) and a
+  dismissible "Warranty expiring in 30 days" chip.
+- `GET /assets` (`asset.controller.js` `listAssets`) accepts
+  `warranty=expiring` — same `warrantyEnd` window as `getStats`'
+  `expiringWarranties`, so the list matches the card's count (0 in the live
+  DB at the time). Backend dev server needs a restart to pick it up.
+
+## Post-module addition: dashboard Attendance Snapshot
+
+Per a live chat request (2026-09-29): the ADMIN/CEO dashboard's "Company
+snapshot" header + 4-tile metrics row (Employees / Present today /
+Projects / Total assets) is replaced by
+`frontend/src/components/AttendanceSnapshot.jsx`:
+- "Attendance Snapshot" heading with a 7-day date strip on the right
+  (opens starting at today, today selected; `<`/`>` shift the window one
+  day; clicking a day selects it). Dates are `YYYY-MM-DD` keys in the org
+  timezone, stepped in UTC.
+- Four tinted tiles (Total Employees / Present / Late / Absent — "… Today"
+  labels only when today is selected) in one row (icon on top, number at
+  the bottom) in the left 60%; 2×2 below `md`.
+- Right 40% (redesign to the user's mockup, same day): "Today Attendance"
+  list for the selected date — everyone PRESENT/LATE, earliest check-in
+  first, name (links to their profile), `+Nm`/`+Nh MMm` late badge, 12-hour
+  check-in time in the org timezone, status pill. Pinned to the tiles'
+  height on desktop and scrolls inside. `getDailyAttendance` rows gained
+  `lateMinutes` (check-in local minute − `shiftStartMinutes`, LATE rows
+  only) for this — additive, no other consumer affected.
+- The "Project status" + "Attendance watch" row that used to sit inside
+  this card was removed to match the mockup (announcements now follow the
+  snapshot directly).
+- Data: reuses `GET /attendance?date=` (`getDailyAttendance`, same roster
+  as the Attendance page) — no new API. Present = PRESENT+LATE (matches
+  `Attendance.jsx`), Absent = ABSENT rows (no record counts as absent) on
+  scheduled workdays, only explicitly-marked ABSENT on non-workdays, 0 for
+  future dates; LEAVE is never absent. Holidays aren't subtracted (the
+  daily endpoint doesn't know them — same as the Attendance page).
+- The four tiles are links: Total Employees → `/employees`; Present /
+  Late / Absent → `/attendance?date=<selected>&status=present|late|absent`.
+  `Attendance.jsx` now reads `?date=` (falls back to today; the date is
+  derived from the URL, not frozen in state, so the sidebar link resets it)
+  and `?status=` — a display-only filter with a dismissible "Showing: X (n)"
+  chip; Save still posts every row. "absent" uses the snapshot's rule (no
+  one on a future day, only explicit ABSENT on non-workdays) so the list
+  matches the tile. Export range defaults to the linked date. Verified
+  end-to-end against the running dev servers as a real ADMIN: 14/6/1/7
+  today and 8 absent yesterday all matched their filtered lists.
+- Pre-existing, unrelated: `Dashboard.jsx` calls `GET /api/alerts`, which
+  has no backend route (404 on every dashboard load since commit 1dee5d7).
+- Latest announcements (content/query unchanged) is passed in as
+  `children` and renders under the stat tiles in the left 60% column; the
+  right "Today Attendance" list is pinned to that column's full height
+  (tiles + announcements) and scrolls inside.
+- Verified against the live DB for 6 dates (today, past workdays, weekend,
+  tomorrow) via a temporary local backend + read-only GETs, plus a
+  Playwright pass for date clicks, arrows, light/dark, and no horizontal
+  overflow at 820px/390px.
+
+## Post-module addition: dashboard Project Tracker + Utilization note
+
+Per a live chat request (2026-09-29):
+- The main dashboard's bottom-row "Top Assigned Assets" card is replaced by
+  `frontend/src/components/ProjectTracker.jsx` (the IT dashboard's "Latest
+  Assets" card is untouched). Lists up to 4 projects (in progress → not
+  started → completed, then by deadline) with status pill, client ·
+  member count, and "Due …"/red "Overdue …"; below it one row of
+  Completed / In progress / Not started totals. Reuses `GET /projects`
+  (no new API) — same role scoping as the Projects page, and the totals
+  are computed from that same list so they always match it. "View all"
+  and each row link to `/projects` (there's no per-project route).
+  The live DB had 0 projects at the time (empty state verified live;
+  populated layout verified with sample data in a preview).
+- Utilization card: a small info line under Assigned/Available explains
+  it's the share of assets assigned to employees ("N assigned out of M
+  total", live values).
+
 ## Automated RBAC test run (2026-09-28)
 
 There's no automated test suite in either app (`npm test` isn't

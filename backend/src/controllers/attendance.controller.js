@@ -5,8 +5,8 @@ const { toDateOnly } = require("../utils/date")
 const { workingMinutesPerDay, expectedWeeklyMinutes, isScheduledWorkday } = require("../utils/work-schedule")
 const { distanceMeters } = require("../utils/geo")
 const { siteDistance } = require("../utils/site-geofence")
-const { dateKeyInTimeZone } = require("../utils/timezone")
-const { isLateCheckIn, resolveArrivalStatus, formatTime12 } = require("../utils/attendance-rules")
+const { dateKeyInTimeZone, localMinutes } = require("../utils/timezone")
+const { isLateCheckIn, resolveArrivalStatus, formatTime12, shiftStartMinutes } = require("../utils/attendance-rules")
 
 function startOfDay(dateStr, timeZone) {
   if (dateStr) return toDateOnly(dateStr)
@@ -58,6 +58,7 @@ async function getDailyAttendance(req, res, next) {
           timezone: true,
           breakStart: true,
           breakEnd: true,
+          shiftStartDefault: true,
         },
       })
     const date = startOfDay(req.query.date, organization?.timezone)
@@ -92,6 +93,12 @@ async function getDailyAttendance(req, res, next) {
         time: record?.updatedAt?.toISOString() || null,
         checkInAt: record?.checkInAt?.toISOString() || null,
         checkOutAt: record?.checkOutAt?.toISOString() || null,
+        // Minutes past the employee's shift start (same shift rule as the
+        // late check) — only for LATE rows with a recorded check-in.
+        lateMinutes:
+          record?.status === "LATE" && record.checkInAt
+            ? Math.max(0, localMinutes(record.checkInAt, organization?.timezone || "UTC") - shiftStartMinutes(emp, organization))
+            : null,
         workingMinutes: record?.workingMinutes ?? null,
         expectedWorkingMinutes: workingMinutesPerDay(organization),
         expectedWeeklyMinutes: expectedWeeklyMinutes(organization),

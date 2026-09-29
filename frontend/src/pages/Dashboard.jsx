@@ -18,13 +18,11 @@ import {
   Laptop2,
   MonitorSmartphone,
   Smartphone,
-  Users,
-  CalendarCheck,
   CalendarDays,
   X,
   Plus,
-  FolderKanban,
   Megaphone,
+  Info,
 } from "lucide-react"
 
 import {
@@ -39,8 +37,12 @@ import {
 import api from "../api/client"
 import { useAuth } from "../context/AuthContext"
 import StatCard from "../components/StatCard"
+import AttendanceSnapshot from "../components/AttendanceSnapshot"
+import ProjectTracker from "../components/ProjectTracker"
+import { canManageInventory } from "../utils/roles"
 import IconChip from "../components/ui/IconChip"
 import SectionHeader from "../components/ui/SectionHeader"
+import DashboardClock, { DashboardSky, greetingFor, useOrgClock } from "../components/DashboardClock"
 
 
 /* ============================================================
@@ -266,12 +268,12 @@ function GaugeRadial({
 export default function Dashboard() {
   const { user, organization } = useAuth()
   const queryClient = useQueryClient()
+  const clock = useOrgClock(organization?.timezone, 60000)
 
   const [range, setRange] =
     useState(defaultRange)
 
-  const [executiveScope, setExecutiveScope] =
-    useState("organization")
+  const executiveScope = "organization"
   const [eventRange, setEventRange] = useState("week")
   const [selectedEvent, setSelectedEvent] = useState(null)
   const [showEventForm, setShowEventForm] = useState(false)
@@ -290,6 +292,9 @@ export default function Dashboard() {
   const isManagement = ["ADMIN", "CEO"].includes(user?.role)
   const isIT = user?.role === "IT_MANAGER"
   const isManager = ["ADMIN", "CEO", "HR"].includes(user?.role)
+  // Same check as App.jsx's RequireInventoryAccess — only link the asset stat
+  // cards for roles that can actually open those pages.
+  const canOpenInventory = canManageInventory(user?.role)
 
 
   /* ==========================================================
@@ -315,14 +320,6 @@ export default function Dashboard() {
   })
 
 
-  // The executive endpoint has existed in more than one response shape.
-  // Normalize it here so the dashboard never crashes when metrics is absent.
-  const executiveMetrics = executive?.metrics ?? executive ?? {}
-  const projectSummary = executiveMetrics?.projectStatus ?? {
-    NOT_STARTED: 0,
-    IN_PROGRESS: 0,
-    COMPLETED: 0,
-  }
 
   /* ==========================================================
      ANNOUNCEMENTS
@@ -656,10 +653,10 @@ export default function Dashboard() {
           DASHBOARD HEADER
       ======================================================= */}
 
-      <section className="card w-full overflow-hidden">
-        <div className="flex flex-col gap-4 p-4 sm:gap-5 sm:p-5 lg:flex-row lg:items-center lg:justify-between lg:p-6">
+      <section className="card relative w-full overflow-hidden">
+        <div className="flex flex-col gap-4 p-4 sm:gap-5 sm:p-5 lg:flex-row lg:items-center lg:justify-between lg:p-6 lg:pr-36">
 
-          <div className="min-w-0">
+          <div className="min-w-0 pr-12 lg:pr-0">
             <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted sm:text-xs">
               {isManagement
                 ? "Executive overview"
@@ -674,7 +671,7 @@ export default function Dashboard() {
                 letterSpacing: "-0.03em",
               }}
             >
-              Good morning,{" "}
+              {greetingFor(clock.hour24)},{" "}
               {user?.name?.split(" ")[0] ||
                 "there"}
             </h1>
@@ -688,51 +685,20 @@ export default function Dashboard() {
             {isManagement &&
               executive && (
                 <p className="mt-2 text-[11px] font-medium leading-4 text-muted sm:text-xs">
-                  {executiveScope ===
-                  "company"
-                    ? `${
-                        executive.organizations?.find(
-                          (o) => !o.companyId || o.companyId === o.id
-                        )?.name ||
-                        executive.organizations?.[0]
-                          ?.name ||
-                        "Main company"
-                      } · All organizations`
-                    : `${
-                        executive.organizations?.[0]
-                          ?.name ||
-                        "Your organization"
-                      } · Current organization`}
+                  {executive.organizations?.[0]?.name ||
+                    organization?.name ||
+                    "Your organization"}
                 </p>
               )}
           </div>
 
-          {isManagement &&
-            executive && (
-              <div className="w-full shrink-0 sm:w-auto">
-                <select
-                  value={
-                    executiveScope
-                  }
-                  onChange={(e) =>
-                    setExecutiveScope(
-                      e.target.value
-                    )
-                  }
-                  className="field w-full text-xs font-semibold sm:min-w-[190px] sm:w-auto"
-                  aria-label="Dashboard organization scope"
-                >
-                  <option value="organization">
-                    Current organization
-                  </option>
-
-                  <option value="company">
-                    All organizations
-                  </option>
-                </select>
-              </div>
-            )}
+          <DashboardClock timeZone={organization?.timezone} />
         </div>
+
+        <DashboardSky
+          timeZone={organization?.timezone}
+          className="pointer-events-none absolute -right-14 -top-4 h-28 w-28 lg:right-0 lg:top-1/2 lg:h-[150%] lg:w-auto lg:aspect-square lg:-translate-y-1/2 lg:translate-x-1/2"
+        />
       </section>
 
 
@@ -750,6 +716,7 @@ export default function Dashboard() {
           sublabel="From last month"
           icon={Package}
           tone="blue"
+          to={canOpenInventory ? "/inventory?view=all" : undefined}
           trend={{
             value: "12%",
             direction: "up",
@@ -764,6 +731,7 @@ export default function Dashboard() {
           sublabel={`${utilization}% utilization`}
           icon={Layers}
           tone="purple"
+          to={canOpenInventory ? "/assignments" : undefined}
           trend={{
             value: "8%",
             direction: "up",
@@ -779,6 +747,7 @@ export default function Dashboard() {
           sublabel="Expiring in 30 days"
           icon={ShieldAlert}
           tone="cyan"
+          to={canOpenInventory ? "/inventory?warranty=expiring" : undefined}
           trend={{
             value: "3%",
             direction: "down",
@@ -796,240 +765,10 @@ export default function Dashboard() {
         executive && (
           <section className="card w-full overflow-hidden">
 
-            {/* Snapshot Header */}
-            <div className="flex flex-col gap-3 border-b border-border px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5 lg:px-6">
+            <AttendanceSnapshot timeZone={organization?.timezone}>
 
-              <div className="min-w-0">
-                <p className="text-sm font-semibold text-ink">
-                  Company snapshot
-                </p>
-
-                <p className="mt-0.5 text-xs leading-5 text-muted">
-                  Key workforce, project and
-                  attendance figures
-                </p>
-              </div>
-
-
-            </div>
-
-
-            {/* Snapshot Metrics */}
-            <div className="grid grid-cols-1 divide-y divide-border sm:grid-cols-2 sm:divide-x sm:divide-y-0 xl:grid-cols-4">
-
-              {/* Employees */}
-              <div className="flex items-center gap-3 px-4 py-4 sm:px-5 lg:px-6">
-
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-surface-2">
-                  <Users
-                    size={17}
-                    className="text-muted"
-                  />
-                </div>
-
-                <div className="min-w-0">
-                  <p className="text-xl font-semibold text-ink">
-                    {executiveMetrics
-                      ?.employees ?? "—"}
-                  </p>
-
-                  <p className="text-xs text-muted">
-                    Employees
-                  </p>
-                </div>
-
-              </div>
-
-
-              {/* Present */}
-              <div className="flex items-center gap-3 px-4 py-4 sm:px-5 lg:px-6">
-
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-surface-2">
-                  <CalendarCheck
-                    size={17}
-                    className="text-muted"
-                  />
-                </div>
-
-                <div className="min-w-0">
-                  <p className="text-xl font-semibold text-ink">
-                    {executiveMetrics
-                      ?.presentToday ??
-                      executiveMetrics?.present ?? "—"}
-                  </p>
-
-                  <p className="text-xs text-muted">
-                    Present today
-                  </p>
-                </div>
-
-              </div>
-
-
-              {/* Projects */}
-              <div className="flex items-center gap-3 px-4 py-4 sm:px-5 lg:px-6">
-
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-surface-2">
-                  <FolderKanban
-                    size={17}
-                    className="text-muted"
-                  />
-                </div>
-
-                <div className="min-w-0">
-                  <p className="text-xl font-semibold text-ink">
-                    {executive?.projects
-                      ?.length ??
-                      executiveMetrics
-                        ?.projects ??
-                      "—"}
-                  </p>
-
-                  <p className="text-xs text-muted">
-                    Projects
-                  </p>
-                </div>
-
-              </div>
-
-
-              {/* Assets */}
-              <div className="flex items-center gap-3 px-4 py-4 sm:px-5 lg:px-6">
-
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-surface-2">
-                  <Package
-                    size={17}
-                    className="text-muted"
-                  />
-                </div>
-
-                <div className="min-w-0">
-                  <p className="text-xl font-semibold text-ink">
-                    {executiveMetrics
-                      ?.assets ?? "—"}
-                  </p>
-
-                  <p className="text-xs text-muted">
-                    Total assets
-                  </p>
-                </div>
-
-              </div>
-
-            </div>
-
-
-            {/* Project Status + Attendance */}
-            <div className="grid grid-cols-1 gap-4 border-t border-border p-4 sm:p-5 lg:grid-cols-2 lg:p-6">
-
-              {/* Project Status */}
+              {/* Latest announcements — sits under the stat tiles in the left column */}
               <div className="rounded-2xl border border-border p-4 sm:p-5">
-
-                <div className="flex items-start justify-between gap-3">
-
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-ink">
-                      Project status
-                    </p>
-
-                    <p className="mt-0.5 text-xs leading-5 text-muted">
-                      Current project distribution
-                    </p>
-                  </div>
-
-                  <Link
-                    to="/projects"
-                    className="shrink-0 text-xs font-semibold text-accent"
-                  >
-                    Open
-                  </Link>
-
-                </div>
-
-
-                <div className="mt-4 grid grid-cols-1 gap-2 xs:grid-cols-3 sm:grid-cols-3">
-
-                  <div className="rounded-xl bg-surface-2 px-2 py-3 text-center">
-                    <p className="text-xl font-semibold text-ink">
-                      {projectSummary.NOT_STARTED ?? 0}
-                    </p>
-
-                    <p className="mt-0.5 text-[10px] leading-4 text-muted sm:text-[11px]">
-                      Not started
-                    </p>
-                  </div>
-
-                  <div className="rounded-xl bg-surface-2 px-2 py-3 text-center">
-                    <p className="text-xl font-semibold text-ink">
-                      {projectSummary.IN_PROGRESS ?? 0}
-                    </p>
-
-                    <p className="mt-0.5 text-[10px] leading-4 text-muted sm:text-[11px]">
-                      In progress
-                    </p>
-                  </div>
-
-                  <div className="rounded-xl bg-surface-2 px-2 py-3 text-center">
-                    <p className="text-xl font-semibold text-ink">
-                      {projectSummary.COMPLETED ?? 0}
-                    </p>
-
-                    <p className="mt-0.5 text-[10px] leading-4 text-muted sm:text-[11px]">
-                      Completed
-                    </p>
-                  </div>
-
-                </div>
-
-              </div>
-
-
-              {/* Attendance */}
-              <div className="rounded-2xl border border-border p-4 sm:p-5">
-
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-semibold text-ink">
-                      Attendance watch
-                    </p>
-
-                    <p className="mt-0.5 text-xs leading-5 text-muted">
-                      Items that may need management
-                      attention
-                    </p>
-                  </div>
-
-                  <Link
-                    to="/attendance"
-                    className="shrink-0 rounded-full border border-border bg-surface-1 px-2.5 py-1 text-[10px] font-semibold text-accent transition-colors hover:bg-surface-2"
-                  >
-                    View attendance
-                  </Link>
-                </div>
-
-                <div className="mt-4 flex flex-wrap gap-2">
-
-                  <span className="rounded-full bg-chip-yellow-bg px-3 py-1.5 text-[11px] font-semibold text-chip-yellow-fg sm:text-xs">
-                    {executiveMetrics
-                      ?.late ?? 0}{" "}
-                    late today
-                  </span>
-
-                  <span className="rounded-full bg-chip-pink-bg px-3 py-1.5 text-[11px] font-semibold text-chip-pink-fg sm:text-xs">
-                    {executiveMetrics
-                      ?.missingCheckout ??
-                      0}{" "}
-                    missing check-out
-                  </span>
-
-                </div>
-
-              </div>
-
-            </div>
-
-            {/* Latest announcements */}
-            <div className="border-t border-border p-4 sm:p-5 lg:p-6">
 
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
@@ -1071,7 +810,8 @@ export default function Dashboard() {
                 )}
               </div>
 
-            </div>
+              </div>
+            </AttendanceSnapshot>
 
           </section>
         )}
@@ -1336,6 +1076,16 @@ export default function Dashboard() {
 
           </div>
 
+          {/* What this card measures — same formula as `utilization` above. */}
+          <p className="mt-3 flex items-start gap-1.5 text-[11px] leading-4 text-muted">
+            <Info size={12} className="mt-0.5 shrink-0" />
+            <span>
+              Share of your organization&apos;s assets currently assigned to
+              employees: {stats?.assignedAssets ?? "—"} assigned out of{" "}
+              {stats?.totalAssets ?? "—"} total.
+            </span>
+          </p>
+
         </div>
 
       </section>
@@ -1509,81 +1259,8 @@ export default function Dashboard() {
         </div>
 
 
-        {/* Top Assigned Assets */}
-        <div className="card min-w-0 p-4 sm:p-5 lg:p-6">
-
-          <SectionHeader
-            title="Top Assigned Assets"
-            showMenu
-          />
-
-          <ul className="mt-4 space-y-3">
-
-            {topAssets.map((asset) => {
-
-              const cfg =
-                CATEGORY_ICON[
-                  asset.category
-                ] ||
-                CATEGORY_ICON.Default
-
-              return (
-                <li
-                  key={asset.id}
-                  className="flex min-w-0 items-center gap-3"
-                >
-
-                  <IconChip
-                    icon={cfg.icon}
-                    tone={cfg.tone}
-                    size="md"
-                  />
-
-                  <div className="min-w-0 flex-1">
-
-                    <Link
-                      to={`/inventory/${asset.id}`}
-                      className="block truncate text-sm font-semibold text-ink hover:text-accent"
-                    >
-                      {asset.name}
-                    </Link>
-
-                    <p className="truncate font-mono text-[10px] text-muted sm:text-[11px]">
-                      ID:
-                      {asset.serialNumber}
-                    </p>
-
-                  </div>
-
-                  <div className="shrink-0 text-right">
-
-                    <p className="max-w-[90px] truncate text-xs font-semibold text-ink sm:max-w-[110px] sm:text-sm">
-                      {asset.category ||
-                        "—"}
-                    </p>
-
-                    <p className="text-[10px] text-muted sm:text-[11px]">
-                      {asset.assignedTo
-                        ?.name
-                        ? "Assigned"
-                        : "Available"}
-                    </p>
-
-                  </div>
-
-                </li>
-              )
-            })}
-
-            {topAssets.length === 0 && (
-              <li className="text-sm text-muted">
-                No assets yet.
-              </li>
-            )}
-
-          </ul>
-
-        </div>
+        {/* Project Tracker (replaced "Top Assigned Assets") */}
+        <ProjectTracker />
 
 
         {/* Alerts */}

@@ -5,13 +5,20 @@ const { parseCsv } = require("../utils/csv")
 async function listAssets(req, res, next) {
   try {
     const { organizationId } = req.user
-    const { q, status, departmentId, category, page, pageSize } = req.query
+    const { q, status, departmentId, category, warranty, page, pageSize } = req.query
 
     const where = {
       organizationId,
       ...(status ? { status } : {}),
       ...(departmentId ? { departmentId } : {}),
       ...(category ? { category } : {}),
+    }
+
+    // Same window as the dashboard's "Warranty Alerts" count (getStats).
+    if (warranty === "expiring") {
+      const in30Days = new Date()
+      in30Days.setDate(in30Days.getDate() + 30)
+      where.warrantyEnd = { gte: new Date(), lte: in30Days }
     }
 
     if (q) {
