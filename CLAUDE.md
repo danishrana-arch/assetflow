@@ -1392,7 +1392,10 @@ module) is untouched. Verified 5/5 against a real approved leave.
 
 Per a live chat request (2026-09-29), `Dashboard.jsx` header:
 - Greeting follows the org's local time (`organization.timezone`): 05–12
-  "Good Morning", 12–17 "Good Afternoon", otherwise "Good Evening".
+  "Good Morning", 12–17 "Good Afternoon", 17–21 "Good Evening", 21–05
+  "Good Night". Greeting and sun/moon re-render once a minute
+  (`useOrgClock(tz, 60000)`); the timezone comes from `/auth/me`'s
+  `organization.timezone` (defaults to Asia/Karachi).
 - Removed the "Current organization / All organizations" scope select
   (dashboard is always `scope=organization` now); in its place,
   `components/DashboardClock.jsx` — flip-clock: four split-flap digit
@@ -1617,6 +1620,102 @@ bar, dashboard deep links).
   PRESENT "On site · Office"; repeat outside 403; biometric row shows
   "Cyber Earth Solution"; menu anchored (incl. after scroll); approve →
   Save sends 1 row → PRESENT, still "Outside premises"; no page errors.
+
+## Post-module addition: payslip breakdown, office-expense claims, termination
+
+Per a live chat request (2026-09-30):
+
+- **Payslip breakdown**: `PayrollRecord` gained `tax`, `absentDeduction`,
+  `lateDeduction`, `otherDeduction`, `expenseReimbursement`, and a
+  termination section (`terminationDate`, `terminationSettlement`,
+  `terminationDeduction`, `terminationNote`). `deductions` is still the
+  **total** of all deduction lines, so Payroll Reports is unchanged. Math
+  lives in `backend/src/utils/payroll.js` (`computePayrollTotals`): net =
+  base + bonus + expenses + settlement − deductions (never below 0).
+  Absent = the existing unpaid-leave rule (no policy change), late = the
+  existing late rule. Admin edits bonus/tax/other/termination on a DRAFT
+  payslip (`PATCH /payroll/:id`); absent/late/expenses are computed.
+  Follow-up same day: bonus is 0 or **≥ PKR 500** (−/+ stepper, 500 per
+  click; enforced server-side too). Tax is entered as a **percentage**
+  (`taxPercent`, 0–100, ±1% stepper); the backend sets
+  `tax = baseSalary × taxPercent / 100` — the tax amount itself is no
+  longer directly editable. `taxPercent` was first folded into
+  `20260930140000_payslip_breakdown_expense_claims`, but that migration had
+  **already been deployed** by then, so the column never reached the DB and
+  Generate/Tax 500'd ("column PayrollRecord.taxPercent does not exist").
+  Reverted that file to its applied form and moved the column to
+  `20260930170000_payroll_tax_percent` (`ADD COLUMN IF NOT EXISTS`).
+  Lesson: never edit a migration folder once it may have been deployed —
+  check `prisma migrate status` immediately before, and add a new one.
+- **Payslip PDF**: `GET /payroll/:id/pdf` (`downloadPayslipPdf`, built by
+  `backend/src/utils/payslip-pdf.js` with the previously-unused `pdfkit`).
+  Own payslip for anyone; someone else's needs the `payroll` module + same
+  org (404 otherwise). One A4 page: org name in a brand-color header,
+  employee details (bank account masked to last 4), Earnings/Deductions
+  tables, net pay, a red "not a cheque / cannot be deposited" banner +
+  footer, and a large diagonal "NOT VALID FOR BANK DEPOSIT" watermark.
+  Unpaid payslips also say "not final". Built-in Helvetica = WinAnsi only,
+  so the PDF text is ASCII. "Download PDF" button on My Payslips.
+- **Month-wide tax**: "Tax" header button on the Payroll page →
+  `POST /payroll/tax { month, year, taxPercent }` (ADMIN) sets the same %
+  on every DRAFT payslip of that month; per-payslip Edit can still
+  override.
+- **Termination**: the last header button on the Payroll page (the per-row
+  icon was removed at the user's request). Picking an employee opens their
+  DRAFT payslip with the termination section on, or — if they have none
+  this month — creates it via `POST /payroll/employee` (ADMIN), whatever
+  their status — bulk Generate skips non-ACTIVE, so this is how someone
+  already marked "Left Company" gets a final payslip. Base pay is **not**
+  auto-pro-rated; use the termination deduction.
+- **Expense claims**: new `ExpenseClaim` model + `/api/expense-claims`.
+  Any employee submits title + value (+date/note) from My Payslips;
+  reviewers are the new `expenseClaims` module (HR, + ADMIN/CEO via `*`),
+  on the new `/expense-claims` page — **no sidebar/mobile-nav entry** (per
+  user request): ADMIN/CEO open it from an "Expense claims" button (with
+  pending-count badge) on the Payroll page; HR opens it from the "New
+  expense claim" notification. Self-review is blocked. Approving
+  assigns the claim to the expense's month — or the next month whose
+  payslip is still DRAFT/not generated if that one is submitted/paid — and
+  updates that DRAFT payslip immediately; Generate also sums approved
+  claims. Notifications both ways.
+- **My Payslips**: single-month view with ‹ Month › navigation, green
+  additions / red deductions, and a collapsible "Office expenses" list +
+  add form. **Bug fixed**: `/payroll/me` was wrapped in
+  `RequirePayrollAccess` (ADMIN/CEO only), so regular employees could never
+  open their own payslips; now open to everyone (the API already was).
+  Added "My Payslips" nav for management and IT too.
+- Migration `20260930140000_payslip_breakdown_expense_claims` (additive;
+  backfills the breakdown on existing payslips from their lump-sum
+  `deductions`). **Not yet deployed** — `prisma migrate deploy` was blocked
+  by the auto-mode classifier; run it manually. JS client regenerated
+  (engine-DLL rename hit the usual EPERM).
+
+## Post-module fix: auto-absent job gaps (2026-09-30)
+
+`services/attendance-auto-absent.service.js` already marked an ACTIVE
+employee with no record ABSENT (`autoFlagged`) once a workday was half
+over. Per a request that "no check-in = absent for that day", closed its
+gaps: skips company **holidays** (it didn't), days before the employee's
+`joiningDate` (else `createdAt`), and — today only — approved **half-day**
+leave; an approved full-day leave with no record becomes LEAVE, not
+ABSENT; and it now also back-fills the last **7 past days** each run, so a
+day the backend was down after the cutoff is still filled in. A later
+check-in the same day still overwrites the ABSENT. `isScheduledWorkday`
+now reads `getUTCDay()` (dates are UTC midnight; `getDay()` shifted a day
+on servers west of UTC). Dry run against the live DB (writes stubbed): 0
+rows would be created — the old job had already covered recent days; 0
+holidays exist, so no wrong holiday ABSENTs to clean up.
+
+**Follow-up same day — absent days now reduce pay**: `computeAttendanceLines`
+in `payroll.controller.js` counts the month's `ABSENT` attendance records
+(new `PayrollRecord.absentDays`) and deducts them at the unpaid-leave daily
+rate, into `absentDeduction` with unpaid leave (unpaid-leave days are LEAVE
+in attendance, so no double count). Re-running **Generate** now refreshes
+existing DRAFT payslips' absent/late/unpaid-leave/expense lines (manual
+bonus/tax/other/termination kept); submitted/paid ones are untouched.
+Migration `20260930160000_payroll_absent_days` — **not yet deployed**; the
+JS client was regenerated with the column, so payroll queries fail until
+`prisma migrate deploy` runs.
 
 ## Automated RBAC test run (2026-09-28)
 

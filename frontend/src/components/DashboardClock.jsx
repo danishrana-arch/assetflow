@@ -62,7 +62,8 @@ export function useOrgClock(timeZone, tickMs = 1000) {
 export function greetingFor(hour24) {
   if (hour24 >= 5 && hour24 < 12) return "Good Morning"
   if (hour24 >= 12 && hour24 < 17) return "Good Afternoon"
-  return "Good Evening"
+  if (hour24 >= 17 && hour24 < 21) return "Good Evening"
+  return "Good Night"
 }
 
 // Realistic sun colours through the day: warm orange low in the morning,

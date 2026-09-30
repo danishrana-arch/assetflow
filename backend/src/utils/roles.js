@@ -43,10 +43,12 @@ const MAX_CEO_COUNT = 3
 // (see UserRole enum) — 0 live users held it, so no reassignment was
 // needed. ADMIN/CEO already cover payroll/payrollReports via the "*"
 // wildcard, so nothing else needed to pick those modules up.
+// "expenseClaims" = reviewing employees' office-expense claims (HR, plus
+// ADMIN/CEO via "*"). Submitting your own claim needs no module.
 const ROLE_MODULES = {
   CEO: ["*"],
   ADMIN: ["*"],
-  HR: ["employees", "employeeForms", "certifications", "attendance", "leave", "hrReports"],
+  HR: ["employees", "employeeForms", "certifications", "attendance", "leave", "hrReports", "expenseClaims"],
   MANAGEMENT: ["employees", "projects", "tasks", "attendance", "performance", "reports"],
   DEPARTMENT_HEAD: ["departments", "employees", "attendance", "projects", "tasks", "leave"],
   IT_MANAGER: ["inventory", "assets", "assetAssignments", "assetRequests", "tickets"],

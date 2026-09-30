@@ -1,15 +1,9 @@
 const prisma = require("../lib/prisma")
 const { decryptField } = require("../utils/crypto")
 const { logAudit } = require("../utils/audit")
-
-function toNumber(decimal) {
-  return decimal === null || decimal === undefined ? 0 : Number(decimal)
-}
-
-function computeNetPay({ baseSalary, bonus, deductions }) {
-  const net = toNumber(baseSalary) + toNumber(bonus) - toNumber(deductions)
-  return Math.max(0, Math.round(net * 100) / 100)
-}
+const { toNumber, round2, computePayrollTotals, approvedExpenseTotal } = require("../utils/payroll")
+const { streamPayslipPdf } = require("../utils/payslip-pdf")
+const { hasModuleAccess } = require("../utils/roles")
 
 // Counts how many of an (inclusive) date range's days fall within the
 // given month, so a multi-day unpaid-leave request that only partly
@@ -24,9 +18,11 @@ function daysInMonthOverlap(start, end, monthStart, monthEnd) {
 
 // POST /api/payroll/generate  { month, year }
 // Creates one DRAFT record per ACTIVE employee with a baseSalary set, for
-// employees who don't already have a record for that month. Existing
-// records are left untouched (idempotent — safe to re-run). Deductions:
-// unpaid leave is a percentage of the employee's base salary per day (not
+// employees who don't already have a record for that month; an existing
+// DRAFT has its attendance-derived lines refreshed, submitted/paid ones
+// are left untouched (safe to re-run). Deductions: each ABSENT attendance
+// day and each unpaid-leave day is a percentage of the employee's base
+// salary per day (not
 // a flat amount), banded by salary so it stays proportional — plus the
 // org's configured lateDeductionAmount (default 500 PKR) per day marked
 // LATE. Bonus is always manual, applied afterward via updatePayroll.
@@ -44,6 +40,80 @@ function unpaidLeaveDailyRate(baseSalary) {
   return 0.027
 }
 
+const PAYSLIP_EMPLOYEE_SELECT = { id: true, name: true, baseSalary: true, bankName: true, bankAccountNumber: true }
+
+// The attendance/leave-derived part of a payslip for one employee/month:
+// late days, absent days (attendance marked ABSENT — no check-in, or set
+// by an admin), unpaid leave, and approved expense claims. Absent days and
+// full unpaid-leave days are deducted at the same per-day rate (a half-day
+// unpaid leave at half of it); an unpaid-leave day is recorded as LEAVE in
+// attendance, never ABSENT, so the two never overlap.
+async function computeAttendanceLines({ employeeId, base, month, year, lateRate }) {
+  const monthStart = new Date(Date.UTC(year, month - 1, 1))
+  const monthEnd = new Date(Date.UTC(year, month, 1)) // exclusive
+
+  const [lateDays, absentDays] = await Promise.all([
+    prisma.attendanceRecord.count({ where: { employeeId, status: "LATE", date: { gte: monthStart, lt: monthEnd } } }),
+    prisma.attendanceRecord.count({ where: { employeeId, status: "ABSENT", date: { gte: monthStart, lt: monthEnd } } }),
+  ])
+
+  const unpaidLeaves = await prisma.leaveApplication.findMany({
+    where: {
+      employeeId,
+      status: "APPROVED",
+      type: "UNPAID",
+      startDate: { lt: monthEnd },
+      endDate: { gte: monthStart },
+    },
+    select: { startDate: true, endDate: true, isHalfDay: true },
+  })
+
+  let fullUnpaidDays = 0
+  let halfUnpaidDays = 0
+  for (const leave of unpaidLeaves) {
+    if (leave.isHalfDay) {
+      halfUnpaidDays += 1 // half-day leave is always a single day by definition
+    } else {
+      fullUnpaidDays += daysInMonthOverlap(leave.startDate, leave.endDate, monthStart, monthEnd)
+    }
+  }
+
+  const perDayDeduction = base * unpaidLeaveDailyRate(base)
+  return {
+    absentDays,
+    unpaidLeaveDays: fullUnpaidDays,
+    halfDayLeaveDays: halfUnpaidDays,
+    lateDays,
+    absentDeduction: round2((absentDays + fullUnpaidDays) * perDayDeduction + halfUnpaidDays * (perDayDeduction / 2)),
+    lateDeduction: round2(lateDays * lateRate),
+    expenseReimbursement: await approvedExpenseTotal(prisma, employeeId, month, year),
+  }
+}
+
+// Builds a new DRAFT payslip's data for one employee/month.
+async function buildPayslipData({ emp, month, year, organizationId, userId, lateRate }) {
+  const base = toNumber(emp.baseSalary)
+  const lines = await computeAttendanceLines({ employeeId: emp.id, base, month, year, lateRate })
+  const breakdown = { baseSalary: base, bonus: 0, tax: 0, otherDeduction: 0, ...lines }
+  return {
+    organizationId,
+    employeeId: emp.id,
+    month,
+    year,
+    ...breakdown,
+    ...computePayrollTotals(breakdown),
+    status: "DRAFT",
+    generatedById: userId,
+    bankName: emp.bankName,
+    bankAccountNumber: emp.bankAccountNumber, // already encrypted at rest on User — copied as-is
+  }
+}
+
+async function orgLateRate(organizationId) {
+  const organization = await prisma.organization.findUnique({ where: { id: organizationId } })
+  return toNumber(organization?.lateDeductionAmount) || 500
+}
+
 async function generatePayroll(req, res, next) {
   try {
     const { organizationId, userId } = req.user
@@ -54,18 +124,15 @@ async function generatePayroll(req, res, next) {
       return res.status(400).json({ error: "Valid month (1-12) and year are required" })
     }
 
-    const organization = await prisma.organization.findUnique({ where: { id: organizationId } })
-    const lateDeduction = toNumber(organization?.lateDeductionAmount) || 500
+    const lateRate = await orgLateRate(organizationId)
 
     const employees = await prisma.user.findMany({
       where: { organizationId, status: "ACTIVE", baseSalary: { not: null } },
-      select: { id: true, name: true, baseSalary: true, bankName: true, bankAccountNumber: true },
+      select: PAYSLIP_EMPLOYEE_SELECT,
     })
 
-    const monthStart = new Date(Date.UTC(year, month - 1, 1))
-    const monthEnd = new Date(Date.UTC(year, month, 1)) // exclusive
-
     let created = 0
+    let refreshed = 0
     let skipped = 0
 
     for (const emp of employees) {
@@ -73,66 +140,32 @@ async function generatePayroll(req, res, next) {
         where: { employeeId_month_year: { employeeId: emp.id, month, year } },
       })
       if (existing) {
-        skipped += 1
+        if (existing.status !== "DRAFT") {
+          skipped += 1
+          continue
+        }
+        // Re-running Generate refreshes a DRAFT's attendance-derived lines
+        // (absent/late/unpaid leave/expenses) so absences marked since it
+        // was first generated are deducted; manual bonus/tax/other and
+        // termination amounts are kept.
+        const lines = await computeAttendanceLines({ employeeId: emp.id, base: toNumber(existing.baseSalary), month, year, lateRate })
+        await prisma.payrollRecord.update({
+          where: { id: existing.id },
+          data: { ...lines, ...computePayrollTotals({ ...existing, ...lines }) },
+        })
+        refreshed += 1
         continue
       }
 
-      const lateDays = await prisma.attendanceRecord.count({
-        where: { employeeId: emp.id, status: "LATE", date: { gte: monthStart, lt: monthEnd } },
-      })
-
-      const unpaidLeaves = await prisma.leaveApplication.findMany({
-        where: {
-          employeeId: emp.id,
-          status: "APPROVED",
-          type: "UNPAID",
-          startDate: { lt: monthEnd },
-          endDate: { gte: monthStart },
-        },
-        select: { startDate: true, endDate: true, isHalfDay: true },
-      })
-
-      let fullUnpaidDays = 0
-      let halfUnpaidDays = 0
-      for (const leave of unpaidLeaves) {
-        if (leave.isHalfDay) {
-          halfUnpaidDays += 1 // half-day leave is always a single day by definition
-        } else {
-          fullUnpaidDays += daysInMonthOverlap(leave.startDate, leave.endDate, monthStart, monthEnd)
-        }
-      }
-
-      const base = toNumber(emp.baseSalary)
-      const dailyRate = unpaidLeaveDailyRate(base)
-      const perDayDeduction = base * dailyRate
-      const leaveDeduction = fullUnpaidDays * perDayDeduction + halfUnpaidDays * (perDayDeduction / 2)
-      const lateDeductionTotal = lateDays * lateDeduction
-      const totalDeductions = Math.round((leaveDeduction + lateDeductionTotal) * 100) / 100
-
       await prisma.payrollRecord.create({
-        data: {
-          organizationId,
-          employeeId: emp.id,
-          month,
-          year,
-          baseSalary: base,
-          bonus: 0,
-          deductions: totalDeductions,
-          unpaidLeaveDays: fullUnpaidDays,
-          halfDayLeaveDays: halfUnpaidDays,
-          lateDays,
-          netPay: computeNetPay({ baseSalary: base, bonus: 0, deductions: totalDeductions }),
-          status: "DRAFT",
-          generatedById: userId,
-          bankName: emp.bankName,
-          bankAccountNumber: emp.bankAccountNumber, // already encrypted at rest on User — copied as-is
-        },
+        data: await buildPayslipData({ emp, month, year, organizationId, userId, lateRate }),
       })
       created += 1
     }
 
     res.status(201).json({
       created,
+      refreshed,
       skipped,
       eligibleEmployees: employees.length,
       message:
@@ -263,13 +296,65 @@ async function myPayroll(req, res, next) {
   }
 }
 
-// PATCH /api/payroll/:id  { bonus, deductions, note }
+// Amount lines an admin may edit by hand on a DRAFT payslip. Absent/late
+// come from attendance, expenseReimbursement from approved claims, and tax
+// from taxPercent, so they're recomputed rather than typed in.
+const EDITABLE_AMOUNTS = ["bonus", "otherDeduction", "terminationSettlement", "terminationDeduction"]
+const MIN_BONUS = 500
+
+function cleanText(value, max) {
+  if (value === undefined) return undefined
+  const text = String(value ?? "").trim()
+  return text ? text.slice(0, max) : null
+}
+
+// GET /api/payroll/:id/pdf — a printable payslip. Your own payslip is
+// always downloadable; anyone else's needs the payroll module and the same
+// organization.
+async function downloadPayslipPdf(req, res, next) {
+  try {
+    const { userId, organizationId, role } = req.user
+    const record = await prisma.payrollRecord.findUnique({ where: { id: req.params.id } })
+    const isOwn = record && record.employeeId === userId
+    if (!record || (!isOwn && !(hasModuleAccess(role, "payroll") && record.organizationId === organizationId))) {
+      return res.status(404).json({ error: "Payslip not found" })
+    }
+
+    const [employee, organization] = await Promise.all([
+      prisma.user.findUnique({
+        where: { id: record.employeeId },
+        select: { name: true, email: true, designation: true, joiningDate: true, department: { select: { name: true } } },
+      }),
+      prisma.organization.findUnique({
+        where: { id: record.organizationId },
+        select: { name: true, primaryColor: true, timezone: true },
+      }),
+    ])
+
+    const safeName = (employee?.name || "employee").replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "")
+    const filename = `payslip-${safeName}-${record.year}-${String(record.month).padStart(2, "0")}.pdf`
+    res.setHeader("Content-Type", "application/pdf")
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`)
+    streamPayslipPdf(res, {
+      record,
+      employee: employee || { name: "-", email: "-" },
+      organization: organization || { name: "Company", primaryColor: null, timezone: "UTC" },
+      bankAccount: decryptField(record.bankAccountNumber),
+    })
+  } catch (err) {
+    next(err)
+  }
+}
+
+// PATCH /api/payroll/:id
+//   { bonus, taxPercent, otherDeduction, note,
+//     terminationDate, terminationSettlement, terminationDeduction, terminationNote }
 // Only DRAFT records can be edited — a PAID payslip is a fixed record.
+// Sending terminationDate: null clears the termination section entirely.
 async function updatePayroll(req, res, next) {
   try {
-    const { organizationId } = req.user
+    const { organizationId, userId } = req.user
     const { id } = req.params
-    const { bonus, deductions, note } = req.body
 
     const existing = await prisma.payrollRecord.findFirst({ where: { id, organizationId } })
     if (!existing) return res.status(404).json({ error: "Payroll record not found" })
@@ -277,24 +362,133 @@ async function updatePayroll(req, res, next) {
       return res.status(400).json({ error: "Only a DRAFT payslip can be edited — it's already been submitted or paid" })
     }
 
-    const nextBonus = bonus !== undefined ? Number(bonus) : toNumber(existing.bonus)
-    const nextDeductions = deductions !== undefined ? Number(deductions) : toNumber(existing.deductions)
+    const data = {}
+    for (const key of EDITABLE_AMOUNTS) {
+      if (req.body[key] === undefined) continue
+      const value = req.body[key] === "" || req.body[key] === null ? 0 : Number(req.body[key])
+      if (Number.isNaN(value) || value < 0) {
+        return res.status(400).json({ error: `${key} must be a non-negative number` })
+      }
+      data[key] = round2(value)
+    }
 
-    if (Number.isNaN(nextBonus) || Number.isNaN(nextDeductions) || nextBonus < 0 || nextDeductions < 0) {
-      return res.status(400).json({ error: "bonus and deductions must be non-negative numbers" })
+    if (data.bonus !== undefined && data.bonus > 0 && data.bonus < MIN_BONUS) {
+      return res.status(400).json({ error: `Bonus must be at least PKR ${MIN_BONUS} (or 0 for no bonus)` })
+    }
+
+    if (req.body.taxPercent !== undefined) {
+      const pct = req.body.taxPercent === "" || req.body.taxPercent === null ? 0 : Number(req.body.taxPercent)
+      if (Number.isNaN(pct) || pct < 0 || pct > 100) {
+        return res.status(400).json({ error: "Tax percentage must be between 0 and 100" })
+      }
+      data.taxPercent = round2(pct)
+      data.tax = round2((toNumber(existing.baseSalary) * data.taxPercent) / 100)
+    }
+
+    const note = cleanText(req.body.note, 1000)
+    if (note !== undefined) data.note = note
+
+    if (req.body.terminationDate !== undefined) {
+      if (req.body.terminationDate === null || req.body.terminationDate === "") {
+        Object.assign(data, { terminationDate: null, terminationSettlement: 0, terminationDeduction: 0, terminationNote: null })
+      } else {
+        const date = new Date(req.body.terminationDate)
+        if (Number.isNaN(date.getTime())) return res.status(400).json({ error: "terminationDate is not a valid date" })
+        data.terminationDate = date
+      }
+    }
+    const terminationNote = cleanText(req.body.terminationNote, 1000)
+    if (terminationNote !== undefined && data.terminationDate !== null) data.terminationNote = terminationNote
+
+    const hasTermination = (data.terminationDate !== undefined ? data.terminationDate : existing.terminationDate) !== null
+    if (!hasTermination && (toNumber(data.terminationSettlement) > 0 || toNumber(data.terminationDeduction) > 0)) {
+      return res.status(400).json({ error: "Set a termination date before adding termination amounts" })
     }
 
     const updated = await prisma.payrollRecord.update({
       where: { id },
-      data: {
-        bonus: nextBonus,
-        deductions: nextDeductions,
-        note: note !== undefined ? note : existing.note,
-        netPay: computeNetPay({ baseSalary: existing.baseSalary, bonus: nextBonus, deductions: nextDeductions }),
-      },
+      data: { ...data, ...computePayrollTotals({ ...existing, ...data }) },
     })
 
+    if (data.terminationDate && !existing.terminationDate) {
+      logAudit({ organizationId, actorId: userId, action: "payroll.termination_added", targetType: "PayrollRecord", targetId: id, note: `${existing.month}/${existing.year}` })
+    }
     res.json(updated)
+  } catch (err) {
+    next(err)
+  }
+}
+
+// POST /api/payroll/tax  { month, year, taxPercent }
+// Applies one tax percentage to every DRAFT payslip of the month
+// (tax = basic pay x %). Submitted/paid payslips are left untouched; a
+// single payslip can still be overridden afterward from its Edit panel.
+async function applyTaxToMonth(req, res, next) {
+  try {
+    const { organizationId, userId } = req.user
+    const month = Number(req.body.month)
+    const year = Number(req.body.year)
+    const pct = Number(req.body.taxPercent)
+    if (!month || month < 1 || month > 12 || !year) {
+      return res.status(400).json({ error: "Valid month (1-12) and year are required" })
+    }
+    if (req.body.taxPercent === "" || Number.isNaN(pct) || pct < 0 || pct > 100) {
+      return res.status(400).json({ error: "Tax percentage must be between 0 and 100" })
+    }
+    const taxPercent = round2(pct)
+
+    const drafts = await prisma.payrollRecord.findMany({ where: { organizationId, month, year, status: "DRAFT" } })
+    if (!drafts.length) return res.status(400).json({ error: "No draft payslips for this month — generate payroll first" })
+
+    await prisma.$transaction(
+      drafts.map((r) => {
+        const tax = round2((toNumber(r.baseSalary) * taxPercent) / 100)
+        return prisma.payrollRecord.update({
+          where: { id: r.id },
+          data: { taxPercent, tax, ...computePayrollTotals({ ...r, tax }) },
+        })
+      })
+    )
+
+    logAudit({ organizationId, actorId: userId, action: "payroll.tax_applied", note: `${month}/${year} — ${taxPercent}% on ${drafts.length} payslip(s)` })
+    res.json({ updated: drafts.length, taxPercent })
+  } catch (err) {
+    next(err)
+  }
+}
+
+// POST /api/payroll/employee  { employeeId, month, year }
+// Creates one employee's DRAFT payslip for a month, whatever their status.
+// Bulk generate only covers ACTIVE employees, so this is how an employee
+// who has already been marked "Left Company" still gets their final
+// (termination) payslip.
+async function createEmployeePayslip(req, res, next) {
+  try {
+    const { organizationId, userId } = req.user
+    const month = Number(req.body.month)
+    const year = Number(req.body.year)
+    const { employeeId } = req.body
+    if (!employeeId || !month || month < 1 || month > 12 || !year) {
+      return res.status(400).json({ error: "employeeId, a valid month (1-12) and year are required" })
+    }
+
+    const emp = await prisma.user.findFirst({ where: { id: employeeId, organizationId }, select: PAYSLIP_EMPLOYEE_SELECT })
+    if (!emp) return res.status(404).json({ error: "Employee not found" })
+    if (emp.baseSalary === null) {
+      return res.status(400).json({ error: `${emp.name} has no base salary set. Add one from their profile first.` })
+    }
+
+    const existing = await prisma.payrollRecord.findUnique({
+      where: { employeeId_month_year: { employeeId, month, year } },
+    })
+    if (existing) return res.status(409).json({ error: `${emp.name} already has a payslip for this month` })
+
+    const lateRate = await orgLateRate(organizationId)
+    const record = await prisma.payrollRecord.create({
+      data: await buildPayslipData({ emp, month, year, organizationId, userId, lateRate }),
+    })
+    logAudit({ organizationId, actorId: userId, action: "payroll.payslip_created", targetType: "PayrollRecord", targetId: record.id, note: `${emp.name} — ${month}/${year}` })
+    res.status(201).json(record)
   } catch (err) {
     next(err)
   }
@@ -449,6 +643,9 @@ module.exports = {
   getPayrollSummary,
   myPayroll,
   updatePayroll,
+  createEmployeePayslip,
+  applyTaxToMonth,
+  downloadPayslipPdf,
   markPaid,
   deletePayroll,
   submitForApproval,

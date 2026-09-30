@@ -208,6 +208,8 @@ model User {
   payrollApprovedBy                                            PayrollRecord[]           @relation("PayrollApprovedBy")
   payrollRecords                                               PayrollRecord[]           @relation("PayrollOf")
   payrollGeneratedBy                                           PayrollRecord[]           @relation("PayrollGeneratedBy")
+  expenseClaims                                                ExpenseClaim[]            @relation("ExpenseClaimOf")
+  expenseClaimsReviewed                                        ExpenseClaim[]            @relation("ExpenseClaimReviewer")
   performanceReviews                                           PerformanceReview[]       @relation("PerformanceEmployee")
   performanceGiven                                             PerformanceReview[]       @relation("PerformanceReviewer")
   managedProjects                                              Project[]                 @relation("ProjectManager")
@@ -710,12 +712,59 @@ model PayrollRecord {
   bankName          String?
   halfDayLeaveDays  Int           @default(0)
   lateDays          Int           @default(0)
+  // Workdays marked ABSENT in attendance (no check-in / admin-marked),
+  // deducted at the same daily rate as unpaid leave into absentDeduction.
+  absentDays        Int           @default(0)
+  // Payslip breakdown. `deductions` stays the TOTAL of every deduction
+  // below (tax + absent + late + other + termination) so existing
+  // summaries keep working; netPay = base + bonus + expenseReimbursement
+  // + terminationSettlement - deductions.
+  // tax = baseSalary x taxPercent / 100, recomputed whenever the admin
+  // changes the percentage.
+  tax                   Decimal   @default(0) @db.Decimal(12, 2)
+  taxPercent            Decimal   @default(0) @db.Decimal(5, 2)
+  absentDeduction       Decimal   @default(0) @db.Decimal(12, 2)
+  lateDeduction         Decimal   @default(0) @db.Decimal(12, 2)
+  otherDeduction        Decimal   @default(0) @db.Decimal(12, 2)
+  // Sum of this employee's APPROVED expense claims assigned to this month.
+  expenseReimbursement  Decimal   @default(0) @db.Decimal(12, 2)
+  terminationDate       DateTime?
+  terminationSettlement Decimal   @default(0) @db.Decimal(12, 2)
+  terminationDeduction  Decimal   @default(0) @db.Decimal(12, 2)
+  terminationNote       String?
   approvedBy        User?         @relation("PayrollApprovedBy", fields: [approvedById], references: [id])
   employee          User          @relation("PayrollOf", fields: [employeeId], references: [id], onDelete: Cascade)
   generatedBy       User?         @relation("PayrollGeneratedBy", fields: [generatedById], references: [id])
 
   @@unique([employeeId, month, year])
   @@index([organizationId, year, month])
+}
+
+// An office expense an employee paid out of pocket (e.g. tea/supplies
+// office management forgot). HR/ADMIN/CEO verify it; once APPROVED it's
+// assigned to a payroll month (payrollMonth/payrollYear) and added to that
+// month's payslip as a reimbursement.
+model ExpenseClaim {
+  id             String             @id @default(cuid())
+  organizationId String
+  employeeId     String
+  title          String
+  amount         Decimal            @db.Decimal(12, 2)
+  description    String?
+  expenseDate    DateTime
+  status         ExpenseClaimStatus @default(PENDING)
+  payrollMonth   Int?
+  payrollYear    Int?
+  reviewedById   String?
+  reviewedAt     DateTime?
+  reviewNote     String?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  employee       User               @relation("ExpenseClaimOf", fields: [employeeId], references: [id], onDelete: Cascade)
+  reviewedBy     User?              @relation("ExpenseClaimReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, status])
+  @@index([employeeId, payrollYear, payrollMonth])
 }
 
 model EmployeeFormInvitation {
@@ -1046,6 +1095,12 @@ enum PayrollStatus {
   DRAFT
   PAID
   PENDING_APPROVAL
+}
+
+enum ExpenseClaimStatus {
+  PENDING
+  APPROVED
+  REJECTED
 }
 
 enum AssetRequestStatus {

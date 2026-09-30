@@ -34,10 +34,12 @@ export const ROLE_LABELS = {
 // The MANAGER role ("Finance Manager") was removed entirely on 2026-09-24
 // (see UserRole enum) — ADMIN/CEO already cover payroll/payrollReports via
 // the "*" wildcard.
+// "expenseClaims" = reviewing employees' office-expense claims (HR, plus
+// ADMIN/CEO via "*"). Submitting your own claim needs no module.
 export const ROLE_MODULES = {
   CEO: ["*"],
   ADMIN: ["*"],
-  HR: ["employees", "employeeForms", "certifications", "attendance", "leave", "hrReports"],
+  HR: ["employees", "employeeForms", "certifications", "attendance", "leave", "hrReports", "expenseClaims"],
   MANAGEMENT: ["employees", "projects", "tasks", "attendance", "performance", "reports"],
   DEPARTMENT_HEAD: ["departments", "employees", "attendance", "projects", "tasks", "leave"],
   IT_MANAGER: ["inventory", "assets", "assetAssignments", "assetRequests", "tickets"],

@@ -45,6 +45,7 @@ const AttendanceDevices = lazy(() => import("./pages/AttendanceDevices"))
 const Billing = lazy(() => import("./pages/Billing"))
 const Payroll = lazy(() => import("./pages/Payroll"))
 const MyPayroll = lazy(() => import("./pages/MyPayroll"))
+const ExpenseClaims = lazy(() => import("./pages/ExpenseClaims"))
 const Profile = lazy(() => import("./pages/Profile"))
 const Notifications = lazy(() => import("./pages/Notifications"))
 const Projects = lazy(() => import("./pages/Projects"))
@@ -152,7 +153,9 @@ function ProtectedShell() {
           <Route path="/holidays" element={<RequireModule moduleKey="leave"><Holidays /></RequireModule>} />
           <Route path="/audit-log" element={<RequireOwner><AuditLog /></RequireOwner>} />
           <Route path="/payroll" element={<RequirePayrollAccess><Payroll /></RequirePayrollAccess>} />
-          <Route path="/payroll/me" element={<RequirePayrollAccess><MyPayroll /></RequirePayrollAccess>} />
+          {/* Own payslips — every employee, like GET /payroll/me itself. */}
+          <Route path="/payroll/me" element={<MyPayroll />} />
+          <Route path="/expense-claims" element={<RequireModule moduleKey="expenseClaims"><ExpenseClaims /></RequireModule>} />
           <Route path="/payroll/reports" element={<RequireModule moduleKey="payrollReports"><PayrollReports /></RequireModule>} />
           <Route path="/tickets" element={<Tickets />} />
           <Route path="/reports" element={<RequireModule moduleKey="reports"><Reports /></RequireModule>} />

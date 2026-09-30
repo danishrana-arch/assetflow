@@ -11,7 +11,9 @@ function expectedWeeklyMinutes(organization) {
 }
 
 function isScheduledWorkday(date, organization) {
-  const day = new Date(date).getDay() // 0 Sunday ... 6 Saturday
+  // Dates here are date-only values stored as UTC midnight, so read the
+  // UTC weekday — local getDay() would shift a day on a server west of UTC.
+  const day = new Date(date).getUTCDay() // 0 Sunday ... 6 Saturday
   const configured = workingDaysPerWeek(organization)
   // The default 5-day office week is Monday-Friday. For other configured
   // counts, use the first N weekdays (e.g. 6 => Mon-Sat).

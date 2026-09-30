@@ -128,6 +128,7 @@ export default function MobileNav({ open, onClose }) {
               {hasModuleAccess(user?.role, "payrollReports") && (
                 <Row to="/payroll/reports" icon={FileSpreadsheet} label="Payroll Reports" onClick={onClose} />
               )}
+              <Row to="/payroll/me" icon={Wallet} label="My Payslips" onClick={onClose} />
               <div className="my-2 divider" />
               <Row to="/notifications" icon={BellRing} label="Notifications" onClick={onClose} showDot={hasUnreadNotifications} />
               {hasModuleAccess(user?.role, "employeeForms") && <Row to="/employee-forms" icon={FileText} label="Employee Forms" onClick={onClose} />}
@@ -145,6 +146,7 @@ export default function MobileNav({ open, onClose }) {
               <Row to="/asset-requests" icon={PackageSearch} label="Asset Requests" onClick={onClose} />
               <Row to="/tickets" icon={Ticket} label="Requests / Tickets" onClick={onClose} />
               <Row to="/attendance/me" icon={CalendarCheck} label="My Attendance" onClick={onClose} />
+              <Row to="/payroll/me" icon={Wallet} label="My Payslips" onClick={onClose} />
               <div className="my-2 divider" />
               <Row to="/notifications" icon={BellRing} label="Notifications" onClick={onClose} showDot={hasUnreadNotifications} />
             </>

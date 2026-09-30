@@ -404,6 +404,7 @@ export default function Sidebar({ expanded, onMouseEnter, onMouseLeave }) {
             {hasModuleAccess(user?.role, "payrollReports") && (
               <RailItem to="/payroll/reports" label="Payroll Reports" icon={FileSpreadsheet} isDark={isDark} expanded={expanded} />
             )}
+            <RailItem to="/payroll/me" label="My Payslips" icon={Wallet} isDark={isDark} expanded={expanded} />
           </>
         ) : isIT ? (
           <>
@@ -415,6 +416,7 @@ export default function Sidebar({ expanded, onMouseEnter, onMouseLeave }) {
             <RailItem to="/tickets" label="Requests / Tickets" icon={Ticket} isDark={isDark} expanded={expanded} />
             <RailItem to="/calendar" label="Company Calendar" icon={CalendarDays} isDark={isDark} expanded={expanded} />
             <RailItem to="/attendance/me" label="My Attendance" icon={CalendarCheck} isDark={isDark} expanded={expanded} />
+            <RailItem to="/payroll/me" label="My Payslips" icon={Wallet} isDark={isDark} expanded={expanded} />
           </>
         ) : (
           <>
