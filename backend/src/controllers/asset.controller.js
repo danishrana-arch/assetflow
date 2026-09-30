@@ -1,6 +1,7 @@
 const prisma = require("../lib/prisma")
 const { logAudit } = require("../utils/audit")
 const { parseCsv } = require("../utils/csv")
+const { createNotification } = require("../utils/notifications")
 
 async function listAssets(req, res, next) {
   try {
@@ -102,7 +103,7 @@ async function getAsset(req, res, next) {
 // Canonical starter categories always offered in the filter/Add-Asset
 // dropdown, plus any custom category values already in use in this org
 // (so a category someone typed before this list existed still shows up).
-const CANONICAL_CATEGORIES = ["Laptop", "Desktop", "Monitor", "Accessories", "Stationery", "Phone", "Other"]
+const CANONICAL_CATEGORIES = ["Laptop", "Desktop", "Monitor", "Accessories", "Stationery", "Phone"]
 
 async function listCategories(req, res, next) {
   try {
@@ -153,6 +154,59 @@ async function createAsset(req, res, next) {
 
     res.status(201).json(asset)
   } catch (err) {
+    next(err)
+  }
+}
+
+const EDITABLE_FIELDS = ["name", "category", "serialNumber", "cpu", "ram", "storage", "purchaseDate", "warrantyEnd", "departmentId"]
+
+// PATCH /assets/:id — edit an asset's details. Assignment and status have
+// their own actions (assign/unassign/status) so their lifecycle history
+// stays intact; this only changes the descriptive fields.
+async function updateAsset(req, res, next) {
+  try {
+    const { organizationId, userId } = req.user
+    const { id } = req.params
+    const asset = await prisma.asset.findFirst({ where: { id, organizationId } })
+    if (!asset) return res.status(404).json({ error: "Asset not found" })
+
+    const data = {}
+    for (const key of EDITABLE_FIELDS) {
+      if (req.body[key] === undefined) continue
+      const raw = req.body[key]
+      const value = typeof raw === "string" ? raw.trim() : raw
+      if (key === "purchaseDate" || key === "warrantyEnd") {
+        if (!value) { data[key] = null; continue }
+        const date = new Date(value)
+        if (Number.isNaN(date.getTime())) return res.status(400).json({ error: `${key} must be a valid date` })
+        data[key] = date
+      } else {
+        data[key] = value || null
+      }
+    }
+    if ("name" in data && !data.name) return res.status(400).json({ error: "Name is required" })
+    if ("serialNumber" in data && !data.serialNumber) return res.status(400).json({ error: "Serial number is required" })
+    if (data.departmentId) {
+      const department = await prisma.department.findFirst({ where: { id: data.departmentId, organizationId }, select: { id: true } })
+      if (!department) return res.status(400).json({ error: "Department not found" })
+    }
+    if (data.serialNumber && data.serialNumber !== asset.serialNumber) {
+      const clash = await prisma.asset.findUnique({ where: { serialNumber: data.serialNumber }, select: { id: true } })
+      if (clash) return res.status(409).json({ error: "Another asset already has this serial number" })
+    }
+
+    const updated = await prisma.asset.update({
+      where: { id },
+      data: {
+        ...data,
+        lifecycleEvents: { create: { type: "NOTE", actorId: userId, note: "Asset details updated" } },
+      },
+      include: { assignedTo: { select: { id: true, name: true } }, department: true },
+    })
+    logAudit({ organizationId, actorId: userId, action: "asset.updated", targetType: "Asset", targetId: id, note: `${updated.name} <${updated.serialNumber}>` })
+    res.json(updated)
+  } catch (err) {
+    if (err.code === "P2002") return res.status(409).json({ error: "Another asset already has this serial number" })
     next(err)
   }
 }
@@ -404,25 +458,45 @@ async function importAssetsTemplate(req, res, next) {
 // employee, where the ASSET's history has to survive). LifecycleEvent has
 // a required link to its asset with no cascade rule, so those rows have to
 // be cleared first or the delete fails with a foreign-key error.
+//
+// An asset that's still assigned can only be deleted by ADMIN/CEO: it's
+// unassigned from the employee automatically (they get a notification).
+// Other inventory roles still have to unassign it first. A fulfilled asset
+// request keeps its record but loses the link to the deleted asset.
 async function deleteAsset(req, res, next) {
   try {
-    const { organizationId, userId } = req.user
+    const { organizationId, userId, role } = req.user
     const { id } = req.params
 
-    const asset = await prisma.asset.findFirst({ where: { id, organizationId } })
+    const asset = await prisma.asset.findFirst({ where: { id, organizationId }, include: { assignedTo: { select: { id: true, name: true } } } })
     if (!asset) return res.status(404).json({ error: "Asset not found" })
 
-    if (asset.status === "ASSIGNED") {
-      return res.status(400).json({ error: "Unassign this asset before deleting it" })
+    const assigned = asset.status === "ASSIGNED" || !!asset.assignedToId
+    if (assigned && !["ADMIN", "CEO"].includes(role)) {
+      return res.status(400).json({ error: "Unassign this asset before deleting it (only Admin or CEO can delete an assigned asset)" })
     }
 
     await prisma.$transaction([
       prisma.lifecycleEvent.deleteMany({ where: { assetId: id } }),
       prisma.ticket.updateMany({ where: { assetId: id }, data: { assetId: null } }),
+      prisma.assetRequest.updateMany({ where: { fulfilledAssetId: id }, data: { fulfilledAssetId: null } }),
       prisma.asset.delete({ where: { id } }),
     ])
 
-    logAudit({ organizationId, actorId: userId, action: "asset.deleted", targetType: "Asset", targetId: id, note: `${asset.name} <${asset.serialNumber}>` })
+    const holder = asset.assignedTo
+    if (holder) {
+      await createNotification({
+        organizationId,
+        recipientId: holder.id,
+        createdById: userId,
+        type: "ASSET",
+        title: "Asset removed",
+        message: `${asset.name} (${asset.serialNumber}) was deleted from inventory and is no longer assigned to you.`,
+        link: `/employees/${holder.id}`,
+      }).catch(() => {})
+    }
+
+    logAudit({ organizationId, actorId: userId, action: "asset.deleted", targetType: "Asset", targetId: id, note: `${asset.name} <${asset.serialNumber}>${holder ? ` — unassigned from ${holder.name}` : ""}` })
     res.status(204).send()
   } catch (err) {
     next(err)
@@ -463,6 +537,7 @@ module.exports = {
   listCategories,
   getAsset,
   createAsset,
+  updateAsset,
   assignAsset,
   unassignAsset,
   changeAssetStatus,

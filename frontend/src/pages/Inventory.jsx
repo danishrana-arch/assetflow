@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react"
 import { useMutation, useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query"
 import { Link, useSearchParams } from "react-router-dom"
-import { Search, Plus, X, Boxes, Laptop2, MonitorSmartphone, Smartphone, Keyboard, PenLine, Upload, Download, Trash2 } from "lucide-react"
+import { Search, Plus, X, Boxes, Laptop2, MonitorSmartphone, Smartphone, Keyboard, PenLine, Upload, Download, Trash2, Pencil } from "lucide-react"
 import api from "../api/client"
+import { useAuth } from "../context/AuthContext"
 import StatusBadge from "../components/StatusBadge"
 import PageHeader from "../components/ui/PageHeader"
 import IconChip from "../components/ui/IconChip"
@@ -48,6 +49,13 @@ export default function Inventory() {
   const [importError, setImportError] = useState("")
   const fileInputRef = useRef(null)
   const queryClient = useQueryClient()
+  const { user } = useAuth()
+  // ADMIN/CEO may delete an asset that's still assigned (it's unassigned
+  // automatically); other inventory roles must unassign it first.
+  const canDeleteAssigned = ["ADMIN", "CEO"].includes(user?.role)
+  const [editingId, setEditingId] = useState(null)
+  const [actionError, setActionError] = useState("")
+  const [actionNotice, setActionNotice] = useState("")
 
   // Dashboard stat cards deep-link here: ?view=all (Total Assets) lists every
   // asset without picking a category; ?warranty=expiring (Warranty Alerts)
@@ -94,11 +102,16 @@ export default function Inventory() {
   })
 
   const deleteAsset = useMutation({
-    mutationFn: (id) => api.delete(`/assets/${id}`),
-    onSuccess: () => {
+    mutationFn: (asset) => api.delete(`/assets/${asset.id}`),
+    onSuccess: (_, asset) => {
       queryClient.invalidateQueries({ queryKey: ["assets"] })
       queryClient.invalidateQueries({ queryKey: ["asset-categories"] })
+      queryClient.invalidateQueries({ queryKey: ["employees"] })
+      queryClient.invalidateQueries({ queryKey: ["employee"] })
+      setActionError("")
+      setActionNotice(asset.assignedTo ? `${asset.name} deleted and unassigned from ${asset.assignedTo.name}.` : `${asset.name} deleted.`)
     },
+    onError: (err) => { setActionNotice(""); setActionError(err.response?.data?.error || "Could not delete asset") },
   })
 
   const deleteCategory = useMutation({
@@ -110,21 +123,46 @@ export default function Inventory() {
     },
   })
 
-  const createAsset = useMutation({
-    mutationFn: () =>
-      api.post("/assets", {
+  // One form for both Add and Edit (editingId set = editing that asset).
+  const saveAsset = useMutation({
+    mutationFn: () => {
+      const payload = {
         ...form,
         category: form.category === "__custom__" ? form.customCategory.trim() : form.category,
         customCategory: undefined,
-        departmentId: form.departmentId || undefined,
-      }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["assets"] })
-      queryClient.invalidateQueries({ queryKey: ["asset-categories"] })
-      setShowForm(false); setForm(emptyForm); setError("")
+      }
+      return editingId
+        ? api.patch(`/assets/${editingId}`, { ...payload, departmentId: form.departmentId || null })
+        : api.post("/assets", { ...payload, departmentId: form.departmentId || undefined })
     },
-    onError: (err) => setError(err.response?.data?.error || "Could not create asset"),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ["assets"] })
+      queryClient.invalidateQueries({ queryKey: ["asset"] })
+      queryClient.invalidateQueries({ queryKey: ["asset-categories"] })
+      setActionError("")
+      setActionNotice(editingId ? `${res.data.name} updated.` : `${res.data.name} added.`)
+      closeForm()
+    },
+    onError: (err) => setError(err.response?.data?.error || (editingId ? "Could not update asset" : "Could not create asset")),
   })
+
+  function closeForm() { setShowForm(false); setEditingId(null); setForm(emptyForm); setError("") }
+
+  function startEdit(asset) {
+    const knownCategory = !asset.category || (categories || []).some((c) => c.name === asset.category)
+    setForm({
+      name: asset.name || "",
+      category: knownCategory ? asset.category || "" : "__custom__",
+      customCategory: knownCategory ? "" : asset.category,
+      serialNumber: asset.serialNumber || "",
+      cpu: asset.cpu || "", ram: asset.ram || "", storage: asset.storage || "",
+      purchaseDate: asset.purchaseDate ? String(asset.purchaseDate).slice(0, 10) : "",
+      warrantyEnd: asset.warrantyEnd ? String(asset.warrantyEnd).slice(0, 10) : "",
+      departmentId: asset.departmentId || asset.department?.id || "",
+    })
+    setEditingId(asset.id); setError(""); setShowForm(true)
+    window.scrollTo({ top: 0, behavior: "smooth" })
+  }
 
   function updateField(key, value) { setForm((f) => ({ ...f, [key]: value })) }
 
@@ -154,9 +192,18 @@ export default function Inventory() {
     importFile.mutate(file)
   }
 
-  function handleDeleteAsset(id) {
-    if (!window.confirm("Delete this asset? This cannot be undone.")) return
-    deleteAsset.mutate(id)
+  function handleDeleteAsset(asset) {
+    const holder = asset.assignedTo?.name
+    if (holder && !canDeleteAssigned) {
+      setActionNotice("")
+      setActionError(`${asset.name} is assigned to ${holder}. Unassign it first — only Admin or CEO can delete an assigned asset.`)
+      return
+    }
+    const message = holder
+      ? `${asset.name} is assigned to ${holder}. Deleting it will unassign it from ${holder} automatically and remove it permanently. Continue?`
+      : `Delete ${asset.name}? This cannot be undone.`
+    if (!window.confirm(message)) return
+    deleteAsset.mutate(asset)
   }
 
   function handleDeleteCategory() {
@@ -214,7 +261,7 @@ export default function Inventory() {
               className="hidden"
             />
             <button
-              onClick={() => setShowForm((v) => !v)}
+              onClick={() => (showForm ? closeForm() : setShowForm(true))}
               className="pill-accent flex items-center gap-1.5 px-4 py-2.5 text-sm"
             >
               {showForm ? <X size={15} /> : <Plus size={15} />}
@@ -223,6 +270,19 @@ export default function Inventory() {
           </>
         }
       />
+
+      {actionError && (
+        <div className="mb-5 flex items-start justify-between gap-3 rounded-2xl bg-chip-pink-bg px-3.5 py-2.5 text-sm text-chip-pink-fg">
+          <span>{actionError}</span>
+          <button onClick={() => setActionError("")} aria-label="Dismiss"><X size={14} /></button>
+        </div>
+      )}
+      {actionNotice && (
+        <div className="mb-5 flex items-start justify-between gap-3 rounded-2xl bg-chip-green-bg px-3.5 py-2.5 text-sm text-chip-green-fg">
+          <span>{actionNotice}</span>
+          <button onClick={() => setActionNotice("")} aria-label="Dismiss"><X size={14} /></button>
+        </div>
+      )}
 
       {importError && (
         <div className="mb-5 rounded-2xl bg-chip-pink-bg px-3.5 py-2.5 text-sm text-chip-pink-fg">{importError}</div>
@@ -300,10 +360,11 @@ export default function Inventory() {
           onSubmit={(e) => {
             e.preventDefault()
             const categoryOk = form.category === "__custom__" ? form.customCategory.trim() : true
-            if (form.name.trim() && form.serialNumber.trim() && categoryOk) createAsset.mutate()
+            if (form.name.trim() && form.serialNumber.trim() && categoryOk) saveAsset.mutate()
           }}
           className="card mb-5 space-y-4 p-5"
         >
+          <p className="text-sm font-semibold text-ink">{editingId ? `Edit ${form.name || "asset"}` : "Add asset"}</p>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <TextField label="Name *" value={form.name} onChange={(e) => updateField("name", e.target.value)} placeholder='Dell Latitude 7440' required />
             <TextField label="Serial number *" value={form.serialNumber} onChange={(e) => updateField("serialNumber", e.target.value)} required />
@@ -338,9 +399,12 @@ export default function Inventory() {
             <TextField label="Warranty end" type="date" value={form.warrantyEnd} onChange={(e) => updateField("warrantyEnd", e.target.value)} />
           </div>
           {error && <p className="text-sm text-danger">{error}</p>}
-          <button type="submit" disabled={createAsset.isPending} className="pill-accent px-5 py-2.5 text-sm">
-            Add asset
-          </button>
+          <div className="flex gap-2">
+            <button type="submit" disabled={saveAsset.isPending} className="pill-accent px-5 py-2.5 text-sm">
+              {saveAsset.isPending ? "Saving…" : editingId ? "Save changes" : "Add asset"}
+            </button>
+            {editingId && <button type="button" onClick={closeForm} className="pill-secondary px-5 py-2.5 text-sm">Cancel</button>}
+          </div>
         </form>
       )}
 
@@ -371,7 +435,15 @@ export default function Inventory() {
               <StatusBadge status={asset.status} />
               <button
                 type="button"
-                onClick={() => handleDeleteAsset(asset.id)}
+                onClick={() => startEdit(asset)}
+                className="flex h-9 w-9 items-center justify-center rounded-full text-muted hover:bg-surface-2"
+                title="Edit asset"
+              >
+                <Pencil size={15} />
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDeleteAsset(asset)}
                 className="flex h-9 w-9 items-center justify-center rounded-full text-danger hover:bg-red-50"
                 title="Delete asset"
               >
@@ -420,13 +492,22 @@ export default function Inventory() {
           <td className="px-5 py-3.5 text-muted">{asset.department?.name || "—"}</td>
           <td className="px-5 py-3.5"><StatusBadge status={asset.status} /></td>
           <td className="px-5 py-3.5">
-            <button
-              type="button"
-              onClick={() => handleDeleteAsset(asset.id)}
-              className="text-danger flex items-center gap-2"
-            >
-              <Trash2 size={14} /> Delete
-            </button>
+            <div className="flex items-center gap-4">
+              <button
+                type="button"
+                onClick={() => startEdit(asset)}
+                className="flex items-center gap-1.5 text-muted hover:text-ink"
+              >
+                <Pencil size={14} /> Edit
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDeleteAsset(asset)}
+                className="text-danger flex items-center gap-1.5"
+              >
+                <Trash2 size={14} /> Delete
+              </button>
+            </div>
           </td>
         </tr>
       )

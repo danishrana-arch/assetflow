@@ -5,6 +5,7 @@ const {
   listCategories,
   getAsset,
   createAsset,
+  updateAsset,
   assignAsset,
   unassignAsset,
   changeAssetStatus,
@@ -37,6 +38,7 @@ router.get("/categories", listCategories);
 router.get("/", listAssets);
 router.get("/:id", getAsset);
 router.post("/", requireInventoryAccess, createAsset);
+router.patch("/:id", requireInventoryAccess, updateAsset);
 router.post("/:id/assign", requireInventoryAccess, assignAsset);
 router.post("/:id/unassign", requireInventoryAccess, unassignAsset);
 router.post("/:id/status", requireInventoryAccess, changeAssetStatus);

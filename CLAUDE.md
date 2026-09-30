@@ -1768,6 +1768,21 @@ JS client was regenerated with the column, so payroll queries fail until
   JS client regenerated (engine DLL rename hit the usual EPERM). Restart the
   backend.
 
+## Post-module addition: full CRUD on Inventory (2026-09-30)
+
+- `PATCH /assets/:id` (`updateAsset`, `requireInventoryAccess`): edits name,
+  category, serial (409 on duplicate), CPU/RAM/storage, dates, department;
+  logs a lifecycle note + audit row. Assignment/status keep their own actions.
+- `deleteAsset`: an **assigned** asset can be deleted by ADMIN/CEO only — it's
+  unassigned automatically and the employee gets an "Asset removed"
+  notification. IT_MANAGER still has to unassign first (400). Also clears
+  `AssetRequest.fulfilledAssetId` first — that FK has no cascade rule, so
+  deleting an asset that fulfilled a request used to fail.
+- `Inventory.jsx`: Edit button (reuses the Add form), role-aware delete
+  confirmation, success/error banners.
+- "Other" removed from the default asset categories (no asset used it).
+- Verified 20/20 against a temporary org (deleted afterwards).
+
 ## Automated RBAC test run (2026-09-28)
 
 There's no automated test suite in either app (`npm test` isn't
