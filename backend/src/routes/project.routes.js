@@ -7,7 +7,7 @@ const { listWorkCategories, createWorkCategory, updateWorkCategory, deleteWorkCa
 const router = express.Router()
 router.use(requireAuth)
 
-startProjectDeadlineNotificationJob()
+if (process.env.DISABLE_BACKGROUND_JOBS !== "true") startProjectDeadlineNotificationJob()
 
 router.get("/work-categories", listWorkCategories)
 router.post("/work-categories", requireModule("projects"), createWorkCategory)

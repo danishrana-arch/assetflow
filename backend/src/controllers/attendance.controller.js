@@ -127,6 +127,9 @@ async function getDailyAttendance(req, res, next) {
         note: noteByEmployee.get(emp.id)?.note || null,
         noteAuthorName: noteByEmployee.get(emp.id)?.author?.name || null,
         noteUpdatedAt: noteByEmployee.get(emp.id)?.updatedAt?.toISOString() || null,
+        employeeNote: record?.employeeNote || null,
+        extraMinutes: record?.extraMinutes ?? null,
+        autoCheckedOut: record?.autoCheckedOut || false,
         workingMinutes: record?.workingMinutes ?? null,
         expectedWorkingMinutes: workingMinutesPerDay(organization),
         expectedWeeklyMinutes: expectedWeeklyMinutes(organization),
@@ -550,9 +553,56 @@ async function getSelfAttendance(req, res, next) {
   }
 }
 
+const SELF_NOTE_DAYS = 7
+const MAX_EXTRA_MINUTES = 12 * 60
+
+// PUT /attendance/self/note — the employee's own note on one of their days
+// (e.g. extra hours worked), with optional extraMinutes. Only on a day they
+// checked in, within the last SELF_NOTE_DAYS. Stored on the record itself,
+// separate from the HR/ADMIN/CEO day note, so neither overwrites the other.
+async function setSelfAttendanceNote(req, res, next) {
+  try {
+    const { userId } = req.user
+    const { date } = req.body || {}
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(String(date))) return res.status(400).json({ error: "date (YYYY-MM-DD) is required" })
+    const text = String(req.body?.note ?? "").trim()
+    if (text.length > NOTE_MAX_LENGTH) return res.status(400).json({ error: `Note must be ${NOTE_MAX_LENGTH} characters or fewer` })
+    let extraMinutes = null
+    if (req.body?.extraMinutes !== undefined && req.body.extraMinutes !== null && req.body.extraMinutes !== "") {
+      extraMinutes = Math.round(Number(req.body.extraMinutes))
+      if (!Number.isFinite(extraMinutes) || extraMinutes < 0 || extraMinutes > MAX_EXTRA_MINUTES) {
+        return res.status(400).json({ error: "Extra time must be between 0 and 12 hours" })
+      }
+      if (extraMinutes === 0) extraMinutes = null
+    }
+
+    // Home organization, same as the other self-service endpoints.
+    const employee = await prisma.user.findUnique({ where: { id: userId }, select: { organizationId: true } })
+    const organization = employee && await prisma.organization.findUnique({ where: { id: employee.organizationId }, select: { timezone: true } })
+    if (!organization) return res.status(404).json({ error: "Employee not found" })
+    const today = startOfDay(null, organization.timezone)
+    const day = toDateOnly(String(date))
+    if (day > today || day.getTime() < today.getTime() - SELF_NOTE_DAYS * 86400000) {
+      return res.status(400).json({ error: `You can add a note for today or the last ${SELF_NOTE_DAYS} days only` })
+    }
+
+    const record = await prisma.attendanceRecord.findUnique({ where: { employeeId_date: { employeeId: userId, date: day } } })
+    if (!record?.checkInAt) return res.status(400).json({ error: "You can only add a note on a day you checked in" })
+
+    const updated = await prisma.attendanceRecord.update({
+      where: { id: record.id },
+      data: { employeeNote: text || null, extraMinutes },
+    })
+    res.json(updated)
+  } catch (err) {
+    next(err)
+  }
+}
+
 module.exports = {
   getDailyAttendance,
   setAttendanceNote,
+  setSelfAttendanceNote,
   markAttendance,
   saveDayAttendance,
   exportAttendanceSheet,
@@ -776,6 +826,7 @@ async function syncOfflineAttendance(req, res, next) {
               await tx.$executeRaw`
                 UPDATE "AttendanceRecord"
                 SET "checkOutAt"=${recordedAt},
+                    "autoCheckedOut"=FALSE,
                     "offlineRecorded"=TRUE,
                     "localRecordedAt"=COALESCE("localRecordedAt", ${recordedAt}),
                     "syncedAt"=CURRENT_TIMESTAMP,

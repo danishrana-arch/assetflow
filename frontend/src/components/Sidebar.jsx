@@ -6,7 +6,6 @@ import {
   Boxes,
   ClipboardCheck,
   FolderKanban,
-  ListTodo,
   Award,
   MapPin,
   PackageSearch,
@@ -315,11 +314,7 @@ export default function Sidebar({ expanded, onMouseEnter, onMouseLeave }) {
             {isOwner && <RailItem to="/organization-comparison" label="Organization Comparison" icon={Landmark} isDark={isDark} expanded={expanded} />}
 
             {hasModuleAccess(user?.role, "projects") && (
-              <RailItem to="/projects" label="Projects" icon={FolderKanban} isDark={isDark} expanded={expanded} />
-            )}
-
-            {hasModuleAccess(user?.role, "tasks") && (
-              <RailItem to="/tasks" label="Tasks" icon={ListTodo} isDark={isDark} expanded={expanded} />
+              <RailItem to="/projects" label="Projects & Tasks" icon={FolderKanban} isDark={isDark} expanded={expanded} />
             )}
             {hasModuleAccess(user?.role, "performance") && (
               <RailItem to="/performance" label="Performance" icon={Award} isDark={isDark} expanded={expanded} />
@@ -430,7 +425,7 @@ export default function Sidebar({ expanded, onMouseEnter, onMouseLeave }) {
 
             <RailItem
               to="/projects"
-              label="My Projects"
+              label="My Projects & Tasks"
               icon={FolderKanban}
               isDark={isDark}
               expanded={expanded}
@@ -446,7 +441,6 @@ export default function Sidebar({ expanded, onMouseEnter, onMouseLeave }) {
 
             <RailItem to="/calendar" label="Company Calendar" icon={CalendarRange} isDark={isDark} expanded={expanded} />
 
-            <RailItem to="/tasks" label="My Tasks" icon={ListTodo} isDark={isDark} expanded={expanded} />
             <RailItem to="/performance" label="My Performance" icon={Award} isDark={isDark} expanded={expanded} />
             <RailItem to="/announcements" label="Announcements" icon={Megaphone} isDark={isDark} expanded={expanded} />
 

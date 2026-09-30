@@ -34,6 +34,65 @@ function fmtTime(dateStr, timezone) {
   return new Date(dateStr).toLocaleTimeString("en-US", { timeZone: timezone || undefined, hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: true })
 }
 
+const SELF_NOTE_DAYS = 7
+function fmtMinutes(m) {
+  const h = Math.floor(m / 60), min = m % 60
+  return h ? `${h}h${min ? ` ${String(min).padStart(2, "0")}m` : ""}` : `${min}m`
+}
+
+// Employee's own note on a day they checked in (e.g. extra hours worked),
+// editable for today and the last SELF_NOTE_DAYS days. HR sees it in the
+// Note column of the Attendance page (PUT /attendance/self/note).
+function SelfNote({ record, today }) {
+  const queryClient = useQueryClient()
+  const [open, setOpen] = useState(false)
+  const [note, setNote] = useState("")
+  const [hours, setHours] = useState("")
+  const [minutes, setMinutes] = useState("")
+  const dayKey = String(record.date).slice(0, 10)
+  const ageDays = Math.round((new Date(`${today}T00:00:00Z`) - new Date(`${dayKey}T00:00:00Z`)) / 86400000)
+  const editable = !!record.checkInAt && ageDays >= 0 && ageDays <= SELF_NOTE_DAYS
+  const save = useMutation({
+    mutationFn: () => api.put("/attendance/self/note", {
+      date: dayKey, note, extraMinutes: (Number(hours) || 0) * 60 + (Number(minutes) || 0),
+    }).then((r) => r.data),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["attendance-self"] }); setOpen(false) },
+  })
+  const start = () => {
+    const extra = record.extraMinutes || 0
+    setNote(record.employeeNote || ""); setHours(extra ? String(Math.floor(extra / 60)) : ""); setMinutes(extra ? String(extra % 60) : "")
+    save.reset(); setOpen(true)
+  }
+  const hasNote = record.employeeNote || record.extraMinutes
+  if (!open) {
+    if (!hasNote && !editable) return null
+    return (
+      <div className="mt-1 flex items-start justify-between gap-2 text-[11px]">
+        <span className="min-w-0 text-muted">
+          {record.extraMinutes > 0 && <span className="mr-1.5 rounded-full bg-chip-blue-bg px-2 py-0.5 font-semibold text-chip-blue-fg">+{fmtMinutes(record.extraMinutes)} extra</span>}
+          {record.employeeNote}
+        </span>
+        {editable && <button type="button" onClick={start} className="shrink-0 font-semibold text-accent hover:underline">{hasNote ? "Edit note" : "Add note / extra hours"}</button>}
+      </div>
+    )
+  }
+  return (
+    <form onSubmit={(e) => { e.preventDefault(); save.mutate() }} className="mt-2 space-y-2 rounded-2xl bg-surface-2 p-3">
+      <p className="text-[11px] font-semibold text-muted">Extra time worked (optional)</p>
+      <div className="flex items-center gap-2">
+        <input type="number" min="0" max="12" className="field w-20 py-1.5 text-xs" placeholder="0" value={hours} onChange={(e) => setHours(e.target.value)} aria-label="Extra hours" /><span className="text-xs text-muted">h</span>
+        <input type="number" min="0" max="59" step="5" className="field w-20 py-1.5 text-xs" placeholder="0" value={minutes} onChange={(e) => setMinutes(e.target.value)} aria-label="Extra minutes" /><span className="text-xs text-muted">m</span>
+      </div>
+      <textarea className="field w-full text-xs" rows="2" maxLength={500} placeholder="e.g. Stayed late to finish the client delivery" value={note} onChange={(e) => setNote(e.target.value)} />
+      {save.isError && <p className="text-[11px] text-danger">{save.error?.response?.data?.error || "Could not save note."}</p>}
+      <div className="flex justify-end gap-2">
+        <button type="button" onClick={() => setOpen(false)} className="rounded-xl px-3 py-1.5 text-xs text-muted hover:bg-surface-3">Cancel</button>
+        <button disabled={save.isPending} className="pill-accent px-3 py-1.5 text-xs disabled:opacity-50">{save.isPending ? "Saving…" : "Save"}</button>
+      </div>
+    </form>
+  )
+}
+
 export default function MyAttendance() {
   const queryClient = useQueryClient()
   const { user, organization } = useAuth()
@@ -86,6 +145,8 @@ export default function MyAttendance() {
   const siteBound = sites.length > 0
   const effectiveCheckInAt = attendance?.today?.checkInAt || offlineToday.checkInAt
   const effectiveCheckOutAt = attendance?.today?.checkOutAt || offlineToday.checkOutAt
+  // Today's date (YYYY-MM-DD) in the organization's timezone.
+  const historyToday = new Intl.DateTimeFormat("en-CA", { timeZone: attendance?.timezone || undefined, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date())
   const todayStatus = attendance?.today?.status || offlineToday.status
   const isOnLeaveToday = todayStatus === "LEAVE"
   // Once today's attendance is on record, the day's mode is whatever was
@@ -355,7 +416,10 @@ export default function MyAttendance() {
                 <p className="mb-1 text-sm text-muted">Check in: <strong>{fmtTime(effectiveCheckInAt, attendance?.timezone)}</strong>{!attendance?.today?.checkInAt && <span className="ml-2 text-[10px] text-chip-yellow-fg">offline</span>}</p>
               )}
               {effectiveCheckOutAt && (
-                <p className="mb-3 text-sm text-muted">Check out: <strong>{fmtTime(effectiveCheckOutAt, attendance?.timezone)}</strong>{!attendance?.today?.checkOutAt && <span className="ml-2 text-[10px] text-chip-yellow-fg">offline</span>}</p>
+                <p className="mb-3 text-sm text-muted">Check out: <strong>{fmtTime(effectiveCheckOutAt, attendance?.timezone)}</strong>{!attendance?.today?.checkOutAt && <span className="ml-2 text-[10px] text-chip-yellow-fg">offline</span>}{attendance?.today?.autoCheckedOut && <span className="ml-2 text-[10px] text-muted-2">recorded automatically at shift end</span>}</p>
+              )}
+              {attendance?.today?.checkInAt && (
+                <div className="mb-3"><SelfNote record={attendance.today} today={String(attendance.today.date).slice(0, 10)} /></div>
               )}
 
               {activeSite && effectiveLocationMode !== "WFH" && (
@@ -434,9 +498,12 @@ export default function MyAttendance() {
             <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Last 30 days</p>
             <ul className="max-h-64 space-y-1.5 overflow-y-auto">
               {(attendance?.history || []).map((r) => (
-                <li key={r.id} className="flex items-center justify-between text-sm">
-                  <span className="text-muted">{fmt(r.date)}</span>
-                  <StatusPill tone={ATTENDANCE_TONE[r.status] || "slate"}>{r.status}</StatusPill>
+                <li key={r.id} className="text-sm">
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted">{fmt(r.date)}{r.autoCheckedOut && <span className="ml-2 text-[10px] text-muted-2">auto check-out</span>}</span>
+                    <StatusPill tone={ATTENDANCE_TONE[r.status] || "slate"}>{r.status}</StatusPill>
+                  </div>
+                  {attendance?.today?.id !== r.id && <SelfNote record={r} today={historyToday} />}
                 </li>
               ))}
               {(attendance?.history || []).length === 0 && <li className="text-sm text-muted">No attendance recorded yet.</li>}

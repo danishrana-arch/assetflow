@@ -144,6 +144,10 @@ model User {
   name                                                         String
   email                                                        String                    @unique
   password                                                     String
+  // Nonce behind the personal .ics calendar feed URL (Google/Outlook
+  // subscribe); the URL carries an HMAC of it, never the nonce itself.
+  // Regenerated on "reset link"; null until first requested.
+  calendarFeedToken                                            String?                   @unique
   phone                                                        String?
   photoUrl                                                     String?
   role                                                         UserRole                  @default(EMPLOYEE)
@@ -506,6 +510,11 @@ model PerformanceReview {
   goals          String?
   achievements   String?
   feedback       String?
+  // Performance bonus, paid on the payslip of bonusPayrollMonth/Year
+  // (PayrollRecord.performanceBonus). 0 = no bonus.
+  bonusAmount       Decimal   @default(0) @db.Decimal(12, 2)
+  bonusPayrollMonth Int?
+  bonusPayrollYear  Int?
   status         String       @default("DRAFT")
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
@@ -657,7 +666,16 @@ model AttendanceRecord {
   // User.workLocationType classification). WFH skips the geofence check
   // entirely at mark time.
   locationMode            AttendanceLocationMode    @default(OFFICE)
-  AttendanceAnomaly       AttendanceAnomaly[]
+  // Shift-end checkout reminder already sent (attendance-checkout.service.js).
+  checkoutReminderSentAt  DateTime?
+  // Check-out filled in by the system at shift end because the employee
+  // never checked out that day.
+  autoCheckedOut          Boolean                   @default(false)
+  // The employee's own note on their day (e.g. extra hours worked), separate
+  // from the HR/ADMIN/CEO AttendanceNote. extraMinutes = extra time claimed.
+  employeeNote            String?
+  extraMinutes            Int?
+  AttendanceAnomaly      AttendanceAnomaly[]
   AttendanceCorrection    AttendanceCorrection[]
   AttendancePresenceEvent AttendancePresenceEvent[]
   employee                User                      @relation("AttendanceOf", fields: [employeeId], references: [id], onDelete: Cascade)
@@ -728,6 +746,8 @@ model PayrollRecord {
   otherDeduction        Decimal   @default(0) @db.Decimal(12, 2)
   // Sum of this employee's APPROVED expense claims assigned to this month.
   expenseReimbursement  Decimal   @default(0) @db.Decimal(12, 2)
+  // Sum of this employee's performance-review bonuses assigned to this month.
+  performanceBonus      Decimal   @default(0) @db.Decimal(12, 2)
   terminationDate       DateTime?
   terminationSettlement Decimal   @default(0) @db.Decimal(12, 2)
   terminationDeduction  Decimal   @default(0) @db.Decimal(12, 2)

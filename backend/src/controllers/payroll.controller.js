@@ -1,7 +1,7 @@
 const prisma = require("../lib/prisma")
 const { decryptField } = require("../utils/crypto")
 const { logAudit } = require("../utils/audit")
-const { toNumber, round2, computePayrollTotals, approvedExpenseTotal } = require("../utils/payroll")
+const { toNumber, round2, computePayrollTotals, approvedExpenseTotal, performanceBonusTotal } = require("../utils/payroll")
 const { streamPayslipPdf } = require("../utils/payslip-pdf")
 const { hasModuleAccess } = require("../utils/roles")
 
@@ -87,6 +87,7 @@ async function computeAttendanceLines({ employeeId, base, month, year, lateRate 
     absentDeduction: round2((absentDays + fullUnpaidDays) * perDayDeduction + halfUnpaidDays * (perDayDeduction / 2)),
     lateDeduction: round2(lateDays * lateRate),
     expenseReimbursement: await approvedExpenseTotal(prisma, employeeId, month, year),
+    performanceBonus: await performanceBonusTotal(prisma, employeeId, month, year),
   }
 }
 
@@ -233,6 +234,7 @@ async function getPayrollSummary(req, res, next) {
         month: true,
         baseSalary: true,
         bonus: true,
+        performanceBonus: true,
         deductions: true,
         netPay: true,
         status: true,
@@ -250,7 +252,7 @@ async function getPayrollSummary(req, res, next) {
     for (const r of records) {
       const bucket = byMonth[r.month - 1]
       bucket.baseSalary += toNumber(r.baseSalary)
-      bucket.bonus += toNumber(r.bonus)
+      bucket.bonus += toNumber(r.bonus) + toNumber(r.performanceBonus)
       bucket.deductions += toNumber(r.deductions)
       bucket.netPay += toNumber(r.netPay)
       bucket.count += 1
@@ -637,7 +639,30 @@ async function deleteAllForMonth(req, res, next) {
   }
 }
 
+// Used by the performance bonus: makes sure the employee has a payslip for
+// that month, creating a DRAFT one (same data as Generate) if there is none
+// yet, so the bonus appears on it right away. Returns
+// { record, created } — record is null when the employee has no base
+// salary (the bonus is then picked up whenever a payslip is generated).
+async function ensurePayslip({ organizationId, userId, employeeId, month, year }) {
+  const existing = await prisma.payrollRecord.findUnique({ where: { employeeId_month_year: { employeeId, month, year } } })
+  if (existing) return { record: existing, created: false }
+  const emp = await prisma.user.findFirst({ where: { id: employeeId, organizationId }, select: PAYSLIP_EMPLOYEE_SELECT })
+  if (!emp || emp.baseSalary === null) return { record: null, created: false }
+  const lateRate = await orgLateRate(organizationId)
+  try {
+    const record = await prisma.payrollRecord.create({ data: await buildPayslipData({ emp, month, year, organizationId, userId, lateRate }) })
+    logAudit({ organizationId, actorId: userId, action: "payroll.payslip_created", targetType: "PayrollRecord", targetId: record.id, note: `${emp.name} — ${month}/${year} (performance bonus)` })
+    return { record, created: true }
+  } catch (err) {
+    // Created concurrently (e.g. Generate ran at the same moment).
+    if (err.code === "P2002") return { record: await prisma.payrollRecord.findUnique({ where: { employeeId_month_year: { employeeId, month, year } } }), created: false }
+    throw err
+  }
+}
+
 module.exports = {
+  ensurePayslip,
   generatePayroll,
   listPayroll,
   getPayrollSummary,

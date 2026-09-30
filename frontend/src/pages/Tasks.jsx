@@ -13,7 +13,9 @@ const STATUSES = { TODO: "To do", IN_PROGRESS: "In progress", BLOCKED: "Blocked"
 const PRIORITIES = { LOW: "Low", MEDIUM: "Medium", HIGH: "High", URGENT: "Urgent" }
 const blank = { projectId: "", title: "", description: "", priority: "MEDIUM", assignedToId: "", dueDate: "", estimatedHours: "" }
 
-export default function Tasks() {
+// Rendered as the "Tasks" tab of the Projects page (`embedded`); /tasks
+// itself just redirects there.
+export default function Tasks({ embedded = false }) {
   useMarkNotificationsRead("TASK")
   const { user } = useAuth(); const management = hasModuleAccess(user?.role, "tasks"); const qc = useQueryClient()
   const [showForm, setShowForm] = useState(false); const [form, setForm] = useState(blank); const [search, setSearch] = useState("")
@@ -40,10 +42,13 @@ export default function Tasks() {
     })
   }
   const cancelEdit = () => { setEditingId(null); setEditForm(null); setEditError("") }
+  const addButton = management && <button onClick={() => setShowForm(v => !v)} className="pill-accent flex items-center gap-2 px-4 py-2.5 text-sm">{showForm ? <X size={15}/> : <Plus size={15}/>} {showForm ? "Cancel" : "Add task"}</button>
   return <div className="space-y-5">
-    <PageHeader title="Tasks" subtitle="Turn projects into clear, trackable work." actions={management && <button onClick={() => setShowForm(v => !v)} className="pill-accent flex items-center gap-2 px-4 py-2.5 text-sm">{showForm ? <X size={15}/> : <Plus size={15}/>} {showForm ? "Cancel" : "Add task"}</button>} />
+    {embedded
+      ? <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-sm font-semibold text-ink">{management ? "All tasks" : "My tasks"}</p><p className="mt-0.5 text-xs text-muted">Turn projects into clear, trackable work — or assign a task directly, without a project.</p></div>{addButton}</div>
+      : <PageHeader title="Tasks" subtitle="Turn projects into clear, trackable work." actions={addButton} />}
     {showForm && <form onSubmit={e => { e.preventDefault(); if (!form.title.trim()) { setFormError("Task title is required."); return } setFormError(""); create.mutate() }} className="card grid gap-4 p-5 sm:grid-cols-2">
-      <label className="sm:col-span-2"><span className="text-xs font-semibold text-muted">Project (optional)</span><select className="field mt-1 w-full" value={form.projectId} onChange={e => setForm({...form, projectId:e.target.value})}><option value="">No project — assign directly</option>{projects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select>{!projectsLoading && projects.length === 0 && <p className="mt-1 text-[11px] text-muted">No projects yet — you can still create tasks without one, or create a project first on the <Link to="/projects" className="underline">Projects page</Link>.</p>}</label>
+      <label className="sm:col-span-2"><span className="text-xs font-semibold text-muted">Project (optional)</span><select className="field mt-1 w-full" value={form.projectId} onChange={e => setForm({...form, projectId:e.target.value})}><option value="">No project — assign directly</option>{projects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select>{!projectsLoading && projects.length === 0 && <p className="mt-1 text-[11px] text-muted">No projects yet — you can still create tasks without one, or create a project first from the <Link to="/projects" className="underline">Projects tab</Link>.</p>}</label>
       <label className="sm:col-span-2"><span className="text-xs font-semibold text-muted">Task title</span><input className="field mt-1 w-full" value={form.title} onChange={e=>setForm({...form,title:e.target.value})} placeholder="Prepare API integration"/></label>
       <label className="sm:col-span-2"><span className="text-xs font-semibold text-muted">Description</span><textarea className="field mt-1 w-full" rows="3" value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></label>
       <label><span className="text-xs font-semibold text-muted">Assignee</span><select className="field mt-1 w-full" value={form.assignedToId} onChange={e=>setForm({...form,assignedToId:e.target.value})}><option value="">Unassigned</option>{employees.filter(e=>e.status!=="LEFT_COMPANY").map(e=><option key={e.id} value={e.id}>{e.name}</option>)}</select></label>

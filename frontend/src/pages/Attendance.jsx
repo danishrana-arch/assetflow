@@ -268,6 +268,25 @@ function StatusMenu({ row, canWrite, onMark }) {
 
 const NOTE_MAX = 500
 
+// The employee's own note / extra hours claimed (from My Attendance), and a
+// marker when the system checked them out at shift end. Read-only here.
+function EmployeeNoteLine({ row }) {
+  if (!row.employeeNote && !row.extraMinutes && !row.autoCheckedOut) return null
+  const extra = row.extraMinutes || 0
+  const extraLabel = extra ? `+${Math.floor(extra / 60) ? `${Math.floor(extra / 60)}h ` : ""}${extra % 60 ? `${extra % 60}m` : ""}`.trim() : null
+  return (
+    <div className="mb-1.5 space-y-1 text-xs">
+      {row.autoCheckedOut && <p className="text-[11px] text-muted-2">Auto check-out at shift end</p>}
+      {(extraLabel || row.employeeNote) && (
+        <p className="line-clamp-3 text-ink" title={row.employeeNote || ""}>
+          {extraLabel && <span className="mr-1.5 rounded-full bg-chip-blue-bg px-2 py-0.5 text-[10px] font-semibold text-chip-blue-fg">{extraLabel} extra</span>}
+          {row.employeeNote && <span><span className="text-muted">Employee:</span> {row.employeeNote}</span>}
+        </p>
+      )}
+    </div>
+  )
+}
+
 // Day note: read-only for everyone, editable by HR/ADMIN/CEO. Saved on its
 // own (PUT /attendance/notes) — independent of the status Save button.
 function NoteCell({ row, date, canEdit, onSaved }) {
@@ -822,8 +841,9 @@ export default function Attendance() {
               <ClockInOut row={row} date={data?.date || date} timeZone={timeZone} />
               <WorkingTimeProgress workingMinutes={row.workingMinutes} checkInAt={row.checkInAt} checkOutAt={row.checkOutAt} expectedMinutes={row.expectedWorkingMinutes} date={data?.date || date} className="!max-w-none" />
               <LocationFlag row={row} />
-              {(row.note || canNote) && (
+              {(row.note || canNote || row.employeeNote || row.extraMinutes) && (
                 <div className="border-t border-border pt-2">
+                  <EmployeeNoteLine row={row} />
                   <NoteCell row={row} date={date} canEdit={canNote} onSaved={onNoteSaved} />
                 </div>
               )}
@@ -870,6 +890,7 @@ export default function Attendance() {
                     </td>
                     <td className="px-4 py-3"><LocationFlag row={row} /></td>
                     <td className="w-[250px] px-4 py-3">
+                      <EmployeeNoteLine row={row} />
                       <NoteCell row={row} date={date} canEdit={canNote} onSaved={onNoteSaved} />
                     </td>
                     <td className="px-4 py-3">

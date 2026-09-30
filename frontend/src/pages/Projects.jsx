@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { createPortal } from "react-dom"
+import { useSearchParams } from "react-router-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   CalendarClock,
@@ -7,6 +8,7 @@ import {
   Clock3,
   ExternalLink,
   FolderKanban,
+  ListTodo,
   Plus,
   Search,
   Trash2,
@@ -19,6 +21,9 @@ import { hasModuleAccess } from "../utils/roles"
 import api from "../api/client"
 import PageHeader from "../components/ui/PageHeader"
 import Avatar from "../components/ui/Avatar"
+import Tasks from "./Tasks"
+
+const TASK_STATUS = { TODO: "To do", IN_PROGRESS: "In progress", BLOCKED: "Blocked", DONE: "Done" }
 
 const STATUS = {
   NOT_STARTED: { label: "Not Started", icon: Clock3, tone: "text-amber-600", bg: "bg-amber-500/10", border: "border-amber-500/20" },
@@ -138,6 +143,7 @@ function ProjectDetails({ project, onClose, onRefresh, onDeleted, canEdit = true
   const [selectedNewEmployees, setSelectedNewEmployees] = useState([])
   const [confirmDelete, setConfirmDelete] = useState(false)
   const categoriesQuery = useQuery({ queryKey: ["project-work-categories"], queryFn: () => api.get("/projects/work-categories").then(r => r.data) })
+  const tasksQuery = useQuery({ queryKey: ["tasks", "project", project.id], queryFn: () => api.get("/tasks", { params: { projectId: project.id } }).then(r => r.data) })
 
   const assignedEmployeeIds = useMemo(() => new Set((project.members || []).map(m => m.employee.id)), [project.members])
   const employeesQuery = useQuery({
@@ -270,6 +276,24 @@ function ProjectDetails({ project, onClose, onRefresh, onDeleted, canEdit = true
                 </div>
               ))}
               {project.members?.length === 0 && <div className="p-6 text-sm text-muted">No employees assigned yet.</div>}
+            </div>
+          </div>
+        </div>
+
+        <div className="px-6 pb-7">
+          <div className="card overflow-hidden">
+            <div className="flex items-center justify-between border-b border-border p-5">
+              <div><p className="text-sm font-semibold text-ink">Tasks in this project</p><p className="mt-1 text-xs text-muted">{tasksQuery.data?.length || 0} task{tasksQuery.data?.length === 1 ? "" : "s"} · add or edit them from the Tasks tab</p></div>
+              <ListTodo size={18} className="text-muted" />
+            </div>
+            <div className="divide-y divide-border">
+              {tasksQuery.isLoading ? <div className="p-5 text-center text-xs text-muted">Loading tasks…</div> : (tasksQuery.data || []).map(task => (
+                <div key={task.id} className="flex items-center gap-3 p-4">
+                  <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-ink">{task.title}</p><p className="truncate text-[11px] text-muted">{task.assignedTo?.name || "Unassigned"}{task.dueDate ? ` · Due ${formatDate(task.dueDate)}` : ""}</p></div>
+                  <span className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-semibold ${task.status === "DONE" ? "bg-emerald-500/10 text-emerald-700" : task.status === "BLOCKED" ? "bg-red-500/10 text-red-700" : task.status === "IN_PROGRESS" ? "bg-blue-500/10 text-blue-700" : "bg-surface-2 text-muted"}`}>{TASK_STATUS[task.status] || task.status}</span>
+                </div>
+              ))}
+              {!tasksQuery.isLoading && !tasksQuery.data?.length && <div className="p-6 text-sm text-muted">No tasks in this project yet.</div>}
             </div>
           </div>
         </div>
@@ -420,6 +444,10 @@ export default function Projects() {
   const [createOpen, setCreateOpen] = useState(false)
   const [workFieldsOpen, setWorkFieldsOpen] = useState(false)
   const isManagement = hasModuleAccess(user?.role, "projects")
+  // Tasks live here as a second tab (?tab=tasks) instead of their own page.
+  const [params, setParams] = useSearchParams()
+  const tab = params.get("tab") === "tasks" ? "tasks" : "projects"
+  const setTab = next => setParams(prev => { const p = new URLSearchParams(prev); if (next === "tasks") p.set("tab", "tasks"); else p.delete("tab"); return p }, { replace: true })
 
   const { data: projects = [], isLoading } = useQuery({
     queryKey: ["projects", activeStatus, search],
@@ -464,13 +492,21 @@ export default function Projects() {
 
   return (
     <div>
-      <PageHeader title="Projects" subtitle="Track company projects, deadlines, teams, technology, and time spent." backTo="/" actions={isManagement ? <div className="flex gap-2"><button onClick={() => setWorkFieldsOpen(true)} className="rounded-2xl bg-surface-2 px-4 py-2.5 text-xs font-semibold text-ink">Work fields</button><button onClick={() => setCreateOpen(true)} className="pill-accent inline-flex items-center gap-2 px-4 py-2.5 text-xs"><Plus size={15} /> New Project</button></div> : null} />
+      <PageHeader title="Projects" subtitle="Track company projects, tasks, deadlines, teams, technology, and time spent." backTo="/" actions={isManagement && tab === "projects" ? <div className="flex gap-2"><button onClick={() => setWorkFieldsOpen(true)} className="rounded-2xl bg-surface-2 px-4 py-2.5 text-xs font-semibold text-ink">Work fields</button><button onClick={() => setCreateOpen(true)} className="pill-accent inline-flex items-center gap-2 px-4 py-2.5 text-xs"><Plus size={15} /> New Project</button></div> : null} />
 
+      <div role="tablist" className="mb-5 inline-flex rounded-2xl bg-surface-2 p-1">
+        {[["projects", "Projects", FolderKanban], ["tasks", "Tasks", ListTodo]].map(([key, label, Icon]) => (
+          <button key={key} role="tab" aria-selected={tab === key} onClick={() => setTab(key)} className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-semibold transition-colors ${tab === key ? "bg-surface text-ink shadow-sm" : "text-muted hover:text-ink"}`}><Icon size={14} />{label}</button>
+        ))}
+      </div>
+
+      {tab === "tasks" ? <Tasks embedded /> : <>
       {isManagement && <div className="grid gap-4 md:grid-cols-3">{["NOT_STARTED", "IN_PROGRESS", "COMPLETED"].map(status => <StatusCard key={status} status={status} count={countsQuery.data?.[status] ?? 0} active={activeStatus === status} onClick={() => setActiveStatus(activeStatus === status ? null : status)} />)}</div>}
 
       <div className="mt-5 card p-4"><div className="flex flex-col gap-3 lg:flex-row lg:items-center"><div className="relative flex-1"><Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" /><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search projects or clients…" className="field w-full pl-9" /></div><select value={deadlineFilter} onChange={e => setDeadlineFilter(e.target.value)} className="field lg:w-48"><option value="ALL">All deadlines</option><option value="UPCOMING">Due in 7 days</option><option value="OVERDUE">Overdue</option></select>{activeStatus && <button onClick={() => setActiveStatus(null)} className="rounded-xl bg-surface-2 px-4 py-2.5 text-xs font-semibold text-muted hover:text-ink">Clear status</button>}</div></div>
 
       <div className="mt-5"><div className="mb-3 flex items-center justify-between"><p className="text-sm font-semibold text-ink">{activeStatus ? STATUS[activeStatus].label : "All Projects"}</p><p className="text-xs text-muted">{visibleProjects.length} project{visibleProjects.length === 1 ? "" : "s"}</p></div>{isLoading ? <div className="card p-10 text-center text-sm text-muted">Loading projects…</div> : visibleProjects.length ? <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{visibleProjects.map(project => <ProjectCard key={project.id} project={project} onOpen={setSelected} />)}</div> : <div className="card p-12 text-center"><Users size={24} className="mx-auto text-muted" /><p className="mt-3 text-sm font-semibold text-ink">No projects found</p><p className="mt-1 text-xs text-muted">Try changing the status, deadline, or search filters.</p></div>}</div>
+      </>}
 
       {createOpen && isManagement && <CreateProjectModal onClose={() => setCreateOpen(false)} onCreated={async project => { setCreateOpen(false); await refresh(); setSelected(project) }} />}
       {selected && <ProjectDetails project={selected} onClose={() => setSelected(null)} onRefresh={() => refresh(selected.id)} onDeleted={async () => { setSelected(null); await refresh() }} canEdit={isManagement} />}

@@ -108,6 +108,7 @@ function streamPayslipPdf(res, { record, employee, organization, bankAccount }) 
   const earnings = [
     ["Basic pay", record.baseSalary],
     ["Bonus", record.bonus],
+    ...(Number(record.performanceBonus) > 0 ? [["Performance bonus", record.performanceBonus]] : []),
     ["Office expenses (reimbursed)", record.expenseReimbursement],
     ...(Number(record.terminationSettlement) > 0 ? [["Termination settlement", record.terminationSettlement]] : []),
   ]

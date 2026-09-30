@@ -4,6 +4,7 @@ const { MANAGEMENT_ROLES, ASSIGNABLE_ROLES, MAX_CEO_COUNT, EMPLOYEE_DIRECTORY_RO
 const { encryptField, decryptField } = require("../utils/crypto")
 const { logAudit } = require("../utils/audit")
 const { parseCsv } = require("../utils/csv")
+const { dateKeyInTimeZone } = require("../utils/timezone")
 
 function stripSensitive(user, canSeeSensitive) {
   const { password, cnic, bankAccountNumber, phone, address, personalEmail, fatherName, ...rest } = user
@@ -236,6 +237,89 @@ async function getEmployee(req, res, next) {
     if (!(hasModuleAccess(role, "certifications") || userId === id)) delete safe.certifications
 
     res.json(safe)
+  } catch (err) {
+    next(err)
+  }
+}
+
+// GET /employees/:id/activity?month=YYYY-MM — one calendar month of an
+// employee's attendance, approved leave, asset activity (events they acted
+// on) and raised tickets, for the profile's month browser. Read-only; the
+// same visibility rules as getEmployee: self or a directory role, org- and
+// DEPARTMENT_HEAD-scoped, and IT_MANAGER never gets attendance or leave.
+async function getEmployeeMonthActivity(req, res, next) {
+  try {
+    const { organizationId, userId, role, departmentId: requesterDepartmentId } = req.user
+    const { id } = req.params
+
+    if (!EMPLOYEE_DIRECTORY_ROLES.includes(role) && userId !== id) {
+      return res.status(403).json({ error: "You can only view your own profile" })
+    }
+    const match = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(String(req.query.month || ""))
+    if (!match) return res.status(400).json({ error: "month must be YYYY-MM" })
+    const monthKey = `${match[1]}-${match[2]}`
+
+    const employee = await prisma.user.findFirst({
+      where: {
+        id,
+        organizationId,
+        ...(role === "DEPARTMENT_HEAD" && id !== userId
+          ? { departmentId: requesterDepartmentId || "__none__" }
+          : {}),
+      },
+      select: { id: true, organization: { select: { timezone: true } } },
+    })
+    if (!employee) return res.status(404).json({ error: "Employee not found" })
+
+    const timeZone = employee.organization?.timezone || "UTC"
+    const year = Number(match[1])
+    const month = Number(match[2])
+    // Attendance/leave dates are date-only (UTC midnight of the local day),
+    // so plain UTC month bounds are exact for them.
+    const start = new Date(Date.UTC(year, month - 1, 1))
+    const end = new Date(Date.UTC(year, month, 1))
+    // Timestamps are fetched with a one-day margin either side, then kept
+    // only if they fall in this month in the org's timezone.
+    const paddedStart = new Date(start.getTime() - 86400000)
+    const paddedEnd = new Date(end.getTime() + 86400000)
+    const inMonth = (date) => dateKeyInTimeZone(date, timeZone).slice(0, 7) === monthKey
+
+    const isIT = role === "IT_MANAGER"
+    const [attendanceRecords, leaves, lifecycleEvents, tickets] = await Promise.all([
+      isIT
+        ? []
+        : prisma.attendanceRecord.findMany({
+            where: { employeeId: id, date: { gte: start, lt: end } },
+            orderBy: { date: "asc" },
+            select: { id: true, date: true, status: true, checkInAt: true, checkOutAt: true, workingMinutes: true, locationMode: true, autoFlagged: true },
+          }),
+      isIT
+        ? []
+        : prisma.leaveApplication.findMany({
+            where: { employeeId: id, status: "APPROVED", startDate: { lt: end }, endDate: { gte: start } },
+            orderBy: { startDate: "asc" },
+            select: { id: true, startDate: true, endDate: true, type: true, isHalfDay: true },
+          }),
+      prisma.lifecycleEvent.findMany({
+        where: { actorId: id, occurredAt: { gte: paddedStart, lt: paddedEnd } },
+        orderBy: { occurredAt: "desc" },
+        select: { id: true, type: true, occurredAt: true, asset: { select: { id: true, name: true } } },
+      }),
+      prisma.ticket.findMany({
+        where: { raisedById: id, createdAt: { gte: paddedStart, lt: paddedEnd } },
+        orderBy: { createdAt: "desc" },
+        select: { id: true, subject: true, status: true, priority: true, createdAt: true },
+      }),
+    ])
+
+    res.json({
+      month: monthKey,
+      timezone: timeZone,
+      attendanceRecords,
+      leaves,
+      lifecycleEvents: lifecycleEvents.filter((e) => inMonth(e.occurredAt)),
+      tickets: tickets.filter((t) => inMonth(t.createdAt)),
+    })
   } catch (err) {
     next(err)
   }
@@ -669,6 +753,7 @@ async function importTemplate(req, res, next) {
 module.exports = {
   listEmployees,
   getEmployee,
+  getEmployeeMonthActivity,
   updateEmployee,
   deleteEmployee,
   importEmployees,

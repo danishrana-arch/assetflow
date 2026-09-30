@@ -374,12 +374,86 @@ function calendarDate(year, month, day) {
   return new Date(Date.UTC(year, month, day))
 }
 
+// Every calendar event (birthdays, holidays, project deadlines, approved
+// leave, company events) between two UTC-midnight dates, inclusive, as seen
+// by this user. Shared by the Company Calendar page and the .ics feed
+// (calendar-feed.controller.js), so both always show the same events.
+async function collectCalendarEvents({ organizationId, userId, role, start, end }) {
+  // Other people's leave (who is off, and why) is only for ADMIN/CEO/HR;
+  // every other role sees just their own leave on the calendar.
+  const canSeeAllLeave = ["ADMIN", "CEO", "HR"].includes(role)
+  const [employees, holidays, projects, leaves, companyEvents] = await Promise.all([
+    prisma.user.findMany({
+      where: { organizationId, status: { not: "LEFT_COMPANY" }, dob: { not: null } },
+      select: { id: true, name: true, dob: true },
+    }),
+    prisma.holiday.findMany({
+      where: { organizationId, date: { gte: start, lte: end } },
+      orderBy: { date: "asc" },
+    }),
+    prisma.project.findMany({
+      where: { organizationId, deadline: { gte: start, lte: end } },
+      select: { id: true, name: true, deadline: true, status: true },
+      orderBy: { deadline: "asc" },
+    }),
+    prisma.leaveApplication.findMany({
+      where: { organizationId, status: "APPROVED", startDate: { lte: end }, endDate: { gte: start }, ...(canSeeAllLeave ? {} : { employeeId: userId }) },
+      select: { id: true, employeeId: true, startDate: true, endDate: true, type: true, reason: true, employee: { select: { name: true } } },
+      orderBy: { startDate: "asc" },
+    }),
+    // Annual events repeat every year, whatever year they were created in.
+    prisma.companyEvent.findMany({
+      where: { organizationId, OR: [{ isAnnual: true }, { date: { gte: start, lte: end } }] },
+      orderBy: { date: "asc" },
+    }),
+  ])
+
+  const events = []
+  const push = (event) => {
+    const d = new Date(event.date)
+    if (d < start || d > new Date(end.getTime() + 86400000 - 1)) return
+    events.push({ ...event, date: d.toISOString().slice(0, 10) })
+  }
+  const years = []
+  for (let y = start.getUTCFullYear(); y <= end.getUTCFullYear(); y += 1) years.push(y)
+
+  for (const e of employees) {
+    const dob = new Date(e.dob)
+    for (const year of years) {
+      const birthday = calendarDate(year, dob.getUTCMonth(), dob.getUTCDate())
+      push({ id: `birthday-${e.id}-${year}`, type: "BIRTHDAY", title: `${e.name}'s birthday`, description: `Birthday of ${e.name}`, date: birthday, employeeId: e.id, employeeName: e.name })
+    }
+  }
+  for (const h of holidays) push({ id: h.id, type: "NATIONAL_HOLIDAY", title: h.name, description: "National/company holiday", date: h.date })
+  for (const p of projects) push({ id: `deadline-${p.id}`, type: "PROJECT_DEADLINE", title: `${p.name} deadline`, description: `Project deadline · ${p.status.replaceAll("_", " ")}`, date: p.deadline, projectId: p.id })
+  for (const l of leaves) {
+    const cursor = new Date(l.startDate)
+    const last = new Date(l.endDate)
+    while (cursor <= last) {
+      const day = new Date(cursor)
+      if (day >= start && day <= end) push({ id: `leave-${l.id}-${day.toISOString().slice(0, 10)}`, type: "EMPLOYEE_LEAVE", title: `${l.employee.name} is on leave`, description: `${l.type} leave${l.reason ? ` · ${l.reason}` : ""}`, date: day, employeeId: l.employeeId, employeeName: l.employee.name })
+      cursor.setUTCDate(cursor.getUTCDate() + 1)
+    }
+  }
+  for (const e of companyEvents) {
+    const original = new Date(e.date)
+    if (!e.isAnnual) {
+      push({ id: e.id, type: e.type || "ANNUAL_EVENT", title: e.title, description: e.description, date: original, isAnnual: false })
+      continue
+    }
+    for (const year of years) {
+      if (year < original.getUTCFullYear()) continue
+      push({ id: `${e.id}-${year}`, eventId: e.id, type: e.type || "ANNUAL_EVENT", title: e.title, description: e.description, date: calendarDate(year, original.getUTCMonth(), original.getUTCDate()), isAnnual: true })
+    }
+  }
+
+  events.sort((a, b) => a.date.localeCompare(b.date) || a.title.localeCompare(b.title))
+  return events
+}
+
 async function getCalendarEvents(req, res, next) {
   try {
     const { organizationId, userId, role } = req.user
-    // Other people's leave (who is off, and why) is only for ADMIN/CEO/HR;
-    // every other role sees just their own leave on the calendar.
-    const canSeeAllLeave = ["ADMIN", "CEO", "HR"].includes(role)
     const range = req.query.range === "month" ? "month" : "week"
     const now = new Date()
     const requestedYear = Number(req.query.year)
@@ -401,63 +475,7 @@ async function getCalendarEvents(req, res, next) {
       end = calendarDate(year, month + 1, 0)
     }
 
-    const [employees, holidays, projects, leaves, companyEvents] = await Promise.all([
-      prisma.user.findMany({
-        where: { organizationId, status: { not: "LEFT_COMPANY" }, dob: { not: null } },
-        select: { id: true, name: true, dob: true },
-      }),
-      prisma.holiday.findMany({
-        where: { organizationId, date: { gte: start, lte: end } },
-        orderBy: { date: "asc" },
-      }),
-      prisma.project.findMany({
-        where: { organizationId, deadline: { gte: start, lte: end } },
-        select: { id: true, name: true, deadline: true, status: true },
-        orderBy: { deadline: "asc" },
-      }),
-      prisma.leaveApplication.findMany({
-        where: { organizationId, status: "APPROVED", startDate: { lte: end }, endDate: { gte: start }, ...(canSeeAllLeave ? {} : { employeeId: userId }) },
-        select: { id: true, employeeId: true, startDate: true, endDate: true, type: true, reason: true, employee: { select: { name: true } } },
-        orderBy: { startDate: "asc" },
-      }),
-      prisma.companyEvent.findMany({
-        where: { organizationId, date: { gte: calendarDate(year, 0, 1), lte: calendarDate(year, 11, 31) } },
-        orderBy: { date: "asc" },
-      }),
-    ])
-
-    const events = []
-    const push = (event) => {
-      const d = new Date(event.date)
-      if (d < start || d > new Date(end.getTime() + 86400000 - 1)) return
-      events.push({ ...event, date: d.toISOString().slice(0, 10) })
-    }
-
-    for (const e of employees) {
-      const dob = new Date(e.dob)
-      const birthday = calendarDate(year, dob.getUTCMonth(), dob.getUTCDate())
-      if (birthday >= start && birthday <= end) {
-        push({ id: `birthday-${e.id}-${year}`, type: "BIRTHDAY", title: `${e.name}'s birthday`, description: `Birthday of ${e.name}`, date: birthday, employeeId: e.id, employeeName: e.name })
-      }
-    }
-    for (const h of holidays) push({ id: h.id, type: "NATIONAL_HOLIDAY", title: h.name, description: "National/company holiday", date: h.date })
-    for (const p of projects) push({ id: `deadline-${p.id}`, type: "PROJECT_DEADLINE", title: `${p.name} deadline`, description: `Project deadline · ${p.status.replaceAll("_", " ")}`, date: p.deadline, projectId: p.id })
-    for (const l of leaves) {
-      const cursor = new Date(l.startDate)
-      const last = new Date(l.endDate)
-      while (cursor <= last) {
-        const day = new Date(cursor)
-        if (day >= start && day <= end) push({ id: `leave-${l.id}-${day.toISOString().slice(0, 10)}`, type: "EMPLOYEE_LEAVE", title: `${l.employee.name} is on leave`, description: `${l.type} leave${l.reason ? ` · ${l.reason}` : ""}`, date: day, employeeId: l.employeeId, employeeName: l.employee.name })
-        cursor.setUTCDate(cursor.getUTCDate() + 1)
-      }
-    }
-    for (const e of companyEvents) {
-      let date = new Date(e.date)
-      if (e.isAnnual) date = calendarDate(year, date.getUTCMonth(), date.getUTCDate())
-      push({ id: e.id, type: e.type || "ANNUAL_EVENT", title: e.title, description: e.description, date, isAnnual: e.isAnnual })
-    }
-
-    events.sort((a, b) => a.date.localeCompare(b.date) || a.title.localeCompare(b.title))
+    const events = await collectCalendarEvents({ organizationId, userId, role, start, end })
     const monthStart = calendarDate(year, month, 1)
     const monthEnd = calendarDate(year, month + 1, 0)
     const calendar = events.filter((e) => e.date >= monthStart.toISOString().slice(0, 10) && e.date <= monthEnd.toISOString().slice(0, 10))
@@ -482,3 +500,4 @@ async function createCalendarEvent(req, res, next) {
 
 module.exports.getCalendarEvents = getCalendarEvents
 module.exports.createCalendarEvent = createCalendarEvent
+module.exports.collectCalendarEvents = collectCalendarEvents

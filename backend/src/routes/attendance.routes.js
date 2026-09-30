@@ -12,22 +12,29 @@ const {
   createAttendanceCorrection,
   listAttendanceCorrections,
   setAttendanceNote,
+  setSelfAttendanceNote,
 } = require("../controllers/attendance.controller")
 const { requireAuth, requireRole } = require("../middleware/auth.middleware")
 const { requireAttendancePermission } = require("../utils/permissions")
 const { startAttendanceAutoAbsentJob } = require("../services/attendance-auto-absent.service")
+const { startAttendanceCheckoutJob } = require("../services/attendance-checkout.service")
 
 const router = express.Router()
 
 router.use(requireAuth)
 
-startAttendanceAutoAbsentJob()
+// Set DISABLE_BACKGROUND_JOBS=true to run an API instance without them (tests).
+if (process.env.DISABLE_BACKGROUND_JOBS !== "true") {
+  startAttendanceAutoAbsentJob()
+  startAttendanceCheckoutJob()
+}
 
 // Self-service — any authenticated employee, own record only.
 router.get("/self", getSelfAttendance)
 router.post("/self/mark", markSelfAttendance)
 router.post("/self/offline-sync", syncOfflineAttendance)
 router.post("/self/corrections", createAttendanceCorrection)
+router.put("/self/note", setSelfAttendanceNote)
 
 // Full attendance grid — gated by the per-role Attendance permission matrix
 // (Settings), not a fixed role list. ADMIN/CEO are always full access;

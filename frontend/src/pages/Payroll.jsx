@@ -122,7 +122,7 @@ function PayslipEditor({ record, state, setState, onSave, onCancel, saving, erro
         <TextField label="Other deductions (−)" type="number" min="0" step="any" placeholder="0" value={state.otherDeduction} onChange={set("otherDeduction")} />
       </div>
       <p className="text-xs text-muted-2">
-        Calculated automatically: absent {money(record.absentDeduction)}, late {money(record.lateDeduction)}, office expenses {money(record.expenseReimbursement)}.
+        Calculated automatically: absent {money(record.absentDeduction)}, late {money(record.lateDeduction)}, office expenses {money(record.expenseReimbursement)}, performance bonus {money(record.performanceBonus)}.
       </p>
       <TextField label="Note on payslip (optional)" maxLength={1000} value={state.note} onChange={set("note")} />
 
@@ -613,6 +613,7 @@ export default function Payroll() {
               <div><p className="text-muted-2">Base</p><p className="font-mono text-ink">{money(r.baseSalary)}</p></div>
               <div><p className="text-muted-2">Tax{Number(r.taxPercent) > 0 ? ` (${Number(r.taxPercent)}%)` : ""}</p><Amount value={r.tax} tone="deduct" /></div>
               <div><p className="text-muted-2">Bonus</p><Amount value={r.bonus} tone="add" /></div>
+              {Number(r.performanceBonus) > 0 && <div><p className="text-muted-2">Performance bonus</p><Amount value={r.performanceBonus} tone="add" /></div>}
               <div><p className="text-muted-2">Office expenses</p><Amount value={r.expenseReimbursement} tone="add" /></div>
               <div><p className="text-muted-2">Absent{absenceSummary(r) ? ` (${absenceSummary(r)})` : ""}</p><Amount value={r.absentDeduction} tone="deduct" /></div>
               <div><p className="text-muted-2">Late{r.lateDays ? ` (${r.lateDays})` : ""}</p><Amount value={r.lateDeduction} tone="deduct" /></div>
@@ -683,6 +684,9 @@ export default function Payroll() {
                     </td>
                     <td className="px-4 py-3">
                       <Amount value={r.bonus} tone="add" />
+                      {Number(r.performanceBonus) > 0 && (
+                        <div className="text-[11px] text-muted">performance <Amount value={r.performanceBonus} tone="add" /></div>
+                      )}
                       {Number(r.terminationSettlement) > 0 && (
                         <div className="text-[11px] text-muted">settlement <Amount value={r.terminationSettlement} tone="add" /></div>
                       )}

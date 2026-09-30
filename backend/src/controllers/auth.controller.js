@@ -344,7 +344,7 @@ async function me(req, res, next) {
       : [organizationSummary(user.organization)]
 
     const activeOrganization = organizations.find((org) => org.id === req.user.organizationId) || organizationSummary(user.organization)
-    const { password, organization, ...safeUser } = user
+    const { password, organization, calendarFeedToken, ...safeUser } = user
     res.json({
       ...safeUser,
       organization: activeOrganization,

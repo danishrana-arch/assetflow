@@ -20,8 +20,34 @@ function computePayrollTotals(r) {
       toNumber(r.terminationDeduction)
   )
   const additions =
-    toNumber(r.baseSalary) + toNumber(r.bonus) + toNumber(r.expenseReimbursement) + toNumber(r.terminationSettlement)
+    toNumber(r.baseSalary) +
+    toNumber(r.bonus) +
+    toNumber(r.performanceBonus) +
+    toNumber(r.expenseReimbursement) +
+    toNumber(r.terminationSettlement)
   return { deductions, netPay: Math.max(0, round2(additions - deductions)) }
+}
+
+// Sum of an employee's performance-review bonuses assigned to a payroll month.
+async function performanceBonusTotal(db, employeeId, month, year) {
+  const agg = await db.performanceReview.aggregate({
+    where: { employeeId, bonusPayrollMonth: month, bonusPayrollYear: year },
+    _sum: { bonusAmount: true },
+  })
+  return round2(toNumber(agg._sum.bonusAmount))
+}
+
+// Same as syncExpenseReimbursement, for performance bonuses.
+async function syncPerformanceBonus(db, employeeId, month, year) {
+  const record = await db.payrollRecord.findUnique({
+    where: { employeeId_month_year: { employeeId, month, year } },
+  })
+  if (!record || record.status !== "DRAFT") return null
+  const performanceBonus = await performanceBonusTotal(db, employeeId, month, year)
+  return db.payrollRecord.update({
+    where: { id: record.id },
+    data: { performanceBonus, ...computePayrollTotals({ ...record, performanceBonus }) },
+  })
 }
 
 // Sum of an employee's approved expense claims assigned to a payroll month.
@@ -73,4 +99,6 @@ module.exports = {
   approvedExpenseTotal,
   syncExpenseReimbursement,
   pickPayrollMonthForClaim,
+  performanceBonusTotal,
+  syncPerformanceBonus,
 }

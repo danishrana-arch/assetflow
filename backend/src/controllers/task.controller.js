@@ -113,7 +113,7 @@ async function createTask(req, res, next) {
       status, priority, assignedToId: assignee?.id || null, createdById: userId, dueDate: due,
       estimatedHours: Math.max(0, number(estimatedHours)),
     }, include: { project: { select: { id: true, name: true } }, assignedTo: { select: { id: true, name: true } } } })
-    if (assignee && assignee.id !== userId) await createNotification({ organizationId, recipientId: assignee.id, createdById: userId, type: "TASK", title: "New task assigned", message: project ? `${project.name}: ${task.title}` : task.title, link: "/tasks" })
+    if (assignee && assignee.id !== userId) await createNotification({ organizationId, recipientId: assignee.id, createdById: userId, type: "TASK", title: "New task assigned", message: project ? `${project.name}: ${task.title}` : task.title, link: "/projects?tab=tasks" })
     res.status(201).json(task)
   } catch (err) { next(err) }
 }
@@ -157,7 +157,7 @@ async function updateTask(req, res, next) {
     const task = await prisma.task.update({ where: { id: existing.id }, data, include: { project: { select: { id: true, name: true } }, assignedTo: { select: { id: true, name: true } } } })
     if (existing.assignedToId && task.status !== existing.status && existing.assignedToId !== userId) {
       const label = task.project ? `${task.project.name}: ${task.title}` : task.title
-      await createNotification({ organizationId, recipientId: existing.assignedToId, createdById: userId, type: "TASK", title: "Task updated", message: `${label} is now ${task.status.replaceAll("_", " ")}`, link: "/tasks" })
+      await createNotification({ organizationId, recipientId: existing.assignedToId, createdById: userId, type: "TASK", title: "Task updated", message: `${label} is now ${task.status.replaceAll("_", " ")}`, link: "/projects?tab=tasks" })
     }
     res.json(task)
   } catch (err) { next(err) }

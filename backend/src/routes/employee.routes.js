@@ -3,6 +3,7 @@ const multer = require("multer")
 const {
   listEmployees,
   getEmployee,
+  getEmployeeMonthActivity,
   updateEmployee,
   deleteEmployee,
   importEmployees,
@@ -34,6 +35,9 @@ router.post("/import", requireModule("employees"), upload.single("file"), import
 // redacted asset-assignment picker — see EMPLOYEE_DIRECTORY_ROLES.
 router.get("/", requireRole(...EMPLOYEE_DIRECTORY_ROLES), listEmployees)
 router.get("/:id", noStore, getEmployee)
+// One month of attendance/leave/activity for the profile's month browser —
+// same visibility rules as GET /:id (checked in the controller).
+router.get("/:id/activity", noStore, getEmployeeMonthActivity)
 // A role with the "employees" module can edit anyone; anyone else can only
 // edit their own phone/email (enforced field-by-field in the controller).
 router.patch("/:id", requireModuleOrSelf("employees"), updateEmployee)

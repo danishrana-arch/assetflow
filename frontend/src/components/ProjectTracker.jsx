@@ -1,28 +1,23 @@
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "react-router-dom"
-import { FolderKanban } from "lucide-react"
 import api from "../api/client"
-import IconChip from "./ui/IconChip"
+import StatusPill from "./ui/StatusPill"
 import SectionHeader from "./ui/SectionHeader"
 
+// Same look as the Projects card on the Employee Profile page: a big total
+// with a dotted status breakdown, then up to four projects with their
+// deadline and a status pill.
 const STATUS = {
-  IN_PROGRESS: { label: "In progress", pill: "bg-chip-blue-bg text-chip-blue-fg", tone: "blue" },
-  NOT_STARTED: { label: "Not started", pill: "bg-chip-slate-bg text-chip-slate-fg", tone: "slate" },
-  COMPLETED: { label: "Completed", pill: "bg-chip-green-bg text-chip-green-fg", tone: "green" },
+  NOT_STARTED: { label: "Not started", tone: "slate", dot: "bg-gray-400" },
+  IN_PROGRESS: { label: "In progress", tone: "blue", dot: "bg-sky-500" },
+  COMPLETED: { label: "Completed", tone: "green", dot: "bg-emerald-500" },
 }
 // Active work first, then upcoming, then done.
 const ORDER = { IN_PROGRESS: 0, NOT_STARTED: 1, COMPLETED: 2 }
 const LIST_LIMIT = 4
 
-const dayFmt = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", month: "short", day: "numeric" })
-
-// Deadlines are date-only (@db.Date → midnight UTC), so compare as UTC days.
-function deadlineLabel(project) {
-  if (!project.deadline) return null
-  const due = new Date(project.deadline)
-  const todayKey = new Date().toISOString().slice(0, 10)
-  const overdue = project.status !== "COMPLETED" && project.deadline.slice(0, 10) < todayKey
-  return { text: overdue ? `Overdue · ${dayFmt.format(due)}` : `Due ${dayFmt.format(due)}`, overdue }
+function fmtDate(value) {
+  return new Date(value).toLocaleDateString(undefined, { timeZone: "UTC", month: "short", day: "numeric", year: "numeric" })
 }
 
 // Reuses GET /projects (same list and role scoping as the Projects page:
@@ -35,9 +30,10 @@ export default function ProjectTracker() {
     queryFn: () => api.get("/projects").then((r) => r.data),
   })
 
-  const counts = { COMPLETED: 0, IN_PROGRESS: 0, NOT_STARTED: 0 }
-  projects.forEach((p) => { if (p.status in counts) counts[p.status] += 1 })
-
+  const todayIso = new Date().toISOString().slice(0, 10)
+  const breakdown = Object.entries(STATUS).map(([key, s]) => ({
+    key, label: s.label, dot: s.dot, value: projects.filter((p) => (p.status || "NOT_STARTED") === key).length,
+  }))
   const shown = [...projects]
     .sort((a, b) =>
       (ORDER[a.status] ?? 3) - (ORDER[b.status] ?? 3) ||
@@ -46,62 +42,57 @@ export default function ProjectTracker() {
     .slice(0, LIST_LIMIT)
 
   return (
-    <div className="card flex min-w-0 flex-col p-4 sm:p-5 lg:p-6">
-      <SectionHeader
-        title="Project Tracker"
-        action={
-          <Link to="/projects" className="text-xs font-semibold text-accent">
-            View all
-          </Link>
-        }
-      />
+    <section className="card flex min-w-0 flex-col p-5">
+      <SectionHeader title="Project Tracker" action={<Link to="/projects" className="text-xs font-semibold text-accent">View all</Link>} />
 
-      <ul className="flex-1 space-y-3">
-        {shown.map((p) => {
-          const cfg = STATUS[p.status] || STATUS.NOT_STARTED
-          const due = deadlineLabel(p)
-          const members = p._count?.members ?? p.members?.length ?? 0
-          return (
-            <li key={p.id}>
-              <Link to="/projects" className="group flex min-w-0 items-center gap-3">
-                <IconChip icon={FolderKanban} tone={cfg.tone} size="md" />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-semibold text-ink group-hover:text-accent">{p.name}</p>
-                  <p className="truncate text-[11px] text-muted">
-                    {[p.clientName, `${members} member${members === 1 ? "" : "s"}`].filter(Boolean).join(" · ")}
-                  </p>
-                </div>
-                <div className="flex shrink-0 flex-col items-end gap-1">
-                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${cfg.pill}`}>{cfg.label}</span>
-                  {due && (
-                    <span className={`text-[10px] ${due.overdue ? "font-semibold text-danger" : "text-muted"}`}>{due.text}</span>
-                  )}
-                </div>
-              </Link>
+      <div className="flex flex-1 items-center gap-5">
+        <div className="shrink-0 border-r border-border pr-5">
+          <p className="text-4xl font-bold tabular-nums text-ink" style={{ letterSpacing: "-0.03em" }}>{isLoading ? "—" : projects.length}</p>
+          <p className="mt-1 text-xs font-medium text-muted">Total projects</p>
+        </div>
+        <ul className="min-w-0 flex-1 space-y-2.5">
+          {breakdown.map((item) => (
+            <li key={item.key} className="flex items-center justify-between gap-2 text-sm">
+              <span className="flex min-w-0 items-center gap-2 text-muted">
+                <span className={`h-2 w-2 shrink-0 rounded-full ${item.dot}`} />
+                <span className="truncate">{item.label}</span>
+              </span>
+              <span className="shrink-0 font-semibold tabular-nums text-ink">{isLoading ? "—" : item.value}</span>
             </li>
-          )
-        })}
-
-        {isLoading && <li className="text-sm text-muted">Loading projects…</li>}
-        {isError && <li className="text-sm text-danger">Couldn't load projects.</li>}
-        {!isLoading && !isError && projects.length === 0 && (
-          <li className="text-sm text-muted">No projects yet.</li>
-        )}
-      </ul>
-
-      {/* Status totals in one row */}
-      <div className="mt-4 grid grid-cols-3 gap-2 border-t border-border pt-4">
-        {[
-          ["COMPLETED", "Completed"],
-          ["IN_PROGRESS", "In progress"],
-          ["NOT_STARTED", "Not started"],
-        ].map(([key, label]) => (
-          <div key={key} className="min-w-0 rounded-xl bg-surface-2 px-2 py-2.5 text-center">
-            <p className="text-lg font-semibold leading-tight text-ink">{isLoading ? "—" : counts[key]}</p>
-            <p className="mt-0.5 truncate text-[10px] text-muted sm:text-[11px]">{label}</p>
-          </div>
-        ))}
+          ))}
+        </ul>
       </div>
-    </div>
+
+      {isLoading ? (
+        <p className="mt-4 border-t border-border pt-3 text-xs text-muted">Loading projects…</p>
+      ) : isError ? (
+        <p className="mt-4 border-t border-border pt-3 text-xs text-danger">Couldn't load projects.</p>
+      ) : shown.length > 0 ? (
+        <ul className="mt-4 space-y-1.5 border-t border-border pt-3">
+          {shown.map((p) => {
+            const status = STATUS[p.status] || STATUS.NOT_STARTED
+            const deadline = p.deadline ? String(p.deadline).slice(0, 10) : null
+            const overdue = deadline && deadline < todayIso && p.status !== "COMPLETED"
+            return (
+              <li key={p.id}>
+                <Link to="/projects" className="group flex items-center justify-between gap-2 rounded-xl px-1 py-1">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-ink group-hover:text-accent">{p.name}</p>
+                    {deadline && (
+                      <p className={`text-[11px] ${overdue ? "font-semibold text-danger" : "text-muted"}`}>
+                        {overdue ? "Overdue" : "Due"} {fmtDate(p.deadline)}
+                      </p>
+                    )}
+                  </div>
+                  <StatusPill tone={status.tone} className="shrink-0">{status.label}</StatusPill>
+                </Link>
+              </li>
+            )
+          })}
+        </ul>
+      ) : (
+        <p className="mt-4 border-t border-border pt-3 text-xs text-muted">No projects yet.</p>
+      )}
+    </section>
   )
 }

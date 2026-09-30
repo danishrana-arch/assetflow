@@ -250,6 +250,9 @@ export default function MyPayroll() {
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-2">Earnings</p>
                 <Line label="Basic pay" amount={record.baseSalary} />
                 <Line label="Bonus" amount={record.bonus} tone="add" />
+                {Number(record.performanceBonus) > 0 && (
+                  <Line label="Performance bonus" detail="from your performance review" amount={record.performanceBonus} tone="add" />
+                )}
                 {Number(record.expenseReimbursement) > 0 && (
                   <Line label="Office expenses" detail="reimbursed" amount={record.expenseReimbursement} tone="add" />
                 )}

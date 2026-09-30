@@ -27,7 +27,6 @@ const AssetProfile = lazy(() => import("./pages/AssetProfile"))
 const Assignments = lazy(() => import("./pages/Assignments"))
 const AssetRequests = lazy(() => import("./pages/AssetRequests"))
 const Departments = lazy(() => import("./pages/Departments"))
-const Tasks = lazy(() => import("./pages/Tasks"))
 const Performance = lazy(() => import("./pages/Performance"))
 const AdvancedCalendar = lazy(() => import("./pages/AdvancedCalendar"))
 const OrganizationComparison = lazy(() => import("./pages/OrganizationComparison"))
@@ -142,7 +141,8 @@ function ProtectedShell() {
           <Route path="/asset-requests" element={<RequireInventoryAccess><AssetRequests /></RequireInventoryAccess>} />
           <Route path="/departments" element={<RequireModule moduleKey="departments"><Departments /></RequireModule>} />
           <Route path="/calendar" element={<AdvancedCalendar />} />
-          <Route path="/tasks" element={<Tasks />} />
+          {/* Tasks are a tab of the Projects page; old links/notifications land there. */}
+          <Route path="/tasks" element={<Navigate to="/projects?tab=tasks" replace />} />
           <Route path="/performance" element={<Performance />} />
           <Route path="/organization-comparison" element={<RequireOwner><OrganizationComparison /></RequireOwner>} />
           <Route path="/attendance" element={<RequireModule moduleKey="attendance"><Attendance /></RequireModule>} />

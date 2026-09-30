@@ -4,7 +4,6 @@ import api from "../api/client"
 import {
   LayoutDashboard,
   FolderKanban,
-  ListTodo,
   Award,
   Users,
   Boxes,
@@ -99,9 +98,8 @@ export default function MobileNav({ open, onClose }) {
               {hasModuleAccess(user?.role, "inventory") && <Row to="/inventory" icon={Boxes} label="Inventory" onClick={onClose} />}
               {hasModuleAccess(user?.role, "employees") && <Row to="/employees" icon={Users} label="Employees" onClick={onClose} />}
               {hasModuleAccess(user?.role, "assetAssignments") && <Row to="/assignments" icon={ClipboardCheck} label="Asset Assignment" onClick={onClose} />}
-              {hasModuleAccess(user?.role, "projects") && <Row to="/projects" icon={FolderKanban} label="Projects" onClick={onClose} />}
+              {hasModuleAccess(user?.role, "projects") && <Row to="/projects" icon={FolderKanban} label="Projects & Tasks" onClick={onClose} />}
               <Row to="/calendar" icon={CalendarRange} label="Company Calendar" onClick={onClose} />
-              {hasModuleAccess(user?.role, "tasks") && <Row to="/tasks" icon={ListTodo} label="Tasks" onClick={onClose} />}
               {hasModuleAccess(user?.role, "performance") && <Row to="/performance" icon={Award} label="Performance" onClick={onClose} />}
               {hasModuleAccess(user?.role, "assetRequests") && <Row to="/asset-requests" icon={PackageSearch} label="Asset Requests" onClick={onClose} />}
               {hasModuleAccess(user?.role, "departments") && <Row to="/departments" icon={Building2} label="Departments" onClick={onClose} />}
@@ -154,8 +152,7 @@ export default function MobileNav({ open, onClose }) {
             <>
               <Row to="/calendar" icon={CalendarRange} label="Company Calendar" onClick={onClose} />
               <Row to={`/employees/${user?.id}`} icon={UserRound} label="My Profile" onClick={onClose} />
-              <Row to="/projects" icon={FolderKanban} label="My Projects" onClick={onClose} />
-              <Row to="/tasks" icon={ListTodo} label="My Tasks" onClick={onClose} />
+              <Row to="/projects" icon={FolderKanban} label="My Projects & Tasks" onClick={onClose} />
               <Row to="/performance" icon={Award} label="My Performance" onClick={onClose} />
               <Row to="/announcements" icon={Bell} label="Announcements" onClick={onClose} />
               <Row to="/attendance/me" icon={CalendarCheck} label="My Attendance" onClick={onClose} />

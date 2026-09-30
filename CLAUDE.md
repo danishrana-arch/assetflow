@@ -1717,6 +1717,57 @@ Migration `20260930160000_payroll_absent_days` — **not yet deployed**; the
 JS client was regenerated with the column, so payroll queries fail until
 `prisma migrate deploy` runs.
 
+## Post-module addition: performance bonus, Tasks inside Projects, calendar sync, checkout automation (2026-09-30)
+
+- **Monthly reviews** (follow-up): a review is for one calendar month
+  (`month: "YYYY-MM"` → periodStart/End = 1st/last day; one review per
+  employee per month, 409 otherwise). The bonus goes on **that month's**
+  payslip (next open month if it's already submitted/paid), and
+  `ensurePayslip` (payroll.controller.js) creates the DRAFT payslip right away
+  if it doesn't exist yet (not when the employee has no base salary).
+- `DISABLE_BACKGROUND_JOBS=true` starts the API without the auto-absent,
+  checkout and project-deadline jobs (for test instances against the live DB).
+- Verified 2026-09-30: 54/54 end-to-end checks (bonus, tasks, calendar feed,
+  employee note, checkout job incl. night shift) in a temporary org, deleted
+  afterwards.
+- **Performance bonus**: `PerformanceReview.bonusAmount` + `bonusPayrollMonth/Year`,
+  `PayrollRecord.performanceBonus` (added to net pay in `computePayrollTotals`;
+  `syncPerformanceBonus`/`performanceBonusTotal` in `utils/payroll.js`, same
+  pattern as expense claims). Only `payroll`-module roles (ADMIN/CEO) can set
+  it; 0 or ≥ PKR 500. Goes on the current month's payslip, or the next one still
+  DRAFT. Locked once that payslip is submitted/paid. Amounts are hidden from
+  other performance reviewers (shown to payroll roles + the employee). Shown on
+  Payroll, My Payslips and the PDF.
+- **Tasks moved into Projects**: `Projects.jsx` has Projects / Tasks tabs
+  (`?tab=tasks`, renders `Tasks.jsx` with `embedded`); the project details
+  modal lists that project's tasks. `/tasks` redirects there; task
+  notifications link there. Tasks removed from Sidebar/MobileNav for every role
+  (nav label is now "Projects & Tasks" / "My Projects & Tasks").
+- **Company Calendar sync**: personal `.ics` feed at
+  `GET /api/calendar/feed/<userId>.<hmac>.ics` (public; HMAC of
+  `User.calendarFeedToken` nonce with `JWT_SECRET`, so a leaked user row can't
+  build the URL). `GET /api/calendar/feed` returns Google / Outlook.com /
+  Microsoft 365 subscribe links; `POST /api/calendar/feed/reset` rotates it.
+  Events come from `collectCalendarEvents` (shared with `GET /dashboard/events`,
+  same leave-visibility rule; also fixed annual events created in an earlier
+  year not repeating). Google/Outlook need a public URL — set
+  `API_PUBLIC_URL` in production.
+- **Dashboard Project Tracker** restyled to match the Employee Profile Projects card.
+- **Checkout reminder + auto checkout** (`services/attendance-checkout.service.js`,
+  every 5 min): after an open shift's end time (employee `shiftEnd`, else org
+  `shiftEndDefault`, else start + working hours) → one "Time to check out"
+  notification. If still open when that day ends (local midnight; overnight
+  shifts: end + 4h) → `checkOutAt` = shift end, `autoCheckedOut`, system day
+  note, notification. Last 3 days are covered, so the first run closes any
+  older open shifts (12 at the time of writing).
+- **Employee note / extra hours**: `AttendanceRecord.employeeNote` +
+  `extraMinutes`, `PUT /attendance/self/note` (own days with a check-in, last 7
+  days). Editable on My Attendance; shown in the Attendance page Note column.
+- Migrations `20260930180000_performance_bonus_calendar_feed` and
+  `20260930190000_attendance_checkout_reminder_employee_note` — **deployed**;
+  JS client regenerated (engine DLL rename hit the usual EPERM). Restart the
+  backend.
+
 ## Automated RBAC test run (2026-09-28)
 
 There's no automated test suite in either app (`npm test` isn't

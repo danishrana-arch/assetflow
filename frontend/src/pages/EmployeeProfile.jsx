@@ -1,18 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useParams, Link, useNavigate } from "react-router-dom"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   BadgeCheck, Plus, X, Boxes, Ticket as TicketIcon, Activity, UserX, Pencil, Check,
   Mail, Phone, KeyRound, Laptop, PackageSearch, MapPin,
   Calendar, Users as ManagerIcon, Send, Save, Minus,
-  CalendarRange, ShieldCheck, ChevronRight, ChevronDown, Building2, Clock3, FolderKanban,
-  Briefcase, AtSign, Layers,
-  Palmtree, HeartPulse, CalendarOff,
+  CalendarRange, ShieldCheck, ChevronLeft, ChevronRight, ChevronDown, Building2, Clock3,
+  Briefcase, AtSign, Layers, LogIn, LogOut,
 } from "lucide-react"
 import api from "../api/client"
 import { useAuth } from "../context/AuthContext"
 import { useTheme } from "../context/ThemeContext"
-import { hasModuleAccess, canManageInventory, ROLE_LABELS } from "../utils/roles"
+import { hasModuleAccess, canManageInventory, canAccessPayroll, ROLE_LABELS } from "../utils/roles"
 import { formatTime, formatClock } from "../utils/time"
 import StatusBadge from "../components/StatusBadge"
 import ParticleText from "../components/ParticleText"
@@ -24,6 +23,49 @@ import SectionHeader from "../components/ui/SectionHeader"
 import { FieldValue, TextField, SelectField } from "../components/ui/Field"
 import EmptyState from "../components/ui/EmptyState"
 import WorkingTimeProgress from "../components/ui/WorkingTimeProgress"
+import { nearestAssignedSite } from "../utils/siteGeofence"
+import { getAttendanceDeviceId } from "../utils/offlineAttendance"
+
+// "YYYY-MM-DD" for a moment in the given IANA timezone (browser's if unset).
+function dateKeyIn(value, timeZone) {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: timeZone || undefined }).format(value)
+}
+// "YYYY-MM" shifted by whole months.
+function shiftMonth(monthKey, delta) {
+  const [y, m] = monthKey.split("-").map(Number)
+  return new Date(Date.UTC(y, m - 1 + delta, 1)).toISOString().slice(0, 7)
+}
+function monthTitle(monthKey) {
+  const [y, m] = monthKey.split("-").map(Number)
+  return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString(undefined, { month: "long", year: "numeric", timeZone: "UTC" })
+}
+function dayTitle(dayKey) {
+  return new Date(`${dayKey}T00:00:00Z`).toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" })
+}
+const DAY_TONE = {
+  PRESENT: "bg-chip-green-bg text-chip-green-fg",
+  LATE: "bg-chip-yellow-bg text-chip-yellow-fg",
+  ABSENT: "bg-chip-pink-bg text-chip-pink-fg",
+  LEAVE: "bg-chip-blue-bg text-chip-blue-fg",
+}
+const LEAVE_TYPE_LABEL = { CASUAL: "Paid", SICK: "Sick", UNPAID: "Unpaid" }
+
+function MonthNav({ monthKey, onChange, minMonth, maxMonth }) {
+  const canPrev = !minMonth || monthKey > minMonth
+  const canNext = !maxMonth || monthKey < maxMonth
+  const btn = "flex h-7 w-7 items-center justify-center rounded-full border border-border bg-surface text-ink transition-colors hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-40"
+  return (
+    <div className="flex items-center gap-1.5">
+      <button type="button" onClick={() => onChange(shiftMonth(monthKey, -1))} disabled={!canPrev} className={btn} aria-label="Previous month">
+        <ChevronLeft size={14} />
+      </button>
+      <span className="min-w-[7.5rem] text-center text-xs font-semibold text-ink">{monthTitle(monthKey)}</span>
+      <button type="button" onClick={() => onChange(shiftMonth(monthKey, 1))} disabled={!canNext} className={btn} aria-label="Next month">
+        <ChevronRight size={14} />
+      </button>
+    </div>
+  )
+}
 
 const LEVEL_LABEL = { INTERN: "Intern", JUNIOR: "Junior", SENIOR: "Senior", LEAD: "Lead" }
 const REQUEST_TONE = { PENDING: "yellow", APPROVED: "blue", REJECTED: "pink", FULFILLED: "green" }
@@ -33,11 +75,6 @@ const PROJECT_STATUS = {
   NOT_STARTED: { label: "Not started", tone: "slate" },
   IN_PROGRESS: { label: "In progress", tone: "blue" },
   COMPLETED: { label: "Completed", tone: "green" },
-}
-const LEAVE_TONE = {
-  green: "bg-chip-green-bg text-chip-green-fg",
-  blue: "bg-chip-blue-bg text-chip-blue-fg",
-  orange: "bg-chip-orange-bg text-chip-orange-fg",
 }
 const ASSET_STATUS_TONE = { ASSIGNED: "blue", AVAILABLE: "green", REPAIR: "yellow", LOST: "pink", DISPOSED: "slate" }
 
@@ -51,6 +88,34 @@ function DetailGroup({ title, children }) {
     <div className="min-w-0 rounded-2xl border border-border bg-surface-2 p-4">
       <p className="mb-3 text-[10px] font-bold uppercase tracking-wider text-muted-2">{title}</p>
       <div className="space-y-3">{children}</div>
+    </div>
+  )
+}
+
+// Big total on the left, a short dotted breakdown on the right — shared by
+// the Leave Balance and Projects cards.
+function SummarySplit({ total, totalLabel, totalNote, items }) {
+  return (
+    <div className="mt-4 flex flex-1 items-center gap-5">
+      <div className="shrink-0 border-r border-border pr-5">
+        <p className="text-4xl font-bold tabular-nums text-ink" style={{ letterSpacing: "-0.03em" }}>{total}</p>
+        <p className="mt-1 text-xs font-medium text-muted">{totalLabel}</p>
+        {totalNote && <p className="mt-0.5 text-[11px] text-muted-2">{totalNote}</p>}
+      </div>
+      <ul className="min-w-0 flex-1 space-y-2.5">
+        {items.map((item) => (
+          <li key={item.key} className="flex items-center justify-between gap-2 text-sm">
+            <span className="flex min-w-0 items-center gap-2 text-muted">
+              <span className={`h-2 w-2 shrink-0 rounded-full ${item.dot}`} />
+              <span className="truncate">{item.label}</span>
+            </span>
+            <span className="shrink-0 font-semibold tabular-nums text-ink">
+              {item.value}
+              {item.note && <span className="ml-1 text-[11px] font-normal text-muted-2">{item.note}</span>}
+            </span>
+          </li>
+        ))}
+      </ul>
     </div>
   )
 }
@@ -114,6 +179,27 @@ export default function EmployeeProfile() {
   const [usageSubmitted, setUsageSubmitted] = useState({}) // { [assetId]: true }
   const [certificateDrafts, setCertificateDrafts] = useState([])
   const { mode: themeMode } = useTheme()
+  // Month browser shared by the Attendance and Activity cards; a clicked
+  // calendar day shows that day's check-in/out (null = today).
+  const [viewMonth, setViewMonthState] = useState(() => dateKeyIn(new Date(), organization?.timezone).slice(0, 7))
+  const [selectedDay, setSelectedDay] = useState(null)
+  const setViewMonth = (month) => { setViewMonthState(month); setSelectedDay(null) }
+  const [marking, setMarking] = useState(null) // "CHECK_IN" | "CHECK_OUT" while a quick mark runs
+  const [markMessage, setMarkMessage] = useState(null) // { tone: "error" | "info", text }
+  const canQuickMark = isSelf && !isIT
+  const { data: monthActivity, isFetching: loadingMonth } = useQuery({
+    queryKey: ["employee-activity", id, viewMonth],
+    queryFn: () => api.get(`/employees/${id}/activity`, { params: { month: viewMonth } }).then((r) => r.data),
+    placeholderData: keepPreviousData,
+    enabled: !isIT,
+  })
+  // Same data (and cache key) My Attendance uses for the geofence check.
+  const { data: assignedSites = [] } = useQuery({
+    queryKey: ["attendance-assigned-sites"],
+    queryFn: () => api.get("/attendance-sites/assigned").then((r) => r.data),
+    enabled: canQuickMark,
+    staleTime: 5 * 60 * 1000,
+  })
   const detailsRef = useRef(null)
   const [detailsOpen, setDetailsOpen] = useState(false)
 
@@ -360,12 +446,13 @@ export default function EmployeeProfile() {
   if (isLoading) return <p className="text-sm text-muted">Loading...</p>
   if (!employee) return <p className="text-sm text-muted">Employee not found.</p>
 
-  // Today's attendance record (date-only comparison)
-  const todayIso = new Date().toISOString().slice(0, 10)
-  const todayRecord = (employee.attendanceRecords || []).find((r) => {
-    const d = r.date ? (typeof r.date === "string" ? r.date.slice(0, 10) : new Date(r.date).toISOString().slice(0, 10)) : null
-    return d === todayIso
-  })
+  // Today in the organization's timezone — attendance dates are stored as
+  // the org-local calendar day.
+  const timeZone = employee.organization?.timezone || organization?.timezone
+  const todayIso = dateKeyIn(new Date(), timeZone)
+  const currentMonth = todayIso.slice(0, 7)
+  const dayKeyOf = (value) => String(value).slice(0, 10)
+  const todayRecord = (employee.attendanceRecords || []).find((r) => r.date && dayKeyOf(r.date) === todayIso)
 
   const level = employee.seniorityLevel
   const levelTone = LEVEL_TONE[level] || "slate"
@@ -374,7 +461,20 @@ export default function EmployeeProfile() {
   const assignedAssets = employee.assignedAssets || []
   const laptopCount = assignedAssets.filter((a) => assetTabOf(a) === "LAPTOP").length
   const accessoryCount = assignedAssets.length - laptopCount
-  const visibleAssets = assignedAssets.filter((a) => assetTab === "ALL" || assetTabOf(a) === assetTab)
+  // One tab per category actually assigned (plus All), so any category —
+  // Tablet, Monitor, Phone… — gets its own filter.
+  const categoryLabelOf = (asset) => (asset.category || "").trim() || "Uncategorized"
+  const categoryKeyOf = (asset) => categoryLabelOf(asset).toLowerCase()
+  const assetTabs = [{ key: "ALL", label: "All", count: assignedAssets.length }]
+  for (const asset of assignedAssets) {
+    const key = categoryKeyOf(asset)
+    const tab = assetTabs.find((t) => t.key === key)
+    if (tab) tab.count += 1
+    else assetTabs.push({ key, label: categoryLabelOf(asset), count: 1 })
+  }
+  assetTabs.splice(1, assetTabs.length, ...assetTabs.slice(1).sort((a, b) => a.label.localeCompare(b.label)))
+  const activeAssetTab = assetTabs.some((t) => t.key === assetTab) ? assetTab : "ALL"
+  const visibleAssets = assignedAssets.filter((a) => activeAssetTab === "ALL" || categoryKeyOf(a) === activeAssetTab)
 
   function setUsageDraft(assetId, patch) {
     setUsageDrafts((prev) => ({ ...prev, [assetId]: { notUsing: false, actual: "", ...prev[assetId], ...patch } }))
@@ -388,20 +488,148 @@ export default function EmployeeProfile() {
     requestAnimationFrame(() => detailsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }))
   }
 
-  // Attendance — same formula as before: this month's PRESENT+LATE share of
-  // recorded days. The legend counts come from the same records.
+  // Attendance for the month being browsed — same formula as before: the
+  // PRESENT+LATE share of recorded days. Data comes from
+  // GET /employees/:id/activity, so any past month is exact (the profile
+  // payload itself only carries the last 90 days).
   const now = new Date()
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
-  const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1)
-  const monthAttendance = (employee.attendanceRecords || []).filter((record) => {
-    const date = record.date ? new Date(record.date) : null
-    return date && date >= monthStart && date < monthEnd
-  })
+  // While a newly picked month loads, the previous month's data is still in
+  // the cache — never show it under the new month's name.
+  const monthReady = monthActivity?.month === viewMonth
+  const monthData = monthReady ? monthActivity : null
+  const monthAttendance = monthData?.attendanceRecords || []
   const presentCount = monthAttendance.filter((a) => a.status === "PRESENT").length
   const lateCount = monthAttendance.filter((a) => a.status === "LATE").length
   const absentCount = monthAttendance.filter((a) => a.status === "ABSENT").length
   const attendancePct = monthAttendance.length ? Math.round(((presentCount + lateCount) / monthAttendance.length) * 100) : 0
-  const monthLabel = now.toLocaleDateString(undefined, { month: "long" })
+  const minMonth = employee.joiningDate ? dayKeyOf(employee.joiningDate).slice(0, 7) : null
+
+  // Calendar for the browsed month (Monday first). Approved leave with no
+  // attendance record still shows as leave.
+  const recordByDay = new Map(monthAttendance.map((r) => [dayKeyOf(r.date), r]))
+  const leaveDays = new Set()
+  for (const leave of monthData?.leaves || []) {
+    for (let d = new Date(`${dayKeyOf(leave.startDate)}T00:00:00Z`); d <= new Date(`${dayKeyOf(leave.endDate)}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + 1)) {
+      leaveDays.add(d.toISOString().slice(0, 10))
+    }
+  }
+  const [viewYear, viewMonthNumber] = viewMonth.split("-").map(Number)
+  const daysInMonth = new Date(Date.UTC(viewYear, viewMonthNumber, 0)).getUTCDate()
+  const leadingBlanks = (new Date(Date.UTC(viewYear, viewMonthNumber - 1, 1)).getUTCDay() + 6) % 7
+  const calendarDays = Array.from({ length: daysInMonth }, (_, i) => {
+    const key = `${viewMonth}-${String(i + 1).padStart(2, "0")}`
+    return { key, day: i + 1, status: recordByDay.get(key)?.status || (leaveDays.has(key) ? "LEAVE" : null), future: key > todayIso }
+  })
+
+  // The day shown in the check-in/out panel: the clicked day, else today
+  // when browsing the current month.
+  const activeDay = selectedDay || (viewMonth === currentMonth ? todayIso : null)
+  const isTodayActive = activeDay === todayIso
+  const activeRecord = activeDay ? (isTodayActive ? todayRecord || recordByDay.get(activeDay) : recordByDay.get(activeDay)) : null
+  const activeOnLeave = activeRecord?.status === "LEAVE" || (activeDay && !activeRecord && leaveDays.has(activeDay))
+  const quickMarkOn = canQuickMark && isTodayActive && !activeOnLeave
+  const checkInAction = quickMarkOn && !activeRecord?.checkInAt ? () => quickMark("CHECK_IN") : null
+  const checkOutAction = quickMarkOn && activeRecord?.checkInAt && !activeRecord?.checkOutAt ? () => quickMark("CHECK_OUT") : null
+
+  // Month activity feed: check-ins/outs, absences, approved leave, asset
+  // actions and raised tickets, newest first.
+  const monthActivities = []
+  for (const r of monthAttendance) {
+    const statusNote = r.status === "LATE" ? "Late" : r.locationMode === "WFH" ? "Work from home" : r.status === "PRESENT" ? "On time" : ""
+    if (r.checkInAt) monthActivities.push({ id: `${r.id}-in`, at: r.checkInAt, icon: LogIn, tone: r.status === "LATE" ? "yellow" : "green", title: "Checked in", note: `${formatTime(r.checkInAt)}${statusNote ? ` · ${statusNote}` : ""}` })
+    if (r.checkOutAt) monthActivities.push({ id: `${r.id}-out`, at: r.checkOutAt, icon: LogOut, tone: "blue", title: "Checked out", note: formatTime(r.checkOutAt) })
+    if (!r.checkInAt && r.status === "ABSENT") monthActivities.push({ id: `${r.id}-abs`, at: `${dayKeyOf(r.date)}T12:00:00Z`, icon: UserX, tone: "pink", title: "Absent", note: r.autoFlagged ? "Flagged — outside premises" : "Marked absent" })
+    if (!r.checkInAt && r.status === "LEAVE") monthActivities.push({ id: `${r.id}-lv`, at: `${dayKeyOf(r.date)}T12:00:00Z`, icon: CalendarRange, tone: "blue", title: "On leave", note: "" })
+  }
+  for (const l of monthData?.leaves || []) {
+    const range = dayKeyOf(l.startDate) === dayKeyOf(l.endDate) ? fmtDate(l.startDate) : `${fmtDate(l.startDate)} – ${fmtDate(l.endDate)}`
+    monthActivities.push({ id: `leave-${l.id}`, at: `${dayKeyOf(l.startDate)}T12:00:00Z`, icon: CalendarRange, tone: "cyan", title: `${LEAVE_TYPE_LABEL[l.type] || "Paid"} leave${l.isHalfDay ? " (half day)" : ""}`, note: range })
+  }
+  for (const e of monthData?.lifecycleEvents || []) {
+    monthActivities.push({ id: `ev-${e.id}`, at: e.occurredAt, icon: Activity, tone: "purple", title: e.asset?.name || "Asset", note: (e.type || "").replaceAll("_", " ").toLowerCase() })
+  }
+  for (const t of monthData?.tickets || []) {
+    monthActivities.push({ id: `tk-${t.id}`, at: t.createdAt, icon: TicketIcon, tone: "orange", title: t.subject, note: `ticket raised · ${(t.status || "").replaceAll("_", " ").toLowerCase()}` })
+  }
+  monthActivities.sort((a, b) => new Date(b.at) - new Date(a.at))
+
+  // Quick check-in/out from the profile — same calls and geofence rules as
+  // My Attendance (GPS → nearest assigned site; the server decides
+  // on-time/late/outside), minus the offline queue, which lives there.
+  async function quickMark(type) {
+    setMarkMessage(null)
+    if (!navigator.onLine) {
+      setMarkMessage({ tone: "error", text: "You're offline. Use My Attendance — it saves your check-in and syncs it later." })
+      return
+    }
+    setMarking(type)
+    try {
+      let position
+      try {
+        position = await new Promise((resolve, reject) => {
+          if (!navigator.geolocation) return reject(new Error("unsupported"))
+          navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 })
+        })
+      } catch (err) {
+        throw new Error(err?.code === 1
+          ? "Location permission was denied. Allow location access and try again."
+          : "We could not get your location. Try again with location services enabled.")
+      }
+      const { latitude, longitude, accuracy } = position.coords
+      const nearest = nearestAssignedSite(assignedSites, latitude, longitude)
+      const site = nearest?.site || assignedSites.find((s) => s.isPrimary) || assignedSites[0] || null
+      const inside = nearest?.inside ?? false
+      const clientEventId = `att-${globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : `${Date.now()}-${Math.random()}`}`
+
+      if (type === "CHECK_IN") {
+        const { data } = await api.post("/attendance/self/mark", {
+          status: "PRESENT",
+          latitude,
+          longitude,
+          gpsAccuracy: accuracy,
+          siteId: site?.id || null,
+          locationMode: "OFFICE",
+          clientEventId,
+        })
+        setMarkMessage(data?.outsideSite
+          ? { tone: "info", text: data.message || "You checked in outside the office premises. It was recorded as Late with your location; HR will review it." }
+          : { tone: "info", text: "Checked in." })
+      } else {
+        if (site && site.geofenceMode === "STRICT" && !inside) {
+          throw new Error("You are outside your assigned site. Move inside the site area and try again.")
+        }
+        const recordedAt = new Date()
+        const { data } = await api.post("/attendance/self/offline-sync", {
+          events: [{
+            type: "CHECK_OUT",
+            localRecordedAt: recordedAt.toISOString(),
+            localDate: dateKeyIn(recordedAt, timeZone),
+            timezone: timeZone || "UTC",
+            locationMode: todayRecord?.locationMode || "OFFICE",
+            latitude,
+            longitude,
+            gpsAccuracy: accuracy,
+            distanceMeters: nearest?.distance != null ? Math.round(nearest.distance) : null,
+            siteId: site?.id || null,
+            siteName: site?.name || "Unassigned / no site",
+            outsideSite: false,
+            deviceId: getAttendanceDeviceId(),
+            networkType: navigator.connection?.effectiveType || "online",
+            clientEventId,
+          }],
+        })
+        if (data?.rejected?.length) throw new Error(data.rejected[0].error || "Check-out was not accepted.")
+        setMarkMessage({ tone: "info", text: "Checked out." })
+      }
+      queryClient.invalidateQueries({ queryKey: ["employee", id] })
+      queryClient.invalidateQueries({ queryKey: ["employee-activity", id] })
+      queryClient.invalidateQueries({ queryKey: ["attendance-self"] })
+    } catch (err) {
+      setMarkMessage({ tone: "error", text: err?.response?.data?.error || err.message || "Could not mark attendance." })
+    } finally {
+      setMarking(null)
+    }
+  }
   const attendanceLegend = [
     { key: "present", label: "Present", count: presentCount, dot: "bg-emerald-500" },
     { key: "absent", label: "Absent", count: absentCount, dot: "bg-rose-500" },
@@ -418,15 +646,26 @@ export default function EmployeeProfile() {
   }
   const paidAllowance = Number(employee.organization?.casualLeaveAllowance || 0)
   const sickAllowance = Number(employee.organization?.sickLeaveAllowance || 0)
-  const leaveTiles = [
-    { key: "paid", label: "Paid Leaves", value: Math.max(0, paidAllowance - leaveUsed.CASUAL), unit: "left", hint: `${leaveUsed.CASUAL} of ${paidAllowance} used`, icon: Palmtree, tone: "green" },
-    { key: "sick", label: "Sick Leaves", value: Math.max(0, sickAllowance - leaveUsed.SICK), unit: "left", hint: `${leaveUsed.SICK} of ${sickAllowance} used`, icon: HeartPulse, tone: "blue" },
-    { key: "unpaid", label: "Unpaid Leaves", value: leaveUsed.UNPAID, unit: leaveUsed.UNPAID === 1 ? "day" : "days", hint: "Taken this year", icon: CalendarOff, tone: "orange" },
+  const paidLeft = Math.max(0, paidAllowance - leaveUsed.CASUAL)
+  const sickLeft = Math.max(0, sickAllowance - leaveUsed.SICK)
+  const totalLeaveLeft = paidLeft + sickLeft
+  const totalLeaveUsed = leaveUsed.CASUAL + leaveUsed.SICK + leaveUsed.UNPAID
+  const leaveBreakdown = [
+    { key: "paid", label: "Paid", value: paidLeft, note: `left of ${paidAllowance}`, dot: "bg-emerald-500" },
+    { key: "sick", label: "Sick", value: sickLeft, note: `left of ${sickAllowance}`, dot: "bg-sky-500" },
+    { key: "unpaid", label: "Unpaid", value: leaveUsed.UNPAID, note: "taken", dot: "bg-amber-400" },
   ]
 
   const projectMemberships = employee.projectMemberships || []
-  const activeProjects = projectMemberships.filter((m) => m.project?.status === "IN_PROGRESS").length
-  const completedProjects = projectMemberships.filter((m) => m.project?.status === "COMPLETED").length
+  const projectBreakdown = [
+    { key: "NOT_STARTED", label: "Not started", dot: "bg-gray-400" },
+    { key: "IN_PROGRESS", label: "In progress", dot: "bg-sky-500" },
+    { key: "COMPLETED", label: "Completed", dot: "bg-emerald-500" },
+  ].map((s) => ({ ...s, value: projectMemberships.filter((m) => (m.project?.status || "NOT_STARTED") === s.key).length }))
+
+  // Payroll rows open the payroll page: your own payslips when it's your
+  // profile, otherwise the Payroll page for roles that can reach it.
+  const payrollLink = isSelf ? "/payroll/me" : canAccessPayroll(user?.role) ? "/payroll" : null
 
   const organizationName = employee.organization?.name || organization?.name
   // Core fields always show (with "—" when empty) so the card keeps a steady
@@ -558,65 +797,16 @@ export default function EmployeeProfile() {
 
         {!isIT && (
           <section className="card flex min-w-0 flex-col p-5">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <h3 className="section-title">Attendance</h3>
-                <p className="mt-0.5 text-xs text-muted">
-                  {monthLabel} · {monthAttendance.length} {monthAttendance.length === 1 ? "day" : "days"} recorded
-                </p>
-              </div>
-              <p className="shrink-0 text-3xl font-bold tabular-nums text-ink" style={{ letterSpacing: "-0.03em" }}>
-                {attendancePct}%
-              </p>
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="section-title">Leave Balance</h3>
+              <span className="rounded-full bg-surface-2 px-2.5 py-1 text-[11px] font-semibold text-muted">{year}</span>
             </div>
-
-            <div className="mt-4 flex h-1.5 w-full overflow-hidden rounded-full bg-surface-2" aria-hidden="true">
-              {monthAttendance.length > 0 && attendanceLegend.map((item) => (
-                <span key={item.key} className={item.dot} style={{ width: `${(item.count / monthAttendance.length) * 100}%` }} />
-              ))}
-            </div>
-
-            <ul className="mt-4 grid grid-cols-3 gap-2">
-              {attendanceLegend.map((item) => (
-                <li key={item.key} className="min-w-0 rounded-2xl bg-surface-2 px-3 py-2.5">
-                  <p className="flex items-center gap-1.5 text-xs font-medium text-muted">
-                    <span className={`h-2 w-2 shrink-0 rounded-full ${item.dot}`} />
-                    <span className="truncate">{item.label}</span>
-                  </p>
-                  <p className="mt-1 text-lg font-bold tabular-nums text-ink">{item.count}</p>
-                </li>
-              ))}
-            </ul>
-
-            {todayRecord && (
-              <div className="mt-4 border-t border-border pt-4">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <p className="text-sm font-semibold text-ink">Today's shift</p>
-                    {todayRecord.status === "LATE" && <StatusPill tone="yellow">LATE</StatusPill>}
-                  </div>
-                  <div className="text-xs text-muted">
-                    {todayRecord.checkInAt ? formatTime(todayRecord.checkInAt) : "-"}
-                    {todayRecord.checkOutAt ? ` — ${formatTime(todayRecord.checkOutAt)}` : ""}
-                  </div>
-                </div>
-                <WorkingTimeProgress
-                  workingMinutes={todayRecord.workingMinutes}
-                  checkInAt={todayRecord.checkInAt}
-                  checkOutAt={todayRecord.checkOutAt}
-                  expectedMinutes={Number(organization?.workingHoursPerDay || 8) * 60}
-                  date={todayRecord.date}
-                  className="mt-2 max-w-none"
-                />
-              </div>
-            )}
-
-            <Link
-              to={`/employees/${id}/attendance`}
-              className="mt-auto inline-flex items-center gap-1.5 pt-4 text-xs font-semibold text-accent hover:underline"
-            >
-              <CalendarRange size={13} /> View attendance history <ChevronRight size={13} />
-            </Link>
+            <SummarySplit
+              total={totalLeaveLeft}
+              totalLabel="Total leaves left"
+              totalNote={`${totalLeaveUsed} ${totalLeaveUsed === 1 ? "day" : "days"} used this year`}
+              items={leaveBreakdown}
+            />
           </section>
         )}
       </div>
@@ -642,68 +832,193 @@ export default function EmployeeProfile() {
         <div className={`min-w-0 space-y-5 ${isIT ? "lg:col-span-3" : "lg:col-span-2"}`}>
           {!isIT && (
             <section className="card p-5">
-              <SectionHeader
-                title="Leave Balance"
-                action={<span className="rounded-full bg-surface-2 px-2.5 py-1 text-[11px] font-semibold text-muted">{year}</span>}
-              />
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                {leaveTiles.map(({ key, label, value, unit, hint, icon: Icon, tone }) => (
-                  <div key={key} className={`min-w-0 rounded-2xl border border-border bg-surface-2 p-3.5 ${key === "unpaid" ? "col-span-2 sm:col-span-1" : ""}`}>
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="truncate text-xs font-medium text-muted">{label}</p>
-                      <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${LEAVE_TONE[tone]}`}>
-                        <Icon size={14} />
-                      </span>
+              <div className="grid gap-5 md:grid-cols-2 md:gap-6">
+                {/* Browsed month */}
+                <div className={`min-w-0 transition-opacity ${loadingMonth ? "opacity-60" : ""}`}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <h3 className="section-title">Attendance</h3>
+                      <p className="mt-0.5 text-xs text-muted">
+                        {monthReady ? `${monthAttendance.length} ${monthAttendance.length === 1 ? "day" : "days"} recorded` : "Loading…"}
+                      </p>
                     </div>
-                    <p className="mt-2 text-2xl font-bold tabular-nums text-ink" style={{ letterSpacing: "-0.02em" }}>
-                      {value} <span className="text-xs font-medium tracking-normal text-muted">{unit}</span>
+                    <p className="shrink-0 text-3xl font-bold tabular-nums text-ink" style={{ letterSpacing: "-0.03em" }}>
+                      {monthReady ? `${attendancePct}%` : "…"}
                     </p>
-                    <p className="mt-0.5 truncate text-[11px] text-muted-2">{hint}</p>
                   </div>
-                ))}
+                  <div className="mt-3">
+                    <MonthNav monthKey={viewMonth} onChange={setViewMonth} minMonth={minMonth} maxMonth={currentMonth} />
+                  </div>
+
+                  <div className="mt-4 flex h-1.5 w-full overflow-hidden rounded-full bg-surface-2" aria-hidden="true">
+                    {monthAttendance.length > 0 && attendanceLegend.map((item) => (
+                      <span key={item.key} className={item.dot} style={{ width: `${(item.count / monthAttendance.length) * 100}%` }} />
+                    ))}
+                  </div>
+
+                  <ul className="mt-4 grid grid-cols-3 gap-2">
+                    {attendanceLegend.map((item) => (
+                      <li key={item.key} className="min-w-0 rounded-2xl bg-surface-2 px-3 py-2.5">
+                        <p className="flex items-center gap-1.5 text-xs font-medium text-muted">
+                          <span className={`h-2 w-2 shrink-0 rounded-full ${item.dot}`} />
+                          <span className="truncate">{item.label}</span>
+                        </p>
+                        <p className="mt-1 text-lg font-bold tabular-nums text-ink">{monthReady ? item.count : "…"}</p>
+                      </li>
+                    ))}
+                  </ul>
+
+                  {/* Day calendar — click a past day to see its check-in/out. */}
+                  <div className="mt-4">
+                    <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-semibold uppercase text-muted-2">
+                      {["M", "T", "W", "T", "F", "S", "S"].map((d, i) => <span key={i}>{d}</span>)}
+                    </div>
+                    <div className="mt-1 grid grid-cols-7 gap-1">
+                      {Array.from({ length: leadingBlanks }, (_, i) => <span key={`b${i}`} />)}
+                      {calendarDays.map((d) => {
+                        const selected = d.key === activeDay
+                        return (
+                          <button
+                            key={d.key}
+                            type="button"
+                            disabled={d.future}
+                            onClick={() => setSelectedDay(d.key)}
+                            title={d.status ? `${dayTitle(d.key)} · ${d.status.toLowerCase()}` : dayTitle(d.key)}
+                            className={`flex h-7 items-center justify-center rounded-lg text-[11px] font-semibold tabular-nums transition-colors disabled:cursor-default disabled:opacity-35 ${
+                              d.status ? DAY_TONE[d.status] : "text-muted hover:bg-surface-2"
+                            } ${selected ? "ring-2 ring-accent ring-offset-1 ring-offset-surface" : ""} ${d.key === todayIso && !selected ? "outline outline-1 outline-border-strong" : ""}`}
+                          >
+                            {d.day}
+                          </button>
+                        )
+                      })}
+                    </div>
+                    <p className="mt-2 flex items-center gap-1.5 text-[10px] text-muted-2">
+                      <span className="h-2 w-2 rounded-full bg-chip-blue-bg" /> Leave
+                    </p>
+                  </div>
+                </div>
+
+                {/* Selected day (today by default) */}
+                <div className="flex min-w-0 flex-col border-t border-border pt-5 md:border-l md:border-t-0 md:pl-6 md:pt-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-sm font-semibold text-ink">{isTodayActive ? "Today's shift" : activeDay ? dayTitle(activeDay) : "Pick a day"}</p>
+                    {activeRecord?.status === "LATE" && <StatusPill tone="yellow">LATE</StatusPill>}
+                    {activeRecord?.status === "ABSENT" && <StatusPill tone="pink">ABSENT</StatusPill>}
+                    {activeOnLeave && <StatusPill tone="blue">LEAVE</StatusPill>}
+                    {selectedDay && viewMonth === currentMonth && !isTodayActive && (
+                      <button type="button" onClick={() => setSelectedDay(null)} className="ml-auto text-[11px] font-semibold text-accent hover:underline">
+                        Back to today
+                      </button>
+                    )}
+                  </div>
+                  {activeDay ? (
+                    <>
+                      <div className="mt-3 grid grid-cols-2 gap-2">
+                        {[
+                          { key: "CHECK_IN", label: "Check in", icon: LogIn, value: activeRecord?.checkInAt, action: checkInAction },
+                          { key: "CHECK_OUT", label: "Check out", icon: LogOut, value: activeRecord?.checkOutAt, action: checkOutAction },
+                        ].map(({ key, label, icon: Icon, value, action }) => {
+                          const busy = marking === key
+                          const body = (
+                            <>
+                              <span className="flex items-center gap-1.5 text-xs font-medium text-muted">
+                                <Icon size={12} /> {label}
+                              </span>
+                              <span className={`mt-1 block text-lg font-bold tabular-nums ${value ? "text-ink" : action ? "text-accent" : "text-muted-2"}`}>
+                                {value ? formatTime(value) : busy ? "Locating…" : action ? "Tap to mark" : "—"}
+                              </span>
+                            </>
+                          )
+                          return action ? (
+                            <button
+                              key={key}
+                              type="button"
+                              onClick={action}
+                              disabled={!!marking}
+                              className="min-w-0 rounded-2xl border border-dashed border-accent bg-surface-2 px-3 py-2.5 text-left transition-colors hover:bg-border disabled:cursor-wait disabled:opacity-70"
+                            >
+                              {body}
+                            </button>
+                          ) : (
+                            <div key={key} className="min-w-0 rounded-2xl border border-transparent bg-surface-2 px-3 py-2.5">{body}</div>
+                          )
+                        })}
+                      </div>
+                      {markMessage && isTodayActive && (
+                        <p className={`mt-2 text-xs ${markMessage.tone === "error" ? "text-danger" : "text-chip-green-fg"}`}>
+                          {markMessage.text}
+                          {markMessage.tone === "error" && <> <Link to="/attendance/me" className="font-semibold underline">Open My Attendance</Link></>}
+                        </p>
+                      )}
+                      {activeRecord?.checkInAt ? (
+                        <WorkingTimeProgress
+                          workingMinutes={activeRecord.workingMinutes}
+                          checkInAt={activeRecord.checkInAt}
+                          checkOutAt={activeRecord.checkOutAt}
+                          expectedMinutes={Number(organization?.workingHoursPerDay || 8) * 60}
+                          date={activeRecord.date}
+                          className="mt-3 max-w-none"
+                        />
+                      ) : (
+                        <p className="mt-3 text-xs text-muted">
+                          {activeOnLeave ? "On approved leave." : isTodayActive ? "No attendance recorded today yet." : "No attendance recorded for this day."}
+                        </p>
+                      )}
+                    </>
+                  ) : (
+                    <p className="mt-3 text-xs text-muted">Click a day in the calendar to see its check-in and check-out.</p>
+                  )}
+                  <Link
+                    to={`/employees/${id}/attendance`}
+                    className="mt-auto inline-flex items-center gap-1.5 pt-4 text-xs font-semibold text-accent hover:underline"
+                  >
+                    <CalendarRange size={13} /> View attendance history <ChevronRight size={13} />
+                  </Link>
+                </div>
               </div>
             </section>
           )}
 
-          {!isIT && (
+          {!isIT && employee.payrollRecords !== undefined && (
             <section className="card p-5">
               <SectionHeader
-                title="Projects"
-                action={projectMemberships.length > 0 && (
-                  <span className="text-xs text-muted">{activeProjects} active · {completedProjects} completed</span>
+                title="Recent payroll"
+                action={payrollLink && (employee.payrollRecords || []).length > 0 && (
+                  <Link to={payrollLink} className="inline-flex items-center gap-1 text-xs font-semibold text-accent hover:underline">
+                    View all <ChevronRight size={13} />
+                  </Link>
                 )}
               />
-              {projectMemberships.length > 0 ? (
-                <ul className="grid gap-2.5 sm:grid-cols-2">
-                  {projectMemberships.slice(0, 6).map((m) => {
-                    const status = PROJECT_STATUS[m.project?.status] || PROJECT_STATUS.NOT_STARTED
-                    const deadline = m.project?.deadline ? String(m.project.deadline).slice(0, 10) : null
-                    const overdue = deadline && deadline < todayIso && m.project?.status !== "COMPLETED"
+              {(employee.payrollRecords || []).length > 0 ? (
+                <ul className="grid gap-2 sm:grid-cols-2">
+                  {(employee.payrollRecords || []).slice(0, 5).map((p) => {
+                    const row = (
+                      <>
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-ink">{p.month}/{p.year}</p>
+                          <p className="text-xs text-muted">{(p.status || "").replaceAll("_", " ")}</p>
+                        </div>
+                        <span className="flex shrink-0 items-center gap-1 text-sm font-semibold text-ink">
+                          PKR {Number(p.netPay || 0).toLocaleString()}
+                          {payrollLink && <ChevronRight size={14} className="text-muted" />}
+                        </span>
+                      </>
+                    )
+                    const rowClass = "flex items-center justify-between gap-2 rounded-2xl bg-surface-2 p-3"
                     return (
-                      <li key={m.id} className="min-w-0 rounded-2xl border border-border p-3.5 transition-colors hover:bg-surface-2">
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="flex min-w-0 items-center gap-2.5">
-                            <IconChip icon={FolderKanban} tone="purple" size="sm" />
-                            <p className="truncate text-sm font-semibold text-ink">{m.project?.name}</p>
-                          </div>
-                          <StatusPill tone={status.tone} className="shrink-0">{status.label}</StatusPill>
-                        </div>
-                        <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted">
-                          {deadline && (
-                            <span className={`flex items-center gap-1 ${overdue ? "font-semibold text-danger" : ""}`}>
-                              <Calendar size={11} /> {overdue ? "Overdue" : "Due"} {fmtDate(m.project.deadline)}
-                            </span>
-                          )}
-                          <span className="flex items-center gap-1">
-                            <Clock3 size={11} /> {Number(m.hoursSpent || 0).toFixed(1)}h logged
-                          </span>
-                        </div>
+                      <li key={p.id}>
+                        {payrollLink ? (
+                          <Link to={payrollLink} className={`${rowClass} transition-colors hover:bg-border`}>{row}</Link>
+                        ) : (
+                          <div className={rowClass}>{row}</div>
+                        )}
                       </li>
                     )
                   })}
                 </ul>
               ) : (
-                <EmptyState icon={FolderKanban} title="No project assignments" description="This employee isn't on any projects yet." />
+                <p className="text-sm text-muted">No payroll records.</p>
               )}
             </section>
           )}
@@ -778,22 +1093,17 @@ export default function EmployeeProfile() {
                 </form>
               )}
 
-              {/* Laptop / Accessories tabs */}
+              {/* One tab per assigned category */}
               <div className="mb-3 flex flex-wrap gap-1.5">
-                {[
-                  { key: "ALL", label: "All", count: assignedAssets.length },
-                  { key: "LAPTOP", label: "Laptops", count: laptopCount },
-                  { key: "ACCESSORY", label: "Accessories", count: accessoryCount },
-                ].map((tab) => (
+                {assetTabs.map((tab) => (
                   <button
                     key={tab.key}
                     onClick={() => setAssetTab(tab.key)}
                     className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-semibold transition-colors ${
-                      assetTab === tab.key ? "pill-accent px-3 py-1.5" : "bg-surface-2 text-muted hover:text-ink"
+                      activeAssetTab === tab.key ? "pill-accent px-3 py-1.5" : "bg-surface-2 text-muted hover:text-ink"
                     }`}
                   >
-                    {tab.key === "LAPTOP" && <Laptop size={11} />}
-                    {tab.key === "ACCESSORY" && <PackageSearch size={11} />}
+                    {tab.key !== "ALL" && (tab.key.includes("laptop") ? <Laptop size={11} /> : <PackageSearch size={11} />)}
                     {tab.label} ({tab.count})
                   </button>
                 ))}
@@ -813,7 +1123,10 @@ export default function EmployeeProfile() {
                               {asset.name}
                             </Link>
                             <p className="truncate text-[11px] text-muted">
-                              {asset.category || "Uncategorized"} · <span className="font-mono">{asset.serialNumber}</span>
+                              <button type="button" onClick={() => setAssetTab(categoryKeyOf(asset))} className="font-medium hover:text-accent hover:underline" title={`Show only ${categoryLabelOf(asset)}`}>
+                                {categoryLabelOf(asset)}
+                              </button>
+                              {" · "}<span className="font-mono">{asset.serialNumber}</span>
                               {asset.warrantyEnd ? ` · Warranty until ${fmtDate(asset.warrantyEnd)}` : ""}
                             </p>
                           </div>
@@ -959,23 +1272,38 @@ export default function EmployeeProfile() {
 
         {!isIT && (
           <div className="min-w-0 space-y-5">
-            {employee.payrollRecords !== undefined && (
-              <section className="card p-5">
-                <SectionHeader title="Recent payroll" />
-                <div className="space-y-2">
-                  {(employee.payrollRecords || []).slice(0, 5).map((p) => (
-                    <div key={p.id} className="flex items-center justify-between gap-2 rounded-2xl bg-surface-2 p-3">
-                      <div>
-                        <p className="text-sm font-semibold text-ink">{p.month}/{p.year}</p>
-                        <p className="text-xs text-muted">{p.status}</p>
-                      </div>
-                      <span className="text-sm font-semibold text-ink">PKR {Number(p.netPay || 0).toLocaleString()}</span>
-                    </div>
-                  ))}
-                  {!(employee.payrollRecords || []).length && <p className="text-sm text-muted">No payroll records.</p>}
-                </div>
-              </section>
-            )}
+            <section className="card p-5">
+              <h3 className="section-title">Projects</h3>
+              <SummarySplit
+                total={projectMemberships.length}
+                totalLabel="Total projects"
+                items={projectBreakdown}
+              />
+              {projectMemberships.length > 0 ? (
+                <ul className="mt-4 space-y-1.5 border-t border-border pt-3">
+                  {projectMemberships.slice(0, 4).map((m) => {
+                    const status = PROJECT_STATUS[m.project?.status] || PROJECT_STATUS.NOT_STARTED
+                    const deadline = m.project?.deadline ? String(m.project.deadline).slice(0, 10) : null
+                    const overdue = deadline && deadline < todayIso && m.project?.status !== "COMPLETED"
+                    return (
+                      <li key={m.id} className="flex items-center justify-between gap-2 rounded-xl px-1 py-1">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium text-ink">{m.project?.name}</p>
+                          {deadline && (
+                            <p className={`text-[11px] ${overdue ? "font-semibold text-danger" : "text-muted"}`}>
+                              {overdue ? "Overdue" : "Due"} {fmtDate(m.project.deadline)}
+                            </p>
+                          )}
+                        </div>
+                        <StatusPill tone={status.tone} className="shrink-0">{status.label}</StatusPill>
+                      </li>
+                    )
+                  })}
+                </ul>
+              ) : (
+                <p className="mt-4 border-t border-border pt-3 text-xs text-muted">This employee isn't on any projects yet.</p>
+              )}
+            </section>
 
               <section className="card min-w-0 p-5">
                 <SectionHeader title="Support History" />
@@ -999,24 +1327,27 @@ export default function EmployeeProfile() {
               </section>
 
               <section className="card min-w-0 p-5">
-                <SectionHeader title="Activity" />
-                {(employee.lifecycleEvents || []).length > 0 ? (
-                  <ul className="max-h-80 space-y-1 overflow-y-auto">
-                    {(employee.lifecycleEvents || []).map((event) => (
-                      <li key={event.id} className="flex items-center gap-3 rounded-2xl px-2 py-2 hover:bg-surface-2">
-                        <IconChip icon={Activity} tone="purple" size="sm" />
+                <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="section-title">Activity</h3>
+                  <MonthNav monthKey={viewMonth} onChange={setViewMonth} minMonth={minMonth} maxMonth={currentMonth} />
+                </div>
+                {monthActivities.length > 0 ? (
+                  <ul className={`max-h-96 space-y-1 overflow-y-auto transition-opacity ${loadingMonth ? "opacity-60" : ""}`}>
+                    {monthActivities.map((item) => (
+                      <li key={item.id} className="flex items-center gap-3 rounded-2xl px-2 py-2 hover:bg-surface-2">
+                        <IconChip icon={item.icon} tone={item.tone} size="sm" />
                         <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-semibold text-ink">{event.asset?.name || "—"}</p>
-                          <p className="text-xs text-muted">{(event.type || "").replaceAll("_", " ").toLowerCase()}</p>
+                          <p className="truncate text-sm font-semibold text-ink">{item.title}</p>
+                          {item.note && <p className="truncate text-xs text-muted">{item.note}</p>}
                         </div>
                         <span className="shrink-0 text-[11px] text-muted">
-                          {new Date(event.occurredAt).toLocaleDateString()}
+                          {new Date(item.at).toLocaleDateString(undefined, { day: "numeric", month: "short", timeZone: timeZone || undefined })}
                         </span>
                       </li>
                     ))}
                   </ul>
                 ) : (
-                  <EmptyState icon={Activity} title="No recent activity" />
+                  <EmptyState icon={Activity} title={monthReady ? "No activity this month" : "Loading…"} />
                 )}
               </section>
           </div>
