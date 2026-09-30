@@ -63,7 +63,7 @@ async function getDailyAttendance(req, res, next) {
       })
     const date = startOfDay(req.query.date, organization?.timezone)
 
-    const [employees, records] = await Promise.all([
+    const [employees, records, notes] = await Promise.all([
       prisma.user.findMany({
         where: {
           organizationId,
@@ -78,9 +78,25 @@ async function getDailyAttendance(req, res, next) {
         where: { organizationId, date },
         include: { markedBy: true },
       }),
+      prisma.attendanceNote.findMany({
+        where: { organizationId, date },
+        include: { author: { select: { name: true } } },
+      }),
     ])
 
     const recordByEmployee = new Map(records.map((r) => [r.employeeId, r]))
+    const noteByEmployee = new Map(notes.map((n) => [n.employeeId, n]))
+
+    // Names for the Location column: the matched attendance site, or the
+    // biometric device the punch came from.
+    const siteIds = [...new Set(records.map((r) => r.siteId).filter(Boolean))]
+    const deviceIds = [...new Set(records.map((r) => r.biometricDeviceId).filter(Boolean))]
+    const [sites, devices] = await Promise.all([
+      siteIds.length ? prisma.attendanceSite.findMany({ where: { id: { in: siteIds } }, select: { id: true, name: true } }) : [],
+      deviceIds.length ? prisma.biometricDevice.findMany({ where: { id: { in: deviceIds } }, select: { id: true, name: true } }) : [],
+    ])
+    const siteName = new Map(sites.map((s) => [s.id, s.name]))
+    const deviceName = new Map(devices.map((d) => [d.id, d.name]))
 
     const rows = employees.map((emp) => {
       const record = recordByEmployee.get(emp.id)
@@ -99,6 +115,18 @@ async function getDailyAttendance(req, res, next) {
           record?.status === "LATE" && record.checkInAt
             ? Math.max(0, localMinutes(record.checkInAt, organization?.timezone || "UTC") - shiftStartMinutes(emp, organization))
             : null,
+        // Signed minutes from shift start to check-in (negative = early
+        // clock-in). Null when there's no check-in.
+        arrivalOffsetMinutes: record?.checkInAt
+          ? localMinutes(record.checkInAt, organization?.timezone || "UTC") - shiftStartMinutes(emp, organization)
+          : null,
+        markedById: record?.markedById || null,
+        offlineRecorded: record?.offlineRecorded || false,
+        siteName: record?.siteId ? siteName.get(record.siteId) || null : null,
+        deviceName: record?.biometricDeviceId ? deviceName.get(record.biometricDeviceId) || null : null,
+        note: noteByEmployee.get(emp.id)?.note || null,
+        noteAuthorName: noteByEmployee.get(emp.id)?.author?.name || null,
+        noteUpdatedAt: noteByEmployee.get(emp.id)?.updatedAt?.toISOString() || null,
         workingMinutes: record?.workingMinutes ?? null,
         expectedWorkingMinutes: workingMinutesPerDay(organization),
         expectedWeeklyMinutes: expectedWeeklyMinutes(organization),
@@ -137,6 +165,67 @@ async function getDailyAttendance(req, res, next) {
   }
 }
 
+const NOTE_MAX_LENGTH = 500
+
+// System note added when a check-in comes from outside the premises (see
+// markSelfAttendance / syncOfflineAttendance). Appended to any existing note
+// for that day rather than replacing what HR wrote; authorId stays as-is
+// (null for a note the system created).
+async function addOutsidePremisesNote(db, organizationId, employeeId, date, distance, where) {
+  const text = `Marked attendance outside the office premises (${distance}m from ${where}) — recorded as Late automatically. HR can change it to Present.`
+  const existing = await db.attendanceNote.findUnique({ where: { employeeId_date: { employeeId, date } } })
+  if (existing?.note.includes("outside the office premises")) return
+  const note = (existing ? `${existing.note}\n${text}` : text).slice(0, NOTE_MAX_LENGTH)
+  await db.attendanceNote.upsert({
+    where: { employeeId_date: { employeeId, date } },
+    update: { note },
+    create: { organizationId, employeeId, date, note },
+  })
+}
+
+// PUT /attendance/notes — add, change or clear (empty text) the note on one
+// employee's day. Route-gated to ADMIN/CEO/HR. Notes live in their own table
+// so writing one never creates an attendance record or changes a status.
+async function setAttendanceNote(req, res, next) {
+  try {
+    const { organizationId, userId } = req.user
+    const { employeeId, date } = req.body || {}
+    const text = String(req.body?.note ?? "").trim()
+
+    if (!employeeId || !date || !/^\d{4}-\d{2}-\d{2}$/.test(String(date))) {
+      return res.status(400).json({ error: "employeeId and date (YYYY-MM-DD) are required" })
+    }
+    if (text.length > NOTE_MAX_LENGTH) {
+      return res.status(400).json({ error: `Note must be ${NOTE_MAX_LENGTH} characters or fewer` })
+    }
+
+    const employee = await prisma.user.findFirst({ where: { id: employeeId, organizationId }, select: { id: true } })
+    if (!employee) return res.status(404).json({ error: "Employee not found" })
+
+    const day = toDateOnly(String(date))
+    if (!text) {
+      await prisma.attendanceNote.deleteMany({ where: { employeeId, date: day } })
+      return res.json({ employeeId, date, note: null, noteAuthorName: null, noteUpdatedAt: null })
+    }
+
+    const saved = await prisma.attendanceNote.upsert({
+      where: { employeeId_date: { employeeId, date: day } },
+      update: { note: text, authorId: userId },
+      create: { organizationId, employeeId, date: day, note: text, authorId: userId },
+      include: { author: { select: { name: true } } },
+    })
+    res.json({
+      employeeId,
+      date,
+      note: saved.note,
+      noteAuthorName: saved.author?.name || null,
+      noteUpdatedAt: saved.updatedAt.toISOString(),
+    })
+  } catch (err) {
+    next(err)
+  }
+}
+
 async function markAttendance(req, res, next) {
   try {
     const { organizationId, userId } = req.user
@@ -157,12 +246,13 @@ async function markAttendance(req, res, next) {
     // late rule — a 10:16 arrival on a 10:00 + 15 min shift stays LATE.
     const finalStatus = resolveArrivalStatus(status, existing?.checkInAt, employee, org)
 
-    // An admin setting the status directly is an explicit override — any
-    // prior "auto-flagged as absent due to location" marker no longer
-    // applies, since a human has now made the call.
+    // An admin setting the status is an explicit decision (e.g. approving an
+    // outside-premises check-in as Present). autoFlagged is left as-is: it
+    // records *where* the employee checked in, which the decision doesn't
+    // change, so the Attendance page keeps showing "Outside premises".
     const record = await prisma.attendanceRecord.upsert({
       where: { employeeId_date: { employeeId, date: day } },
-      update: { status: finalStatus, markedById: userId, autoFlagged: false },
+      update: { status: finalStatus, markedById: userId },
       create: { organizationId, employeeId, date: day, status: finalStatus, markedById: userId },
     })
 
@@ -205,7 +295,8 @@ async function saveDayAttendance(req, res, next) {
         const status = resolveArrivalStatus(r.status, checkInByEmployee.get(r.employeeId), employeeById.get(r.employeeId), org)
         return prisma.attendanceRecord.upsert({
           where: { employeeId_date: { employeeId: r.employeeId, date: day } },
-          update: { status, markedById: userId, autoFlagged: false },
+          // autoFlagged kept — see markAttendance.
+          update: { status, markedById: userId },
           create: { organizationId, employeeId: r.employeeId, date: day, status, markedById: userId },
         })
       })
@@ -343,9 +434,12 @@ async function markSelfAttendance(req, res, next) {
     if (existing?.status==='LEAVE') return res.status(400).json({ error:'Today is already recorded as leave' })
 
     // An employee bound to an attendance site (directly or through the site's
-    // project) can only check in from inside that site: WFH is not offered
-    // to them, and a check-in from outside is recorded as ABSENT with the
-    // exact location kept so management can review it.
+    // project) must check in with a location: WFH is not offered to them. A
+    // check-in from outside the premises (outside every assigned site, or
+    // outside the office geofence for non-site employees) is still accepted
+    // but recorded as LATE + autoFlagged, with the exact location kept and an
+    // automatic day note, so HR can review it and mark Present if the
+    // company allows it.
     const assignedSites=await findAssignedSites(prisma, organizationId, userId)
     const siteBound=assignedSites.length>0
     if (status==='PRESENT' && isWfh && siteBound) {
@@ -372,20 +466,22 @@ async function markSelfAttendance(req, res, next) {
     }
 
     const officeGeofenceActive=organization.geofenceEnabled && organization.officeLatitude!=null && organization.officeLongitude!=null && employee.workLocationType!=='FIELD'
-    let finalStatus=status, autoFlagged=false
-    if (outsideSite) {
-      // Never downgrade a check-in that was already accepted today.
-      if (existing?.checkInAt && existing.status!=='ABSENT') {
-        return res.status(403).json({ error:'You are outside your assigned site, and you have already checked in today.' })
-      }
-      finalStatus='ABSENT'
-      autoFlagged=true
-    } else if (status==='PRESENT' && !siteBound && officeGeofenceActive && hasCoords) {
+    let outsideOffice=false
+    if (status==='PRESENT' && !siteBound && officeGeofenceActive && hasCoords) {
       const distance=distanceMeters(Number(latitude),Number(longitude),Number(organization.officeLatitude),Number(organization.officeLongitude))
       chosenDistance=distance
-      if (distance > Number(organization.geofenceRadiusMeters)) {
-        return res.status(403).json({ error: `You are ${Math.round(distance)}m from the office; the allowed radius is ${organization.geofenceRadiusMeters}m. Move closer and try again — attendance was not marked.` })
+      outsideOffice=distance > Number(organization.geofenceRadiusMeters)
+    }
+    const outsidePremises=outsideSite || outsideOffice
+
+    let finalStatus=status, autoFlagged=false
+    if (outsidePremises) {
+      // Never overwrite a check-in that was already accepted today.
+      if (existing?.checkInAt && existing.status!=='ABSENT') {
+        return res.status(403).json({ error:'You are outside the office premises, and you have already checked in today.' })
       }
+      finalStatus='LATE'
+      autoFlagged=true
     }
 
     const now=new Date()
@@ -394,9 +490,7 @@ async function markSelfAttendance(req, res, next) {
       ? {latitude:Number(latitude),longitude:Number(longitude),distanceMeters:chosenDistance==null?null:Math.round(chosenDistance),siteId:chosenSite?.id||null}
       : {latitude:null,longitude:null,distanceMeters:null,siteId:null}
 
-    // An outside-site attempt is recorded as ABSENT without a check-in time,
-    // so the employee can still check in properly once inside the site.
-    const checkInAt=outsideSite ? null : now
+    const checkInAt=now
     const record=await prisma.attendanceRecord.upsert({
       where:{employeeId_date:{employeeId:userId,date:today}},
       update:{status:finalStatus,markedById:userId,autoFlagged,checkInAt,locationMode:mode,...locationData},
@@ -409,22 +503,24 @@ async function markSelfAttendance(req, res, next) {
           ("id","organizationId","employeeId","attendanceId","siteId","eventType","recordedAt","latitude","longitude","gpsAccuracy","distanceMeters","inside","clientEventId","metadata")
         VALUES
           (${presenceId},${organizationId},${userId},${record.id},${chosenSite?.id||null},${chosenInside ? 'GEOFENCE_ENTER':'GEOFENCE_EXIT'},${now},${Number(latitude)},${Number(longitude)},${req.body?.gpsAccuracy!=null?Number(req.body.gpsAccuracy):null},${chosenDistance},${chosenSite ? chosenInside : null},${req.body?.clientEventId||null},${JSON.stringify({source:'CHECK_IN',siteName:chosenSite?.name||null})}::jsonb)
-        ON CONFLICT ("clientEventId") DO NOTHING
+        ON CONFLICT ("clientEventId") WHERE "clientEventId" IS NOT NULL DO NOTHING
       `
     }
     let message=null
-    if (outsideSite) {
-      message=`You are ${Math.round(chosenDistance)}m outside your assigned site (${chosenSite.name}). You have been marked ABSENT and your location was recorded. Move inside the site and check in again.`
+    if (outsidePremises) {
+      const where=outsideSite ? chosenSite.name : 'the office'
+      message=`You are ${Math.round(chosenDistance)}m outside ${outsideSite ? `your assigned site (${where})` : where}. Your attendance was recorded as LATE with your location; HR will review it.`
+      await addOutsidePremisesNote(prisma, organizationId, userId, today, Math.round(chosenDistance), where)
       await prisma.$executeRaw`
         INSERT INTO "AttendanceAnomaly"
           ("id","organizationId","employeeId","attendanceId","siteId","type","severity","message","metadata")
         VALUES
-          (${`an_${Date.now().toString(36)}_${crypto.randomBytes(4).toString('hex')}`},${organizationId},${userId},${record.id},${chosenSite.id},'OUTSIDE_SITE','HIGH',
-           ${`Check-in attempted ${Math.round(chosenDistance)}m outside assigned site (${chosenSite.name}) — marked ABSENT`},
+          (${`an_${Date.now().toString(36)}_${crypto.randomBytes(4).toString('hex')}`},${organizationId},${userId},${record.id},${chosenSite?.id||null},'OUTSIDE_SITE','HIGH',
+           ${`Checked in ${Math.round(chosenDistance)}m outside ${where} — recorded as LATE`},
            ${JSON.stringify({ distanceMeters: Math.round(chosenDistance), latitude: Number(latitude), longitude: Number(longitude) })}::jsonb)
       `
     }
-    res.json({ ...record, requestedStatus:status, autoFlagged, outsideSite, message, site:chosenSite ? {id:chosenSite.id,name:chosenSite.name,distanceMeters:Math.round(chosenDistance),radiusMeters:Number(chosenSite.radiusMeters),inside:chosenInside} : null })
+    res.json({ ...record, requestedStatus:status, autoFlagged, outsideSite:outsidePremises, message, site:chosenSite ? {id:chosenSite.id,name:chosenSite.name,distanceMeters:Math.round(chosenDistance),radiusMeters:Number(chosenSite.radiusMeters),inside:chosenInside} : null })
   } catch(err) { next(err) }
 }
 
@@ -456,6 +552,7 @@ async function getSelfAttendance(req, res, next) {
 
 module.exports = {
   getDailyAttendance,
+  setAttendanceNote,
   markAttendance,
   saveDayAttendance,
   exportAttendanceSheet,
@@ -556,9 +653,11 @@ async function syncOfflineAttendance(req, res, next) {
             let distance = null
             let anomaly = null
             let outsideSite = false
+            let outsideSiteName = null
 
             // Same site-bound rules as markSelfAttendance: no WFH, location
-            // required, and an outside check-in is recorded as ABSENT.
+            // required, and an outside check-in is recorded as LATE +
+            // autoFlagged with an automatic note for HR to review.
             const assignedSites = status === "CHECK_IN" || status === "CHECK_OUT" ? await findAssignedSites(tx, organizationId, userId) : []
             if (status === "CHECK_IN" && assignedSites.length) {
               if (isWfh) throw new Error(`Work from home is not available — you are assigned to the attendance site "${assignedSites[0].name}"`)
@@ -578,8 +677,9 @@ async function syncOfflineAttendance(req, res, next) {
                 } else if (status === "CHECK_OUT" && best.site.geofenceMode === "STRICT" && !inside) {
                   throw new Error(`Outside all assigned site geofences (${Math.round(distance)}m from nearest site)`)
                 }
+                if (outsideSite) outsideSiteName = best.site.name
                 if (!inside) anomaly={type:"OUTSIDE_SITE",severity:"HIGH",message:outsideSite
-                  ? `Check-in attempted ${Math.round(distance)}m outside assigned site (${best.site.name}) — marked ABSENT`
+                  ? `Checked in ${Math.round(distance)}m outside assigned site (${best.site.name}) — recorded as LATE`
                   : `Attendance location is ${Math.round(distance)}m from nearest assigned site (${best.site.name})`}
               } else if (status === "CHECK_IN") {
                 throw new Error("No active attendance site is assigned to this employee")
@@ -608,15 +708,16 @@ async function syncOfflineAttendance(req, res, next) {
                   ("id","organizationId","employeeId","attendanceId","siteId","eventType","recordedAt","latitude","longitude","gpsAccuracy","distanceMeters","inside","clientEventId","metadata")
                 VALUES
                   (${`ape_${Date.now().toString(36)}_${crypto.randomBytes(5).toString("hex")}`},${organizationId},${userId},${attendance?.id || null},${best?.site?.id || null},${inside ? "GEOFENCE_ENTER" : "GEOFENCE_EXIT"},${recordedAt},${hasCoords ? Number(event.latitude) : null},${hasCoords ? Number(event.longitude) : null},${event.gpsAccuracy != null ? Number(event.gpsAccuracy) : null},${best?.distance ?? null},${inside},${clientEventId},${JSON.stringify({source:"OFFLINE",siteName:best?.site?.name||null})}::jsonb)
-                ON CONFLICT ("clientEventId") DO NOTHING
+                ON CONFLICT ("clientEventId") WHERE "clientEventId" IS NOT NULL DO NOTHING
               `
             } else if (status === "CHECK_IN") {
               let finalStatus = isLateCheckIn(recordedAt, employee, org) ? "LATE" : "PRESENT"
               if (outsideSite) {
                 if (attendance?.checkInAt && attendance.status !== "ABSENT") throw new Error("Outside the assigned site, and already checked in for this day")
-                finalStatus = "ABSENT"
+                finalStatus = "LATE"
+                await addOutsidePremisesNote(tx, organizationId, userId, day, Math.round(distance), outsideSiteName)
               }
-              const checkInAt = outsideSite ? null : recordedAt
+              const checkInAt = recordedAt
               const roundedDistance = distance == null ? null : Math.round(distance)
 
               const verificationHash = crypto

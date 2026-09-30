@@ -30,7 +30,6 @@ import {
   FileText,
   MapPin,
   CalendarRange,
-  BadgeCheck,
   FileSpreadsheet,
   FileBarChart,
 } from "lucide-react"
@@ -154,7 +153,6 @@ export default function MobileNav({ open, onClose }) {
               <Row to="/calendar" icon={CalendarRange} label="Company Calendar" onClick={onClose} />
               <Row to={`/employees/${user?.id}`} icon={UserRound} label="My Profile" onClick={onClose} />
               <Row to="/projects" icon={FolderKanban} label="My Projects" onClick={onClose} />
-              <Row to={`/employee-360/${user?.id}`} icon={BadgeCheck} label="My Employee 360°" onClick={onClose} />
               <Row to="/tasks" icon={ListTodo} label="My Tasks" onClick={onClose} />
               <Row to="/performance" icon={Award} label="My Performance" onClick={onClose} />
               <Row to="/announcements" icon={Bell} label="Announcements" onClick={onClose} />

@@ -11,8 +11,9 @@ const {
   resolveAttendanceAnomaly,
   createAttendanceCorrection,
   listAttendanceCorrections,
+  setAttendanceNote,
 } = require("../controllers/attendance.controller")
-const { requireAuth } = require("../middleware/auth.middleware")
+const { requireAuth, requireRole } = require("../middleware/auth.middleware")
 const { requireAttendancePermission } = require("../utils/permissions")
 const { startAttendanceAutoAbsentJob } = require("../services/attendance-auto-absent.service")
 
@@ -39,5 +40,8 @@ router.get("/export", requireAttendancePermission("canRead"), exportAttendanceSh
 router.get("/anomalies", requireAttendancePermission("canRead"), getAttendanceAnomalies)
 router.patch("/anomalies/:id/resolve", requireAttendancePermission("canUpdate"), resolveAttendanceAnomaly)
 router.get("/corrections", requireAttendancePermission("canRead"), listAttendanceCorrections)
+// Day notes: written only by HR/ADMIN/CEO (a fixed role rule, independent of
+// the permission matrix); still requires being able to read the grid.
+router.put("/notes", requireAttendancePermission("canRead"), requireRole("ADMIN", "CEO", "HR"), setAttendanceNote)
 
 module.exports = router

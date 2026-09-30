@@ -87,9 +87,25 @@ export function DashboardSky({ timeZone, className = "" }) {
   const { hour24, minute } = useOrgClock(timeZone, 60000)
   const hour = hour24 + minute / 60
   const isDay = hour >= 6 && hour < 18.5
+  const name = isDay ? "Sun" : "Moon"
   return (
-    <div className={className} aria-hidden="true">
-      {isDay ? <RealSun palette={sunPalette(hour)} /> : <RealMoon />}
+    <div className={className}>
+      <div aria-hidden="true" className="h-full w-full">
+        {isDay ? <RealSun palette={sunPalette(hour)} /> : <RealMoon />}
+      </div>
+      {/* Hover target over the disk only (r=30 of the 100-unit viewBox, i.e.
+          the middle 60%) — the wrapper itself stays pointer-events-none so
+          the glow never blocks clicks. The label sits to the disk's left,
+          since the right half is clipped by the header's edge. */}
+      <div
+        className="group pointer-events-auto absolute left-[20%] top-[20%] h-[60%] w-[60%] rounded-full"
+        role="img"
+        aria-label={name}
+      >
+        <span className="pointer-events-none absolute right-full top-1/2 mr-2 -translate-y-1/2 whitespace-nowrap rounded-md bg-ink-strong px-2 py-1 text-[11px] font-semibold text-on-strong opacity-0 shadow-pop transition-opacity duration-150 group-hover:opacity-100">
+          {name}
+        </span>
+      </div>
     </div>
   )
 }

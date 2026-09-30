@@ -2,6 +2,7 @@ import { useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "react-router-dom"
 import ParticleText from "../components/ParticleText"
+import { useTheme } from "../context/ThemeContext"
 
 import {
   Package,
@@ -267,6 +268,7 @@ function GaugeRadial({
 
 export default function Dashboard() {
   const { user, organization } = useAuth()
+  const { mode: themeMode } = useTheme()
   const queryClient = useQueryClient()
   const clock = useOrgClock(organization?.timezone, 60000)
 
@@ -1325,35 +1327,28 @@ export default function Dashboard() {
           MANAGEMENTDOCK PARTICLE BANNER
       ======================================================= */}
 
+      {/* Same treatment as the Employee Profile footer: no background card,
+          black dots in light mode / white in dark mode, yellow accents in
+          both. The canvas's touch-none is overridden so swiping over it
+          still scrolls on phones. */}
       <div
-        className="
-          mt-1
-          w-full
-          overflow-hidden
-          rounded-2xl
-          border border-black/5
-          shadow-[0_18px_50px_rgba(0,0,0,0.10)]
-          dark:border-white/5
-          sm:rounded-[26px]
-        "
+        aria-hidden="true"
+        className="mt-8 h-[155px] w-full select-none overflow-hidden sm:h-[170px] [&_canvas]:touch-auto"
         style={{
-          backgroundColor:
-            "#050629",
+          maskImage: "linear-gradient(to bottom, transparent, #000 30%, #000 70%, transparent)",
+          WebkitMaskImage: "linear-gradient(to bottom, transparent, #000 30%, #000 70%, transparent)",
         }}
       >
-
-        <div className="h-[120px] w-full sm:h-[160px] lg:h-[200px]">
-
-          <ParticleText
-            text={(organization?.name && organization.name.trim() ? organization.name : "MANAGEMENTDOCK").toUpperCase()}
-            height={200}
-            repelRadius={155}
-            repelStrength={210}
-            ease={0.065}
-          />
-
-        </div>
-
+        <ParticleText
+          text={(organization?.name && organization.name.trim() ? organization.name : "MANAGEMENTDOCK").toUpperCase()}
+          height={170}
+          background="transparent"
+          dotColor={themeMode === "dark" ? "rgba(255, 255, 255, 0.9)" : "rgba(17, 17, 17, 0.85)"}
+          accentColor="rgba(211, 151, 0, 0.9)"
+          repelRadius={140}
+          repelStrength={210}
+          ease={0.065}
+        />
       </div>
 
     </div>

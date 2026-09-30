@@ -1,7 +1,7 @@
 const prisma = require("../lib/prisma")
 const { hasModuleAccess } = require("../utils/roles")
 
-// Shared by both the per-employee route (Employee360.jsx) and the org-wide
+// Shared by both the per-employee route (/performance/:employeeId) and the org-wide
 // route (Performance.jsx, which posts { employeeId, ... } in the body
 // instead of putting it in the URL).
 async function createReview({ organizationId, reviewerId, employeeId, body }) {
@@ -17,7 +17,7 @@ async function createReview({ organizationId, reviewerId, employeeId, body }) {
     data: { organizationId, employeeId, reviewerId, periodStart: start, periodEnd: end, rating: score, goals: goals?.trim() || null, achievements: achievements?.trim() || null, feedback: feedback?.trim() || null },
     include: { reviewer: { select: { id: true, name: true, role: true } } },
   })
-  await prisma.notification.create({ data: { organizationId, recipientId: employeeId, createdById: reviewerId, type: "PERFORMANCE", title: "Performance review published", message: `A performance review for ${review.periodStart.toISOString().slice(0,10)} to ${review.periodEnd.toISOString().slice(0,10)} is available.`, link: `/employee-360/${employeeId}` } }).catch(() => {})
+  await prisma.notification.create({ data: { organizationId, recipientId: employeeId, createdById: reviewerId, type: "PERFORMANCE", title: "Performance review published", message: `A performance review for ${review.periodStart.toISOString().slice(0,10)} to ${review.periodEnd.toISOString().slice(0,10)} is available.`, link: "/performance" } }).catch(() => {})
   return { status: 201, review }
 }
 

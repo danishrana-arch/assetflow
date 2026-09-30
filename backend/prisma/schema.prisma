@@ -175,7 +175,7 @@ model User {
   lastFailedLoginAt                                            DateTime?
   securityAlertSentAt                                          DateTime?
   passwordResetTokens                                          PasswordResetToken[]
-  announcementsCreated                                        Announcement[]            @relation("AnnouncementCreator")
+  announcementsCreated                                         Announcement[]            @relation("AnnouncementCreator")
   assignedAssets                                               Asset[]                   @relation("AssignedAssets")
   assetRequests                                                AssetRequest[]            @relation("AssetRequestedBy")
   assetRequestsReviewed                                        AssetRequest[]            @relation("AssetRequestReviewer")
@@ -186,6 +186,8 @@ model User {
   AttendancePresenceEvent                                      AttendancePresenceEvent[]
   attendanceRecords                                            AttendanceRecord[]        @relation("AttendanceOf")
   attendanceMarkedBy                                           AttendanceRecord[]        @relation("AttendanceMarkedBy")
+  attendanceNotes                                              AttendanceNote[]          @relation("AttendanceNoteEmployee")
+  attendanceNotesWritten                                       AttendanceNote[]          @relation("AttendanceNoteAuthor")
   AttendanceSite                                               AttendanceSite[]
   AttendanceSiteEmployee                                       AttendanceSiteEmployee[]
   AttendanceSyncEvent                                          AttendanceSyncEvent[]
@@ -652,7 +654,7 @@ model AttendanceRecord {
   // Per-day mode chosen at check-in (distinct from the employee's fixed
   // User.workLocationType classification). WFH skips the geofence check
   // entirely at mark time.
-  locationMode            AttendanceLocationMode   @default(OFFICE)
+  locationMode            AttendanceLocationMode    @default(OFFICE)
   AttendanceAnomaly       AttendanceAnomaly[]
   AttendanceCorrection    AttendanceCorrection[]
   AttendancePresenceEvent AttendancePresenceEvent[]
@@ -664,6 +666,25 @@ model AttendanceRecord {
   @@index([biometricDeviceId])
   @@index([offlineRecorded])
   @@index([siteId, date])
+}
+
+// Free-text note on an employee's day, written by HR/ADMIN/CEO from the
+// Attendance page. Separate from AttendanceRecord so adding a note never
+// creates an attendance record (which would change the day's status).
+model AttendanceNote {
+  id             String   @id @default(cuid())
+  organizationId String
+  employeeId     String
+  date           DateTime @db.Date
+  note           String
+  authorId       String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  employee       User     @relation("AttendanceNoteEmployee", fields: [employeeId], references: [id], onDelete: Cascade)
+  author         User?    @relation("AttendanceNoteAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+
+  @@unique([employeeId, date])
+  @@index([organizationId, date])
 }
 
 model PayrollRecord {

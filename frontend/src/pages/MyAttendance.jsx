@@ -108,9 +108,9 @@ export default function MyAttendance() {
     const checkIn = [...todayEvents].reverse().find((event) => event.type === "CHECK_IN")
     const checkOut = [...todayEvents].reverse().find((event) => event.type === "CHECK_OUT")
     setOfflineToday({
-      checkInAt: checkIn && !checkIn.outsideSite ? checkIn.localRecordedAt : null,
+      checkInAt: checkIn ? checkIn.localRecordedAt : null,
       checkOutAt: checkOut?.localRecordedAt || null,
-      status: checkIn ? (checkIn.outsideSite ? "ABSENT" : "PRESENT") : null,
+      status: checkIn ? (checkIn.outsideSite ? "LATE" : "PRESENT") : null,
     })
     return queue
   }
@@ -208,7 +208,7 @@ export default function MyAttendance() {
       site = nearest?.site || primarySite
       const inside = nearest?.inside ?? false
       // A check-in from outside the assigned site still goes through — the
-      // server records it as ABSENT together with the employee's location.
+      // server records it as LATE (flagged for HR review) with the location.
       outsideSite = type === "CHECK_IN" && siteBound && !inside && !sites.some((s) => s.geofenceMode === "DISABLED")
       if (type === "CHECK_OUT" && site && site.geofenceMode === "STRICT" && !inside) {
         resetCheckInFill()
@@ -251,11 +251,11 @@ export default function MyAttendance() {
             locationMode: event.locationMode,
             clientEventId: event.clientEventId,
           })
+          // Accepted either way; an outside-premises check-in is recorded as
+          // Late and flagged for HR, so tell the employee why.
+          finishCheckInFill()
           if (data?.outsideSite) {
-            resetCheckInFill()
-            setLocationError(data.message || "You are outside your assigned site. You have been marked ABSENT and your location was recorded.")
-          } else {
-            finishCheckInFill()
+            setLocationError(data.message || "You checked in outside the office premises. Your attendance was recorded as Late with your location; HR will review it.")
           }
         } else {
           // Checkout is intentionally queued through the offline-safe endpoint.
@@ -287,9 +287,9 @@ export default function MyAttendance() {
       employeeName: user?.name || "Current employee",
       timezone,
       siteName: event.siteName,
-      status: type === "CHECK_IN" ? (outsideSite ? "ABSENT" : "PRESENT") : "PENDING",
+      status: type === "CHECK_IN" ? (outsideSite ? "LATE" : "PRESENT") : "PENDING",
     })
-    if (outsideSite) setLocationError("You are outside your assigned site. This check-in will be recorded as ABSENT with your location once it syncs.")
+    if (outsideSite) setLocationError("You are outside your assigned site. This check-in will be recorded as Late with your location once it syncs; HR will review it.")
   }
 
   const submitLeave = useMutation({
@@ -368,7 +368,7 @@ export default function MyAttendance() {
 
               {!effectiveCheckInAt && siteBound && (
                 <p className="mb-4 rounded-2xl bg-chip-yellow-bg px-3 py-2.5 text-xs font-medium text-chip-yellow-fg">
-                  You are assigned to {sites.length > 1 ? "project sites" : `"${activeSite?.name}"`}. Attendance can only be marked from inside the site — work from home is not available. Checking in from outside marks you Absent and records your location.
+                  You are assigned to {sites.length > 1 ? "project sites" : `"${activeSite?.name}"`}. Attendance can only be marked from inside the site — work from home is not available. Checking in from outside is recorded as Late with your location, for HR to review.
                 </p>
               )}
 

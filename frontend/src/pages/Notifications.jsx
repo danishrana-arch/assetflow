@@ -21,6 +21,9 @@ function resolveNotificationLink(link, user) {
     return user?.id ? `/employees/${user.id}` : "/"
   }
   if (path === "/leave-requests" && !hasModuleAccess(user?.role, "leave")) return "/attendance/me"
+  // Employee 360 was removed; older performance-review notifications still
+  // point at it.
+  if (path.startsWith("/employee-360/")) return "/performance"
   return link
 }
 

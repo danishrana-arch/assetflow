@@ -1,14 +1,17 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useParams, Link, useNavigate } from "react-router-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   BadgeCheck, Plus, X, Boxes, Ticket as TicketIcon, Activity, UserX, Pencil, Check,
   Mail, Phone, KeyRound, Laptop, PackageSearch, MapPin,
-  Calendar, Users as ManagerIcon, Briefcase, Send, AlertTriangle, Save, Minus,
-  BriefcaseBusiness, UserRoundCheck, CalendarRange, ShieldCheck,
+  Calendar, Users as ManagerIcon, Send, Save, Minus,
+  CalendarRange, ShieldCheck, ChevronRight, ChevronDown, Building2, Clock3, FolderKanban,
+  Briefcase, AtSign, Layers,
+  Palmtree, HeartPulse, CalendarOff,
 } from "lucide-react"
 import api from "../api/client"
 import { useAuth } from "../context/AuthContext"
+import { useTheme } from "../context/ThemeContext"
 import { hasModuleAccess, canManageInventory, ROLE_LABELS } from "../utils/roles"
 import { formatTime, formatClock } from "../utils/time"
 import StatusBadge from "../components/StatusBadge"
@@ -26,6 +29,17 @@ const LEVEL_LABEL = { INTERN: "Intern", JUNIOR: "Junior", SENIOR: "Senior", LEAD
 const REQUEST_TONE = { PENDING: "yellow", APPROVED: "blue", REJECTED: "pink", FULFILLED: "green" }
 const LEVEL_TONE = { INTERN: "slate", JUNIOR: "blue", SENIOR: "green", LEAD: "yellow" }
 const WORK_LOCATION_LABEL = { OFFICE: "Office", FIELD: "Field / Remote" }
+const PROJECT_STATUS = {
+  NOT_STARTED: { label: "Not started", tone: "slate" },
+  IN_PROGRESS: { label: "In progress", tone: "blue" },
+  COMPLETED: { label: "Completed", tone: "green" },
+}
+const LEAVE_TONE = {
+  green: "bg-chip-green-bg text-chip-green-fg",
+  blue: "bg-chip-blue-bg text-chip-blue-fg",
+  orange: "bg-chip-orange-bg text-chip-orange-fg",
+}
+const ASSET_STATUS_TONE = { ASSIGNED: "blue", AVAILABLE: "green", REPAIR: "yellow", LOST: "pink", DISPOSED: "slate" }
 
 function fmtDate(value) {
   if (!value) return undefined
@@ -34,8 +48,8 @@ function fmtDate(value) {
 
 function DetailGroup({ title, children }) {
   return (
-    <div className="border-t border-border pt-3 first:border-t-0 first:pt-0">
-      <p className="mb-2.5 text-[10px] font-bold uppercase tracking-wider text-muted-2">{title}</p>
+    <div className="min-w-0 rounded-2xl border border-border bg-surface-2 p-4">
+      <p className="mb-3 text-[10px] font-bold uppercase tracking-wider text-muted-2">{title}</p>
       <div className="space-y-3">{children}</div>
     </div>
   )
@@ -43,8 +57,8 @@ function DetailGroup({ title, children }) {
 
 function FormGroup({ title, children }) {
   return (
-    <fieldset className="grid grid-cols-1 gap-3 border-t border-border pt-3 first:border-t-0 first:pt-0">
-      <legend className="mb-1 text-[10px] font-bold uppercase tracking-wider text-muted-2">{title}</legend>
+    <fieldset className="grid min-w-0 grid-cols-1 gap-3 rounded-2xl border border-border p-4">
+      <legend className="px-1 text-[10px] font-bold uppercase tracking-wider text-muted-2">{title}</legend>
       {children}
     </fieldset>
   )
@@ -99,6 +113,9 @@ export default function EmployeeProfile() {
   const [usageDrafts, setUsageDrafts] = useState({}) // { [assetId]: { notUsing: bool, actual: string } }
   const [usageSubmitted, setUsageSubmitted] = useState({}) // { [assetId]: true }
   const [certificateDrafts, setCertificateDrafts] = useState([])
+  const { mode: themeMode } = useTheme()
+  const detailsRef = useRef(null)
+  const [detailsOpen, setDetailsOpen] = useState(false)
 
   const { data: employee, isLoading } = useQuery({
     queryKey: ["employee", id],
@@ -363,27 +380,79 @@ export default function EmployeeProfile() {
     setUsageDrafts((prev) => ({ ...prev, [assetId]: { notUsing: false, actual: "", ...prev[assetId], ...patch } }))
   }
 
+  function handleEditClick() {
+    startEditing()
+    setDetailsOpen(true)
+    // The edit form lives in the Detailed Information card, which sits
+    // below the fold on smaller screens — bring it into view.
+    requestAnimationFrame(() => detailsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }))
+  }
+
+  // Attendance — same formula as before: this month's PRESENT+LATE share of
+  // recorded days. The legend counts come from the same records.
+  const now = new Date()
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+  const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1)
+  const monthAttendance = (employee.attendanceRecords || []).filter((record) => {
+    const date = record.date ? new Date(record.date) : null
+    return date && date >= monthStart && date < monthEnd
+  })
+  const presentCount = monthAttendance.filter((a) => a.status === "PRESENT").length
+  const lateCount = monthAttendance.filter((a) => a.status === "LATE").length
+  const absentCount = monthAttendance.filter((a) => a.status === "ABSENT").length
+  const attendancePct = monthAttendance.length ? Math.round(((presentCount + lateCount) / monthAttendance.length) * 100) : 0
+  const monthLabel = now.toLocaleDateString(undefined, { month: "long" })
+  const attendanceLegend = [
+    { key: "present", label: "Present", count: presentCount, dot: "bg-emerald-500" },
+    { key: "absent", label: "Absent", count: absentCount, dot: "bg-rose-500" },
+    { key: "late", label: "Late", count: lateCount, dot: "bg-amber-400" },
+  ]
+
+  // Leave balance — same day counting as before, split by leave type.
+  const year = now.getFullYear()
+  const leaveUsed = { CASUAL: 0, SICK: 0, UNPAID: 0 }
+  for (const l of employee.leaveApplications || []) {
+    if (new Date(l.startDate).getFullYear() !== year) continue
+    const days = Math.max(1, Math.round((new Date(l.endDate) - new Date(l.startDate)) / 86400000) + 1)
+    leaveUsed[l.type || "CASUAL"] = (leaveUsed[l.type || "CASUAL"] || 0) + days
+  }
+  const paidAllowance = Number(employee.organization?.casualLeaveAllowance || 0)
+  const sickAllowance = Number(employee.organization?.sickLeaveAllowance || 0)
+  const leaveTiles = [
+    { key: "paid", label: "Paid Leaves", value: Math.max(0, paidAllowance - leaveUsed.CASUAL), unit: "left", hint: `${leaveUsed.CASUAL} of ${paidAllowance} used`, icon: Palmtree, tone: "green" },
+    { key: "sick", label: "Sick Leaves", value: Math.max(0, sickAllowance - leaveUsed.SICK), unit: "left", hint: `${leaveUsed.SICK} of ${sickAllowance} used`, icon: HeartPulse, tone: "blue" },
+    { key: "unpaid", label: "Unpaid Leaves", value: leaveUsed.UNPAID, unit: leaveUsed.UNPAID === 1 ? "day" : "days", hint: "Taken this year", icon: CalendarOff, tone: "orange" },
+  ]
+
+  const projectMemberships = employee.projectMemberships || []
+  const activeProjects = projectMemberships.filter((m) => m.project?.status === "IN_PROGRESS").length
+  const completedProjects = projectMemberships.filter((m) => m.project?.status === "COMPLETED").length
+
+  const organizationName = employee.organization?.name || organization?.name
+  // Core fields always show (with "—" when empty) so the card keeps a steady
+  // shape; the optional ones only appear when set. Personal email/address
+  // follow the same lens as the Detailed Information card.
+  const heroMeta = [
+    { key: "title", icon: Briefcase, label: "Role / Job title", value: employee.designation || ROLE_LABELS[employee.role] || employee.role, always: true },
+    { key: "email", icon: Mail, label: "Company email", value: employee.email, always: true },
+    { key: "personalEmail", icon: AtSign, label: "Personal email", value: employee.personalEmail, always: true, hidden: isIT },
+    { key: "phone", icon: Phone, label: "Phone", value: employee.phone, always: true },
+    { key: "department", icon: Layers, label: "Department", value: employee.department?.name, always: true },
+    { key: "manager", icon: ManagerIcon, label: "Reporting manager", value: employee.manager?.name, always: true },
+    { key: "address", icon: MapPin, label: "Address", value: employee.address, always: true, hidden: !showPersonalDetails },
+    { key: "org", icon: Building2, label: "Company", value: organizationName },
+    { key: "joined", icon: Calendar, label: "Joined", value: fmtDate(employee.joiningDate) },
+    { key: "shift", icon: Clock3, label: "Shift", value: employee.shiftStart || employee.shiftEnd ? `${formatClock(employee.shiftStart) || "—"} - ${formatClock(employee.shiftEnd) || "—"}` : null },
+  ].filter((item) => !item.hidden && (item.always || item.value))
+
+  const iconButton = "flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface text-ink transition-colors hover:bg-surface-2 disabled:opacity-60"
+
   return (
     <div>
       <PageHeader
         title="Employee Profile"
         subtitle="Personal information, assigned assets and activity."
         backTo={canManageAssets || hasModuleAccess(user?.role, "employees") ? "/employees" : "/"}
-        actions={
-          <div className="flex flex-wrap gap-2">
-            <Link to={`/employee-360/${id}`} className="inline-flex items-center gap-2 rounded-2xl bg-surface-2 px-4 py-2.5 text-xs font-semibold text-ink"><BadgeCheck size={14} /> 360° View</Link>
-            {canRemoveEmployee && (
-              <button
-                onClick={handleRemoveEmployee}
-                disabled={removeEmployee.isPending}
-                className="pill-secondary flex items-center gap-1.5 px-4 py-2.5 text-sm text-danger disabled:opacity-60"
-              >
-                <UserX size={15} />
-                {removeEmployee.isPending ? "Removing…" : "Remove Employee"}
-              </button>
-            )}
-          </div>
-        }
       />
       {removeEmployee.isError && (
         <div className="mb-4 rounded-2xl bg-chip-pink-bg px-3.5 py-2.5 text-sm text-chip-pink-fg">
@@ -404,152 +473,246 @@ export default function EmployeeProfile() {
         </div>
       )}
 
-      {/* Small particle banner showing employee's organization */}
-      <div
-        className="mt-2 w-full overflow-hidden rounded-2xl border border-black/5 shadow-[0_18px_50px_rgba(0,0,0,0.10)] dark:border-white/5"
-        style={{ backgroundColor: "#050629" }}
-      >
-        <div className="h-[120px] w-full sm:h-[160px] lg:h-[200px]">
-          <ParticleText
-            text={(employee?.organization?.name && employee.organization.name.trim() ? employee.organization.name : "MANAGEMENTDOCK").toUpperCase()}
-            height={200}
-            repelRadius={155}
-            repelStrength={210}
-            ease={0.065}
-          />
-        </div>
-      </div>
+      {/* Row 1 — profile hero + attendance summary */}
+      <div className="mb-5 grid grid-cols-1 gap-5 lg:grid-cols-3">
+        <section className={`card min-w-0 p-5 sm:p-6 ${isIT ? "lg:col-span-3" : "lg:col-span-2"}`}>
+          <div className="flex flex-col gap-5 sm:flex-row sm:items-start">
+            <Avatar name={employee.name} size="2xl" className="self-center shadow-card ring-4 ring-surface-2 sm:self-start" />
 
-      {/* Top identity bar — name / designation / reporting manager / company
-          email on the left, company name tag in the org's brand color on
-          the right. */}
-      <div className="card mb-5 flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-4">
-          <Avatar name={employee.name} size="lg" />
-          <div className="min-w-0">
-            <h2 className="truncate text-lg font-bold text-ink" style={{ letterSpacing: "-0.02em" }}>
-              {employee.name}
-            </h2>
-            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
-              {(employee.designation || employee.skill) && (
-                <span className="flex items-center gap-1">
-                  <Briefcase size={12} /> {employee.designation || employee.skill}
-                </span>
-              )}
-              {employee.manager?.name && (
-                <span className="flex items-center gap-1">
-                  <ManagerIcon size={12} /> Reports to {employee.manager.name}
-                </span>
-              )}
-              {employee.email && (
-                <span className="flex items-center gap-1">
-                  <Mail size={12} /> {employee.email}
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
-        {/** Attendance timeline & status for today's record (visible to admins/CEO and employee) */}
-        {todayRecord && (
-          <div className="mb-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <p className="text-sm font-semibold text-ink">Today's shift</p>
-                {todayRecord.status === "LATE" && (
-                  <StatusPill tone="yellow">LATE</StatusPill>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0 text-center sm:text-left">
+                  <div className="flex flex-wrap items-center justify-center gap-2 sm:justify-start">
+                    <h2 className="min-w-0 break-words text-xl font-bold text-ink sm:text-2xl" style={{ letterSpacing: "-0.02em" }}>
+                      {employee.name}
+                    </h2>
+                    <StatusBadge type="employee" status={employee.status} />
+                  </div>
+                  <p className="mt-1 text-sm text-muted">
+                    {employee.designation || employee.skill || ROLE_LABELS[employee.role] || employee.role}
+                    {employee.department?.name ? ` · ${employee.department.name}` : ""}
+                  </p>
+                </div>
+
+                <div className="flex shrink-0 flex-wrap items-center justify-center gap-2">
+                  {canEdit && !editing && (
+                    <button onClick={handleEditClick} className="pill-secondary flex h-9 items-center gap-1.5 px-3.5 text-xs">
+                      <Pencil size={13} /> Edit profile
+                    </button>
+                  )}
+                  {employee.email && (
+                    <a href={`mailto:${employee.email}`} className={iconButton} aria-label="Email" title="Email">
+                      <Mail size={15} />
+                    </a>
+                  )}
+                  {employee.phone && (
+                    <a href={`tel:${employee.phone}`} className={iconButton} aria-label="Call" title="Call">
+                      <Phone size={15} />
+                    </a>
+                  )}
+                  {canResetPassword && (
+                    <button onClick={handleResetPassword} disabled={resetPassword.isPending} className={iconButton} aria-label="Reset password" title="Reset password">
+                      <KeyRound size={15} />
+                    </button>
+                  )}
+                  {canRemoveEmployee && (
+                    <button
+                      onClick={handleRemoveEmployee}
+                      disabled={removeEmployee.isPending}
+                      className={`${iconButton} text-danger hover:bg-chip-pink-bg`}
+                      aria-label="Remove employee"
+                      title={removeEmployee.isPending ? "Removing…" : "Remove employee"}
+                    >
+                      <UserX size={15} />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="mt-3 flex flex-wrap items-center justify-center gap-1.5 sm:justify-start">
+                <StatusPill tone="blue" icon={ShieldCheck}>{ROLE_LABELS[employee.role] || employee.role}</StatusPill>
+                {level && <StatusPill tone={levelTone} icon={BadgeCheck}>{LEVEL_LABEL[level]}</StatusPill>}
+                {!isIT && (
+                  <StatusPill tone="slate" icon={MapPin}>{WORK_LOCATION_LABEL[employee.workLocationType] || "Office"}</StatusPill>
                 )}
               </div>
-              <div className="text-xs text-muted">
-                {todayRecord.checkInAt ? formatTime(todayRecord.checkInAt) : "-"}
-                {todayRecord.checkOutAt ? ` — ${formatTime(todayRecord.checkOutAt)}` : ""}
+
+              {heroMeta.length > 0 && (
+                <dl className="mt-5 grid grid-cols-1 gap-x-6 gap-y-3.5 border-t border-border pt-4 sm:grid-cols-2 xl:grid-cols-3">
+                  {heroMeta.map(({ key, icon: Icon, label, value }) => (
+                    <div key={key} className="flex min-w-0 items-start gap-2.5">
+                      <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-surface-2 text-muted">
+                        <Icon size={13} />
+                      </span>
+                      <div className="min-w-0">
+                        <dt className="text-[10px] font-bold uppercase tracking-wider text-muted-2">{label}</dt>
+                        <dd className={`truncate text-sm font-medium ${value ? "text-ink" : "text-muted-2"}`} title={typeof value === "string" ? value : undefined}>{value || "—"}</dd>
+                      </div>
+                    </div>
+                  ))}
+                </dl>
+              )}
+            </div>
+          </div>
+        </section>
+
+        {!isIT && (
+          <section className="card flex min-w-0 flex-col p-5">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h3 className="section-title">Attendance</h3>
+                <p className="mt-0.5 text-xs text-muted">
+                  {monthLabel} · {monthAttendance.length} {monthAttendance.length === 1 ? "day" : "days"} recorded
+                </p>
               </div>
+              <p className="shrink-0 text-3xl font-bold tabular-nums text-ink" style={{ letterSpacing: "-0.03em" }}>
+                {attendancePct}%
+              </p>
             </div>
 
-            <WorkingTimeProgress
-              workingMinutes={todayRecord.workingMinutes}
-              checkInAt={todayRecord.checkInAt}
-              checkOutAt={todayRecord.checkOutAt}
-              expectedMinutes={Number(organization?.workingHoursPerDay || 8) * 60}
-              date={todayRecord.date}
-              className="mt-2 max-w-none"
-            />
-          </div>
+            <div className="mt-4 flex h-1.5 w-full overflow-hidden rounded-full bg-surface-2" aria-hidden="true">
+              {monthAttendance.length > 0 && attendanceLegend.map((item) => (
+                <span key={item.key} className={item.dot} style={{ width: `${(item.count / monthAttendance.length) * 100}%` }} />
+              ))}
+            </div>
+
+            <ul className="mt-4 grid grid-cols-3 gap-2">
+              {attendanceLegend.map((item) => (
+                <li key={item.key} className="min-w-0 rounded-2xl bg-surface-2 px-3 py-2.5">
+                  <p className="flex items-center gap-1.5 text-xs font-medium text-muted">
+                    <span className={`h-2 w-2 shrink-0 rounded-full ${item.dot}`} />
+                    <span className="truncate">{item.label}</span>
+                  </p>
+                  <p className="mt-1 text-lg font-bold tabular-nums text-ink">{item.count}</p>
+                </li>
+              ))}
+            </ul>
+
+            {todayRecord && (
+              <div className="mt-4 border-t border-border pt-4">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-semibold text-ink">Today's shift</p>
+                    {todayRecord.status === "LATE" && <StatusPill tone="yellow">LATE</StatusPill>}
+                  </div>
+                  <div className="text-xs text-muted">
+                    {todayRecord.checkInAt ? formatTime(todayRecord.checkInAt) : "-"}
+                    {todayRecord.checkOutAt ? ` — ${formatTime(todayRecord.checkOutAt)}` : ""}
+                  </div>
+                </div>
+                <WorkingTimeProgress
+                  workingMinutes={todayRecord.workingMinutes}
+                  checkInAt={todayRecord.checkInAt}
+                  checkOutAt={todayRecord.checkOutAt}
+                  expectedMinutes={Number(organization?.workingHoursPerDay || 8) * 60}
+                  date={todayRecord.date}
+                  className="mt-2 max-w-none"
+                />
+              </div>
+            )}
+
+            <Link
+              to={`/employees/${id}/attendance`}
+              className="mt-auto inline-flex items-center gap-1.5 pt-4 text-xs font-semibold text-accent hover:underline"
+            >
+              <CalendarRange size={13} /> View attendance history <ChevronRight size={13} />
+            </Link>
+          </section>
         )}
       </div>
 
-      {!isIT && (
-        <>
-      {/* Employee 360 overview */}
-      <section className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {(() => {
-          const allAttendance = employee.attendanceRecords || []
-          const now = new Date()
-          const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
-          const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1)
-          const attendance = allAttendance.filter((record) => {
-            const date = record.date ? new Date(record.date) : null
-            return date && date >= monthStart && date < monthEnd
-          })
-          const present = attendance.filter((a) => ["PRESENT", "LATE"].includes(a.status)).length
-          const attendancePct = attendance.length ? Math.round((present / attendance.length) * 100) : 0
-          const activeProjects = (employee.projectMemberships || []).filter((m) => m.project?.status === "IN_PROGRESS").length
-          const completedProjects = (employee.projectMemberships || []).filter((m) => m.project?.status === "COMPLETED").length
-          const year = new Date().getFullYear()
-          const leaveDays = (employee.leaveApplications || []).filter((l) => new Date(l.startDate).getFullYear() === year).reduce((sum, l) => sum + Math.max(1, Math.round((new Date(l.endDate) - new Date(l.startDate)) / 86400000) + 1), 0)
-          const allowance = Number(employee.organization?.casualLeaveAllowance || 0) + Number(employee.organization?.sickLeaveAllowance || 0)
-          const remaining = Math.max(0, allowance - leaveDays)
-          const monthLabel = now.toLocaleDateString(undefined, { month: "long" })
-          return <>
-            <div className="card p-4"><p className="text-xs text-muted">Attendance</p><p className="mt-1 text-2xl font-semibold text-ink">{attendancePct}%</p><p className="text-[11px] text-muted">{monthLabel}</p></div>
-            <div className="card p-4"><p className="text-xs text-muted">Leave remaining</p><p className="mt-1 text-2xl font-semibold text-ink">{remaining}</p><p className="text-[11px] text-muted">Approved days this year: {leaveDays}</p></div>
-            <div className="card p-4"><p className="text-xs text-muted">Projects</p><p className="mt-1 text-2xl font-semibold text-ink">{activeProjects}</p><p className="text-[11px] text-muted">{completedProjects} completed</p></div>
-            <div className="card p-4"><p className="text-xs text-muted">Assigned assets</p><p className="mt-1 text-2xl font-semibold text-ink">{assignedAssets.length}</p><p className="text-[11px] text-muted">Current assignments</p></div>
-          </>
-        })()}
-      </section>
-      <section className="mb-5 grid gap-4 lg:grid-cols-2">
-        <div className="card p-5"><SectionHeader title="Projects & time"/><div className="mt-3 space-y-2">{(employee.projectMemberships||[]).slice(0,6).map(m=><div key={m.id} className="flex items-center justify-between rounded-2xl bg-surface-2 p-3"><div className="min-w-0"><p className="truncate text-sm font-semibold text-ink">{m.project?.name}</p><p className="text-xs text-muted">{m.project?.status?.replaceAll("_"," ")} · {Number(m.hoursSpent||0).toFixed(1)}h</p></div>{m.project?.deadline&&<span className="text-[11px] text-muted">Due {new Date(m.project.deadline).toLocaleDateString()}</span>}</div>)}{!(employee.projectMemberships||[]).length&&<p className="text-sm text-muted">No project assignments.</p>}</div></div>
-        {employee.payrollRecords !== undefined && <div className="card p-5"><SectionHeader title="Recent payroll"/><div className="mt-3 space-y-2">{(employee.payrollRecords||[]).slice(0,5).map(p=><div key={p.id} className="flex items-center justify-between rounded-2xl bg-surface-2 p-3"><div><p className="text-sm font-semibold text-ink">{p.month}/{p.year}</p><p className="text-xs text-muted">{p.status}</p></div><span className="text-sm font-semibold text-ink">PKR {Number(p.netPay||0).toLocaleString()}</span></div>)}{!(employee.payrollRecords||[]).length&&<p className="text-sm text-muted">No payroll records.</p>}</div></div>}
-      </section>
-
-      {/* Attendance History — links out to its own page rather than listing
-          records inline here; the destination reuses the same
-          `["employee", id]` query, so it's already warm from this page's cache. */}
-      <section className="mb-5">
-        <div className="card flex flex-wrap items-center justify-between gap-3 p-5">
-          <div>
-            <h3 className="section-title">Attendance History</h3>
-            <p className="mt-1 text-sm text-muted">View {employee.name.split(" ")[0]}'s full check-in/check-out history.</p>
-          </div>
-          <Link
-            to={`/employees/${id}/attendance`}
-            className="pill-secondary inline-flex shrink-0 items-center gap-2 px-4 py-2.5 text-sm"
-          >
-            <CalendarRange size={15} /> View Attendance History
-          </Link>
-        </div>
-      </section>
-        </>
-      )}
-
       {isIT && (
-        <section className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          <div className="card p-4"><p className="text-xs text-muted">Assigned assets</p><p className="mt-1 text-2xl font-semibold text-ink">{assignedAssets.length}</p><p className="text-[11px] text-muted">Current assignments</p></div>
-          <div className="card p-4"><p className="text-xs text-muted">Laptops</p><p className="mt-1 text-2xl font-semibold text-ink">{laptopCount}</p><p className="text-[11px] text-muted">Assigned laptop devices</p></div>
-          <div className="card p-4"><p className="text-xs text-muted">Accessories</p><p className="mt-1 text-2xl font-semibold text-ink">{accessoryCount}</p><p className="text-[11px] text-muted">Monitors, phones and accessories</p></div>
+        <section className="mb-5 grid gap-3 sm:grid-cols-3">
+          {[
+            { label: "Assigned assets", value: assignedAssets.length, hint: "Current assignments" },
+            { label: "Laptops", value: laptopCount, hint: "Assigned laptop devices" },
+            { label: "Accessories", value: accessoryCount, hint: "Monitors, phones and accessories" },
+          ].map((stat) => (
+            <div key={stat.label} className="card p-4">
+              <p className="text-xs text-muted">{stat.label}</p>
+              <p className="mt-1 text-2xl font-semibold text-ink">{stat.value}</p>
+              <p className="text-[11px] text-muted">{stat.hint}</p>
+            </div>
+          ))}
         </section>
       )}
 
-      {/**/}
-      {/* Contact panel + content, matching the ManagementDock contact-detail layout */}
+      {/* Row 2 — main content + details sidebar */}
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
-        {/* LEFT — wider column: assets, tickets, activity */}
-        <div className="space-y-5 lg:order-1 lg:col-span-2">
+        <div className={`min-w-0 space-y-5 ${isIT ? "lg:col-span-3" : "lg:col-span-2"}`}>
+          {!isIT && (
+            <section className="card p-5">
+              <SectionHeader
+                title="Leave Balance"
+                action={<span className="rounded-full bg-surface-2 px-2.5 py-1 text-[11px] font-semibold text-muted">{year}</span>}
+              />
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                {leaveTiles.map(({ key, label, value, unit, hint, icon: Icon, tone }) => (
+                  <div key={key} className={`min-w-0 rounded-2xl border border-border bg-surface-2 p-3.5 ${key === "unpaid" ? "col-span-2 sm:col-span-1" : ""}`}>
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="truncate text-xs font-medium text-muted">{label}</p>
+                      <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${LEAVE_TONE[tone]}`}>
+                        <Icon size={14} />
+                      </span>
+                    </div>
+                    <p className="mt-2 text-2xl font-bold tabular-nums text-ink" style={{ letterSpacing: "-0.02em" }}>
+                      {value} <span className="text-xs font-medium tracking-normal text-muted">{unit}</span>
+                    </p>
+                    <p className="mt-0.5 truncate text-[11px] text-muted-2">{hint}</p>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {!isIT && (
+            <section className="card p-5">
+              <SectionHeader
+                title="Projects"
+                action={projectMemberships.length > 0 && (
+                  <span className="text-xs text-muted">{activeProjects} active · {completedProjects} completed</span>
+                )}
+              />
+              {projectMemberships.length > 0 ? (
+                <ul className="grid gap-2.5 sm:grid-cols-2">
+                  {projectMemberships.slice(0, 6).map((m) => {
+                    const status = PROJECT_STATUS[m.project?.status] || PROJECT_STATUS.NOT_STARTED
+                    const deadline = m.project?.deadline ? String(m.project.deadline).slice(0, 10) : null
+                    const overdue = deadline && deadline < todayIso && m.project?.status !== "COMPLETED"
+                    return (
+                      <li key={m.id} className="min-w-0 rounded-2xl border border-border p-3.5 transition-colors hover:bg-surface-2">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex min-w-0 items-center gap-2.5">
+                            <IconChip icon={FolderKanban} tone="purple" size="sm" />
+                            <p className="truncate text-sm font-semibold text-ink">{m.project?.name}</p>
+                          </div>
+                          <StatusPill tone={status.tone} className="shrink-0">{status.label}</StatusPill>
+                        </div>
+                        <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted">
+                          {deadline && (
+                            <span className={`flex items-center gap-1 ${overdue ? "font-semibold text-danger" : ""}`}>
+                              <Calendar size={11} /> {overdue ? "Overdue" : "Due"} {fmtDate(m.project.deadline)}
+                            </span>
+                          )}
+                          <span className="flex items-center gap-1">
+                            <Clock3 size={11} /> {Number(m.hoursSpent || 0).toFixed(1)}h logged
+                          </span>
+                        </div>
+                      </li>
+                    )
+                  })}
+                </ul>
+              ) : (
+                <EmptyState icon={FolderKanban} title="No project assignments" description="This employee isn't on any projects yet." />
+              )}
+            </section>
+          )}
+
           {/* Assigned Assets */}
           {showAssets ? (
-            <div className="card p-5">
+            <section className="card p-5">
               <SectionHeader
-                title="Assigned Assets"
+                title={`Assigned Assets${assignedAssets.length ? ` (${assignedAssets.length})` : ""}`}
                 action={
                   canManageAssets && (
                     <div className="flex items-center gap-2">
@@ -602,7 +765,7 @@ export default function EmployeeProfile() {
                     value={selectedAssetId}
                     onChange={(e) => setSelectedAssetId(e.target.value)}
                     required
-                    className="field flex-1"
+                    className="field min-w-0 flex-1"
                   >
                     <option value="">Select an available asset…</option>
                     {(availableAssets || []).map((a) => (
@@ -616,7 +779,7 @@ export default function EmployeeProfile() {
               )}
 
               {/* Laptop / Accessories tabs */}
-              <div className="mb-3 flex gap-1.5">
+              <div className="mb-3 flex flex-wrap gap-1.5">
                 {[
                   { key: "ALL", label: "All", count: assignedAssets.length },
                   { key: "LAPTOP", label: "Laptops", count: laptopCount },
@@ -636,95 +799,104 @@ export default function EmployeeProfile() {
                 ))}
               </div>
 
-              <ul className="max-h-96 space-y-2 overflow-y-auto">
-                {visibleAssets.map((asset) => {
-                  const draft = usageDrafts[asset.id] || { notUsing: false, actual: "" }
-                  const submitted = usageSubmitted[asset.id]
-                  return (
-                    <li key={asset.id} className="rounded-2xl px-2 py-2 hover:bg-surface-2">
-                      <div className="flex items-center gap-3">
-                        <IconChip icon={assetTabOf(asset) === "LAPTOP" ? Laptop : Boxes} tone="blue" size="sm" />
-                        <div className="min-w-0 flex-1">
-                          <Link to={`/inventory/${asset.id}`} className="block truncate text-sm font-semibold text-ink hover:text-accent">
-                            {asset.name}
-                          </Link>
-                          <p className="truncate font-mono text-[11px] text-muted">{asset.serialNumber}</p>
-                        </div>
-                        {canManageAssets && (
-                          <button
-                            onClick={() => removeAsset.mutate(asset.id)}
-                            disabled={removeAsset.isPending}
-                            className="shrink-0 text-xs font-semibold text-danger hover:underline"
-                          >
-                            Remove
-                          </button>
-                        )}
-                      </div>
-
-                      {/* Self-service usage confirmation — routes a
-                          discrepancy to IT/management as a ticket. */}
-                      {isSelf && (
-                        <div className="ml-11 mt-1.5">
-                          {submitted ? (
-                            <p className="flex items-center gap-1 text-[11px] font-medium text-chip-green-fg">
-                              <Check size={11} /> Reported to IT — they'll follow up.
+              {visibleAssets.length > 0 ? (
+                <ul className="max-h-[28rem] space-y-2 overflow-y-auto">
+                  {visibleAssets.map((asset) => {
+                    const draft = usageDrafts[asset.id] || { notUsing: false, actual: "" }
+                    const submitted = usageSubmitted[asset.id]
+                    return (
+                      <li key={asset.id} className="rounded-2xl border border-border px-3 py-2.5 transition-colors hover:bg-surface-2">
+                        <div className="flex items-center gap-3">
+                          <IconChip icon={assetTabOf(asset) === "LAPTOP" ? Laptop : Boxes} tone="blue" size="sm" />
+                          <div className="min-w-0 flex-1">
+                            <Link to={`/inventory/${asset.id}`} className="block truncate text-sm font-semibold text-ink hover:text-accent">
+                              {asset.name}
+                            </Link>
+                            <p className="truncate text-[11px] text-muted">
+                              {asset.category || "Uncategorized"} · <span className="font-mono">{asset.serialNumber}</span>
+                              {asset.warrantyEnd ? ` · Warranty until ${fmtDate(asset.warrantyEnd)}` : ""}
                             </p>
-                          ) : (
-                            <>
-                              <label className="flex items-center gap-1.5 text-[11px] text-muted">
-                                <input
-                                  type="checkbox"
-                                  checked={!draft.notUsing}
-                                  onChange={(e) => setUsageDraft(asset.id, { notUsing: !e.target.checked })}
-                                  className="h-3.5 w-3.5 rounded border-border-strong"
-                                />
-                                I'm currently using this
-                              </label>
-                              {draft.notUsing && (
-                                <form
-                                  onSubmit={(e) => {
-                                    e.preventDefault()
-                                    if (draft.actual.trim()) reportUsage.mutate({ asset, actual: draft.actual.trim() })
-                                  }}
-                                  className="mt-1.5 flex gap-1.5"
-                                >
-                                  <input
-                                    value={draft.actual}
-                                    onChange={(e) => setUsageDraft(asset.id, { actual: e.target.value })}
-                                    placeholder="What are you actually using?"
-                                    className="field flex-1 py-1.5 text-xs"
-                                    required
-                                  />
-                                  <button
-                                    type="submit"
-                                    disabled={reportUsage.isPending}
-                                    className="pill-accent flex items-center gap-1 px-3 py-1.5 text-[11px] disabled:opacity-60"
-                                  >
-                                    <Send size={10} /> Submit
-                                  </button>
-                                </form>
-                              )}
-                            </>
+                          </div>
+                          {asset.status && (
+                            <StatusPill tone={ASSET_STATUS_TONE[asset.status] || "slate"} className="hidden shrink-0 sm:inline-flex">
+                              {asset.status.toLowerCase()}
+                            </StatusPill>
+                          )}
+                          {canManageAssets && (
+                            <button
+                              onClick={() => removeAsset.mutate(asset.id)}
+                              disabled={removeAsset.isPending}
+                              className="shrink-0 text-xs font-semibold text-danger hover:underline"
+                            >
+                              Remove
+                            </button>
                           )}
                         </div>
-                      )}
-                    </li>
-                  )
-                })}
-                {visibleAssets.length === 0 && (
-                  <EmptyState icon={Boxes} title="No assets here" description="Nothing assigned in this category yet." />
-                )}
-              </ul>
-            </div>
+
+                        {/* Self-service usage confirmation — routes a
+                            discrepancy to IT/management as a ticket. */}
+                        {isSelf && (
+                          <div className="ml-12 mt-1.5">
+                            {submitted ? (
+                              <p className="flex items-center gap-1 text-[11px] font-medium text-chip-green-fg">
+                                <Check size={11} /> Reported to IT — they'll follow up.
+                              </p>
+                            ) : (
+                              <>
+                                <label className="flex items-center gap-1.5 text-[11px] text-muted">
+                                  <input
+                                    type="checkbox"
+                                    checked={!draft.notUsing}
+                                    onChange={(e) => setUsageDraft(asset.id, { notUsing: !e.target.checked })}
+                                    className="h-3.5 w-3.5 rounded border-border-strong"
+                                  />
+                                  I'm currently using this
+                                </label>
+                                {draft.notUsing && (
+                                  <form
+                                    onSubmit={(e) => {
+                                      e.preventDefault()
+                                      if (draft.actual.trim()) reportUsage.mutate({ asset, actual: draft.actual.trim() })
+                                    }}
+                                    className="mt-1.5 flex gap-1.5"
+                                  >
+                                    <input
+                                      value={draft.actual}
+                                      onChange={(e) => setUsageDraft(asset.id, { actual: e.target.value })}
+                                      placeholder="What are you actually using?"
+                                      className="field min-w-0 flex-1 py-1.5 text-xs"
+                                      required
+                                    />
+                                    <button
+                                      type="submit"
+                                      disabled={reportUsage.isPending}
+                                      className="pill-accent flex items-center gap-1 px-3 py-1.5 text-[11px] disabled:opacity-60"
+                                    >
+                                      <Send size={10} /> Submit
+                                    </button>
+                                  </form>
+                                )}
+                              </>
+                            )}
+                          </div>
+                        )}
+                      </li>
+                    )
+                  })}
+                </ul>
+              ) : (
+                <EmptyState icon={Boxes} title="No assets here" description="Nothing assigned in this category yet." />
+              )}
+            </section>
           ) : (
-            <div className="card p-5">
+            <section className="card p-5">
               <SectionHeader title="Assigned Assets" />
               <p className="text-sm text-muted">Asset details aren't part of your department's view of this profile.</p>
-            </div>
+            </section>
           )}
 
           {isSelf && (
-            <div className="card p-5">
+            <section className="card p-5">
               <SectionHeader
                 title="My Asset Requests"
                 action={
@@ -751,375 +923,349 @@ export default function EmployeeProfile() {
                 </form>
               )}
 
-              <ul className="space-y-2">
-                {(myRequests || []).map((r) => (
-                  <li key={r.id} className="rounded-2xl bg-surface-2 px-3.5 py-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-sm font-semibold text-ink">{r.category}</p>
-                      <StatusPill tone={REQUEST_TONE[r.status]}>{r.status}</StatusPill>
-                    </div>
-                    <p className="mt-0.5 text-xs text-muted">{r.reason}</p>
-                    {r.fulfilledAsset && (
-                      <p className="mt-1 text-xs font-medium text-chip-green-fg">
-                        Fulfilled: {r.fulfilledAsset.name} ({r.fulfilledAsset.serialNumber})
-                      </p>
-                    )}
-                    {r.status === "PENDING" && (
-                      <button
-                        onClick={() => cancelRequest.mutate(r.id)}
-                        disabled={cancelRequest.isPending}
-                        className="mt-1.5 text-xs font-semibold text-danger hover:underline"
-                      >
-                        Cancel request
-                      </button>
-                    )}
-                  </li>
-                ))}
-                {(myRequests || []).length === 0 && (
-                  <EmptyState title="No requests yet" description="Need something? Submit a request above." />
-                )}
-              </ul>
-            </div>
+              {(myRequests || []).length > 0 ? (
+                <ul className="space-y-2">
+                  {(myRequests || []).map((r) => (
+                    <li key={r.id} className="rounded-2xl border border-border px-3.5 py-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="truncate text-sm font-semibold text-ink">{r.category}</p>
+                        <StatusPill tone={REQUEST_TONE[r.status]}>{r.status}</StatusPill>
+                      </div>
+                      <p className="mt-0.5 text-xs text-muted">{r.reason}</p>
+                      {r.fulfilledAsset && (
+                        <p className="mt-1 text-xs font-medium text-chip-green-fg">
+                          Fulfilled: {r.fulfilledAsset.name} ({r.fulfilledAsset.serialNumber})
+                        </p>
+                      )}
+                      {r.status === "PENDING" && (
+                        <button
+                          onClick={() => cancelRequest.mutate(r.id)}
+                          disabled={cancelRequest.isPending}
+                          className="mt-1.5 text-xs font-semibold text-danger hover:underline"
+                        >
+                          Cancel request
+                        </button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <EmptyState title="No requests yet" description="Need something? Submit a request above." />
+              )}
+            </section>
           )}
 
-          {!isIT && (
-          <div className="card p-5">
-            <SectionHeader title="Support History" />
-            <ul className="max-h-80 space-y-2 overflow-y-auto">
-              {(employee.tickets || []).map((ticket) => (
-                <li key={ticket.id} className="flex items-center gap-3 rounded-2xl px-2 py-2 hover:bg-surface-2">
-                  <IconChip icon={TicketIcon} tone="orange" size="sm" />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-semibold text-ink">{ticket.subject}</p>
-                    <p className="text-xs text-muted">
-                      {(ticket.status || "").replaceAll("_", " ").toLowerCase()} · {(ticket.priority || "").toLowerCase()} priority
-                    </p>
-                  </div>
-                </li>
-              ))}
-              {employee.tickets?.length === 0 && (
-                <EmptyState icon={TicketIcon} title="No tickets" description="This employee hasn't raised any support requests." />
-              )}
-            </ul>
-          </div>          )}
-
-          {!isIT && (
-          <div className="card p-5">
-            <SectionHeader title="Activity" />
-            <ul className="max-h-80 space-y-2 overflow-y-auto">
-              {(employee.lifecycleEvents || []).map((event) => (
-                <li key={event.id} className="flex items-center gap-3 rounded-2xl px-2 py-2 hover:bg-surface-2">
-                  <IconChip icon={Activity} tone="purple" size="sm" />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-semibold text-ink">
-                      {event.asset?.name || "—"}
-                    </p>
-                    <p className="text-xs text-muted">
-                      {(event.type || "").replaceAll("_", " ").toLowerCase()}
-                    </p>
-                  </div>
-                  <span className="shrink-0 text-[11px] text-muted">
-                    {new Date(event.occurredAt).toLocaleDateString()}
-                  </span>
-                </li>
-              ))}
-              {employee.lifecycleEvents?.length === 0 && (
-                <EmptyState icon={Activity} title="No recent activity" />
-              )}
-            </ul>
-          </div>
-          )}
         </div>
 
-        <div className="card p-6 lg:order-2">
-          <div className="flex flex-col items-center text-center">
-            <Avatar name={employee.name} size="2xl" />
-            <h2 className="mt-4 text-xl font-bold text-ink" style={{ letterSpacing: "-0.02em" }}>
-              {employee.name}
-            </h2>
-            <p className="mt-0.5 text-sm text-muted">
-              {employee.department?.name || "No department"}
-              {organization?.name ? ` · ${organization.name}` : ""}
-            </p>
-            <div className="mt-2 flex flex-wrap items-center justify-center gap-1.5">
-              <span className="inline-flex items-center gap-1 rounded-full bg-chip-blue-bg px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-chip-blue-fg">
-                <ShieldCheck size={11} strokeWidth={2.5} />
-                {ROLE_LABELS[employee.role] || employee.role}
-              </span>
-              <StatusBadge type="employee" status={employee.status} />
-              {level && (
-                <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide bg-chip-${levelTone}-bg text-chip-${levelTone}-fg`}>
-                  <BadgeCheck size={11} strokeWidth={2.5} />
-                  {LEVEL_LABEL[level]}
-                </span>
-              )}
-              <span className="inline-flex items-center gap-1 rounded-full bg-surface-2 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted">
-                <MapPin size={11} strokeWidth={2.5} />
-                {WORK_LOCATION_LABEL[employee.workLocationType] || "Office"}
-              </span>
-            </div>
-
-
-
-            <div className="mt-4 flex items-center gap-2">
-              {canEdit && !editing && (
-                <button
-                  onClick={startEditing}
-                  className="flex h-10 w-10 items-center justify-center rounded-full border border-border-strong bg-surface text-ink transition-colors hover:bg-surface-2"
-                  aria-label="Edit"
-                  title="Edit"
-                >
-                  <Pencil size={15} />
-                </button>
-              )}
-              {employee.email && (
-                <a
-                  href={`mailto:${employee.email}`}
-                  className="flex h-10 w-10 items-center justify-center rounded-full border border-border-strong bg-surface text-ink transition-colors hover:bg-surface-2"
-                  aria-label="Email"
-                  title="Email"
-                >
-                  <Mail size={15} />
-                </a>
-              )}
-              {employee.phone && (
-                <a
-                  href={`tel:${employee.phone}`}
-                  className="flex h-10 w-10 items-center justify-center rounded-full border border-border-strong bg-surface text-ink transition-colors hover:bg-surface-2"
-                  aria-label="Call"
-                  title="Call"
-                >
-                  <Phone size={15} />
-                </a>
-              )}
-              {canResetPassword && (
-                <button
-                  onClick={handleResetPassword}
-                  disabled={resetPassword.isPending}
-                  className="flex h-10 w-10 items-center justify-center rounded-full border border-border-strong bg-surface text-ink transition-colors hover:bg-surface-2 disabled:opacity-60"
-                  aria-label="Reset password"
-                  title="Reset password"
-                >
-                  <KeyRound size={15} />
-                </button>
-              )}
-              {canRemoveEmployee && (
-                <button
-                  onClick={handleRemoveEmployee}
-                  disabled={removeEmployee.isPending}
-                  className="flex h-10 w-10 items-center justify-center rounded-full border border-border-strong bg-surface text-danger transition-colors hover:bg-chip-pink-bg disabled:opacity-60"
-                  aria-label="Remove employee"
-                  title="Remove employee"
-                >
-                  <UserX size={15} />
-                </button>
-              )}
-            </div>
-          </div>
-
-          {!isIT && (
-            <>
-          <div className="my-5 divider" />
-
-          <SectionHeader
-            title="Detailed Information"
-            action={
-              editing ? (
-                <button onClick={() => setEditing(false)} className="pill-secondary flex items-center gap-1.5 px-3 py-1.5 text-xs">
-                  <X size={12} /> Cancel
-                </button>
-              ) : null
-            }
-          />
-
-          {editing ? (
-            <form onSubmit={handleSaveEdit} className="grid grid-cols-1 gap-4">
-              {/* Each field appears exactly once, grouped the same way as the
-                  read-only view below. */}
-              <FormGroup title="Contact">
-                {canEditFully && <TextField label="Full name" value={editForm.name} onChange={setField("name")} required />}
-                <TextField label="Company Email" type="email" value={editForm.email} onChange={setField("email")} required />
-                <TextField label="Phone" value={editForm.phone} onChange={setField("phone")} />
-                {canEditFully && <TextField label="Personal Email" type="email" value={editForm.personalEmail} onChange={setField("personalEmail")} />}
-              </FormGroup>
-              {canEditFully && (
-                <>
-                  <FormGroup title="Employment">
-                    <TextField label="Designation / Title" value={editForm.designation} onChange={setField("designation")} placeholder="e.g. Senior Backend Engineer" />
-                    <SelectField label="Department" value={editForm.departmentId} onChange={setField("departmentId")}>
-                      <option value="">None</option>
-                      {(departments || []).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-                    </SelectField>
-                    <SelectField label="Reporting Manager" value={editForm.managerId} onChange={setField("managerId")}>
-                      <option value="">None</option>
-                      {(managerOptions || []).filter((manager) => manager.id !== employee.id).map((manager) => (
-                        <option key={manager.id} value={manager.id}>{manager.name} — {ROLE_LABELS[manager.role] || manager.role}</option>
-                      ))}
-                    </SelectField>
-                    <SelectField label="Role" value={editForm.role} disabled={!canChangeRoleAndStatus} onChange={setField("role")}>
-                      {Object.entries(ROLE_LABELS)
-                        .filter(([value]) => ["ADMIN", "CEO", "HR", "MANAGEMENT", "DEPARTMENT_HEAD", "IT_MANAGER", "EMPLOYEE"].includes(value))
-                        .filter(([value]) => value !== "CEO" || employee.role === "CEO" || (managerOptions || []).filter((m) => m.role === "CEO").length < 3)
-                        .map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                    </SelectField>
-                    <SelectField label="Status" value={editForm.status} disabled={employee.role === "CEO" && user?.role !== "CEO"} onChange={setField("status")}>
-                      <option value="ACTIVE">Active</option>
-                      <option value="ON_LEAVE">On Leave</option>
-                      <option value="LEFT_COMPANY">Left Company</option>
-                    </SelectField>
-                    <SelectField label="Employee type" value={editForm.workLocationType} onChange={setField("workLocationType")}>
-                      <option value="OFFICE">Office (attendance geofence applies)</option>
-                      <option value="FIELD">Field / Remote (exempt from geofence)</option>
-                    </SelectField>
-                    <SelectField label="Level" value={editForm.seniorityLevel} onChange={setField("seniorityLevel")}>
-                      <option value="">None</option>
-                      {Object.entries(LEVEL_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                    </SelectField>
-                    <TextField label="Skill" value={editForm.skill} onChange={setField("skill")} />
-                    <TextField label="Joining date" type="date" value={editForm.joiningDate} onChange={setField("joiningDate")} />
-                    <div className="grid grid-cols-2 gap-2">
-                      <TextField label="Shift Start" type="time" value={editForm.shiftStart} hint={formatClock(editForm.shiftStart)} onChange={setField("shiftStart")} />
-                      <TextField label="Shift End" type="time" value={editForm.shiftEnd} hint={formatClock(editForm.shiftEnd)} onChange={setField("shiftEnd")} />
-                    </div>
-                  </FormGroup>
-                  <FormGroup title="Personal">
-                    <TextField label="Father Name" value={editForm.fatherName} onChange={setField("fatherName")} />
-                    <TextField label="CNIC" value={editForm.cnic} onChange={setField("cnic")} placeholder="XXXXX-XXXXXXX-X" hint="Stored encrypted" />
-                    <TextField label="Date of birth" type="date" value={editForm.dob} onChange={setField("dob")} />
-                    <TextField label="Location / Residence" value={editForm.address} onChange={setField("address")} />
-                  </FormGroup>
-                  <FormGroup title="Education">
-                    <TextField label="Education" value={editForm.education} onChange={setField("education")} placeholder="e.g. BS Computer Science" />
-                    <TextField label="University" value={editForm.currentUniversity} onChange={setField("currentUniversity")} />
-                    <TextField label="LinkedIn URL" value={editForm.linkedinUrl} onChange={setField("linkedinUrl")} placeholder="https://www.linkedin.com/in/..." />
-                  </FormGroup>
-                  <FormGroup title="Payroll & bank">
-                    <TextField
-                      label="Base Salary (PKR / month)"
-                      type="number"
-                      min="25000"
-                      step="5000"
-                      value={editForm.baseSalary}
-                      onChange={setField("baseSalary")}
-                      hint="Minimum PKR 25,000 used to generate this employee's payroll"
-                    />
-                    <TextField label="Bank Name" value={editForm.bankName} onChange={setField("bankName")} placeholder="e.g. HBL, Meezan Bank" />
-                    <TextField label="Bank Account Number" value={editForm.bankAccountNumber} onChange={setField("bankAccountNumber")} hint="Stored encrypted used for payroll disbursement" />
-                  </FormGroup>
-                </>
-              )}
-              {editError && <p className="text-sm text-danger">{editError}</p>}
-              <button type="submit" disabled={saveEdit.isPending} className="pill-accent flex items-center justify-center gap-1.5 px-4 py-2.5 text-sm disabled:opacity-60">
-                <Check size={14} /> {saveEdit.isPending ? "Saving…" : "Save changes"}
-              </button>
-            </form>
-          ) : (
-            <div className="space-y-3.5">
-              {/* Department, role, status, level and employee type are already
-                  shown as chips above, so they aren't repeated here. */}
-              <DetailGroup title="Contact">
-                <FieldValue label="Company Email" value={employee.email} />
-                <FieldValue label="Phone" value={employee.phone} />
-                <FieldValue label="Personal Email" value={employee.personalEmail} />
-              </DetailGroup>
-              <DetailGroup title="Employment">
-                <FieldValue label="Designation" value={employee.designation} />
-                <FieldValue label="Reporting Manager" value={employee.manager?.name} />
-                <FieldValue label="Skill" value={employee.skill} />
-                <FieldValue label="Joining date" value={fmtDate(employee.joiningDate)} />
-                <FieldValue label="Shift" value={employee.shiftStart || employee.shiftEnd ? `${formatClock(employee.shiftStart) || "—"} - ${formatClock(employee.shiftEnd) || "—"}` : null} />
-              </DetailGroup>
-              {showPersonalDetails && (
-                <>
-                  <DetailGroup title="Personal">
-                    <FieldValue label="Father Name" value={employee.fatherName} />
-                    <FieldValue label="CNIC" value={employee.cnic} />
-                    <FieldValue label="Date of birth" value={fmtDate(employee.dob)} />
-                    <FieldValue label="Location / Residence" value={employee.address} />
-                  </DetailGroup>
-                  <DetailGroup title="Education">
-                    <FieldValue label="Education" value={employee.education} />
-                    <FieldValue label="University" value={employee.currentUniversity} />
-                    <FieldValue
-                      label="LinkedIn"
-                      value={employee.linkedinUrl && <a href={employee.linkedinUrl} target="_blank" rel="noreferrer" className="break-all text-accent hover:underline">{employee.linkedinUrl}</a>}
-                    />
-                  </DetailGroup>
-                </>
-              )}
-              {showFinancial && (
-                <DetailGroup title="Payroll & bank">
-                  <FieldValue label="Base Salary" value={employee.baseSalary != null && employee.baseSalary !== "" ? `PKR ${Number(employee.baseSalary).toLocaleString()} / month` : null} />
-                  <FieldValue label="Bank Name" value={employee.bankName} />
-                  <FieldValue label="Bank Account Number" value={employee.bankAccountNumber} />
-                </DetailGroup>
-              )}
-
-            {canManageCertifications && (
-              <div className="mt-5 w-full border-t border-border pt-4 text-left">
-                <div className="flex items-center justify-between gap-2">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-wide text-muted">Certifications</p>
-                    <p className="mt-0.5 text-[11px] text-muted-2">{isSelf ? "Add your certificates and credentials." : "Add verified certificates and credentials."}</p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setCertificateDrafts((items) => [...items, { name: "", institute: "", credentialId: "", credentialUrl: "", issuedDate: "", expiryDate: "", notes: "" }])}
-                    className="flex h-8 w-8 items-center justify-center rounded-full border border-border-strong bg-surface text-ink hover:bg-surface-2"
-                    title="Add certification"
-                    aria-label="Add certification"
-                  >
-                    <Plus size={14} />
-                  </button>
-                </div>
-
-                <div className="mt-3 space-y-3">
-                  {certificateDrafts.map((certificate, index) => (
-                    <div key={certificate.id || `new-${index}`} className="rounded-2xl border border-border bg-surface-2 p-3">
-                      <div className="grid grid-cols-1 gap-2">
-                        <TextField label="Certificate name" value={certificate.name} onChange={(e) => setCertificateDrafts((items) => items.map((item, i) => i === index ? { ...item, name: e.target.value } : item))} placeholder="e.g. AWS Certified Developer" />
-                        <TextField label="Institute" value={certificate.institute} onChange={(e) => setCertificateDrafts((items) => items.map((item, i) => i === index ? { ...item, institute: e.target.value } : item))} placeholder="Issuing institute" />
-                        <TextField label="Credential ID" value={certificate.credentialId} onChange={(e) => setCertificateDrafts((items) => items.map((item, i) => i === index ? { ...item, credentialId: e.target.value } : item))} />
-                        <TextField label="Verification URL" type="url" value={certificate.credentialUrl} onChange={(e) => setCertificateDrafts((items) => items.map((item, i) => i === index ? { ...item, credentialUrl: e.target.value } : item))} placeholder="https://..." />
-                        <div className="grid grid-cols-2 gap-2">
-                          <TextField label="Issued" type="date" value={certificate.issuedDate} onChange={(e) => setCertificateDrafts((items) => items.map((item, i) => i === index ? { ...item, issuedDate: e.target.value } : item))} />
-                          <TextField label="Expiry" type="date" value={certificate.expiryDate} onChange={(e) => setCertificateDrafts((items) => items.map((item, i) => i === index ? { ...item, expiryDate: e.target.value } : item))} />
-                        </div>
-                        <div className="flex items-center justify-end gap-2 pt-1">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (certificate.id) deleteCertification.mutate(certificate.id)
-                              else setCertificateDrafts((items) => items.filter((_, i) => i !== index))
-                            }}
-                            className="flex h-8 w-8 items-center justify-center rounded-full border border-border-strong bg-surface text-danger hover:bg-chip-pink-bg"
-                            title="Remove certification"
-                            aria-label="Remove certification"
-                          >
-                            <Minus size={13} />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => saveCertification.mutate({ certificateId: certificate.id, data: certificate, index })}
-                            disabled={saveCertification.isPending || !certificate.name.trim() || !certificate.institute.trim()}
-                            className="flex items-center gap-1.5 rounded-full bg-accent px-3 py-1.5 text-[11px] font-semibold text-white disabled:opacity-50"
-                          >
-                            <Save size={12} /> Save
-                          </button>
-                        </div>
+        {!isIT && (
+          <div className="min-w-0 space-y-5">
+            {employee.payrollRecords !== undefined && (
+              <section className="card p-5">
+                <SectionHeader title="Recent payroll" />
+                <div className="space-y-2">
+                  {(employee.payrollRecords || []).slice(0, 5).map((p) => (
+                    <div key={p.id} className="flex items-center justify-between gap-2 rounded-2xl bg-surface-2 p-3">
+                      <div>
+                        <p className="text-sm font-semibold text-ink">{p.month}/{p.year}</p>
+                        <p className="text-xs text-muted">{p.status}</p>
                       </div>
+                      <span className="text-sm font-semibold text-ink">PKR {Number(p.netPay || 0).toLocaleString()}</span>
                     </div>
                   ))}
-                  {certificateError && <p className="text-xs text-danger">{certificateError}</p>}
-                  {certificateDrafts.length === 0 && <p className="text-xs text-muted">No certifications added. Use + to add one.</p>}
+                  {!(employee.payrollRecords || []).length && <p className="text-sm text-muted">No payroll records.</p>}
                 </div>
-              </div>
+              </section>
             )}
-            </div>
-          )}
-            </>
-          )}
-        </div>
+
+              <section className="card min-w-0 p-5">
+                <SectionHeader title="Support History" />
+                {(employee.tickets || []).length > 0 ? (
+                  <ul className="max-h-80 space-y-1 overflow-y-auto">
+                    {(employee.tickets || []).map((ticket) => (
+                      <li key={ticket.id} className="flex items-center gap-3 rounded-2xl px-2 py-2 hover:bg-surface-2">
+                        <IconChip icon={TicketIcon} tone="orange" size="sm" />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-semibold text-ink">{ticket.subject}</p>
+                          <p className="text-xs text-muted">
+                            {(ticket.status || "").replaceAll("_", " ").toLowerCase()} · {(ticket.priority || "").toLowerCase()} priority
+                          </p>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <EmptyState icon={TicketIcon} title="No tickets" description="This employee hasn't raised any support requests." />
+                )}
+              </section>
+
+              <section className="card min-w-0 p-5">
+                <SectionHeader title="Activity" />
+                {(employee.lifecycleEvents || []).length > 0 ? (
+                  <ul className="max-h-80 space-y-1 overflow-y-auto">
+                    {(employee.lifecycleEvents || []).map((event) => (
+                      <li key={event.id} className="flex items-center gap-3 rounded-2xl px-2 py-2 hover:bg-surface-2">
+                        <IconChip icon={Activity} tone="purple" size="sm" />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-semibold text-ink">{event.asset?.name || "—"}</p>
+                          <p className="text-xs text-muted">{(event.type || "").replaceAll("_", " ").toLowerCase()}</p>
+                        </div>
+                        <span className="shrink-0 text-[11px] text-muted">
+                          {new Date(event.occurredAt).toLocaleDateString()}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <EmptyState icon={Activity} title="No recent activity" />
+                )}
+              </section>
+          </div>
+        )}
+      </div>
+
+      {/* Detailed Information — full width at the end of the page, groups
+          side by side. Collapsible: the key fields are already in the
+          profile card, so the full list stays folded until asked for; the
+          edit form always shows while editing. */}
+      {!isIT && (
+            <section ref={detailsRef} className="card mt-5 scroll-mt-4 p-5 sm:p-6">
+              <div className="flex items-center justify-between gap-2">
+                <button
+                  type="button"
+                  onClick={() => !editing && setDetailsOpen((v) => !v)}
+                  aria-expanded={detailsOpen || editing}
+                  aria-controls="employee-detailed-information"
+                  className="-mx-1 flex min-w-0 flex-1 items-center justify-between gap-2 rounded-xl px-1 py-1 text-left"
+                >
+                  <h3 className="section-title">Detailed Information</h3>
+                  {!editing && (
+                    <ChevronDown size={18} className={`shrink-0 text-muted transition-transform duration-200 ${detailsOpen ? "rotate-180" : ""}`} />
+                  )}
+                </button>
+                {editing && (
+                  <button onClick={() => setEditing(false)} className="pill-secondary flex shrink-0 items-center gap-1.5 px-3 py-1.5 text-xs">
+                    <X size={12} /> Cancel
+                  </button>
+                )}
+              </div>
+
+              {(detailsOpen || editing) && <div id="employee-detailed-information" className="mt-4">
+              {editing ? (
+                <form onSubmit={handleSaveEdit} className="grid items-start gap-4 [grid-template-columns:repeat(auto-fit,minmax(240px,1fr))]">
+                  {/* Each field appears exactly once, grouped the same way as the
+                      read-only view below. */}
+                  <FormGroup title="Contact">
+                    {canEditFully && <TextField label="Full name" value={editForm.name} onChange={setField("name")} required />}
+                    <TextField label="Company Email" type="email" value={editForm.email} onChange={setField("email")} required />
+                    <TextField label="Phone" value={editForm.phone} onChange={setField("phone")} />
+                    {canEditFully && <TextField label="Personal Email" type="email" value={editForm.personalEmail} onChange={setField("personalEmail")} />}
+                  </FormGroup>
+                  {canEditFully && (
+                    <>
+                      <FormGroup title="Employment">
+                        <TextField label="Designation / Title" value={editForm.designation} onChange={setField("designation")} placeholder="e.g. Senior Backend Engineer" />
+                        <SelectField label="Department" value={editForm.departmentId} onChange={setField("departmentId")}>
+                          <option value="">None</option>
+                          {(departments || []).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                        </SelectField>
+                        <SelectField label="Reporting Manager" value={editForm.managerId} onChange={setField("managerId")}>
+                          <option value="">None</option>
+                          {(managerOptions || []).filter((manager) => manager.id !== employee.id).map((manager) => (
+                            <option key={manager.id} value={manager.id}>{manager.name} — {ROLE_LABELS[manager.role] || manager.role}</option>
+                          ))}
+                        </SelectField>
+                        <SelectField label="Role" value={editForm.role} disabled={!canChangeRoleAndStatus} onChange={setField("role")}>
+                          {Object.entries(ROLE_LABELS)
+                            .filter(([value]) => ["ADMIN", "CEO", "HR", "MANAGEMENT", "DEPARTMENT_HEAD", "IT_MANAGER", "EMPLOYEE"].includes(value))
+                            .filter(([value]) => value !== "CEO" || employee.role === "CEO" || (managerOptions || []).filter((m) => m.role === "CEO").length < 3)
+                            .map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                        </SelectField>
+                        <SelectField label="Status" value={editForm.status} disabled={employee.role === "CEO" && user?.role !== "CEO"} onChange={setField("status")}>
+                          <option value="ACTIVE">Active</option>
+                          <option value="ON_LEAVE">On Leave</option>
+                          <option value="LEFT_COMPANY">Left Company</option>
+                        </SelectField>
+                        <SelectField label="Employee type" value={editForm.workLocationType} onChange={setField("workLocationType")}>
+                          <option value="OFFICE">Office (attendance geofence applies)</option>
+                          <option value="FIELD">Field / Remote (exempt from geofence)</option>
+                        </SelectField>
+                        <SelectField label="Level" value={editForm.seniorityLevel} onChange={setField("seniorityLevel")}>
+                          <option value="">None</option>
+                          {Object.entries(LEVEL_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                        </SelectField>
+                        <TextField label="Skill" value={editForm.skill} onChange={setField("skill")} />
+                        <TextField label="Joining date" type="date" value={editForm.joiningDate} onChange={setField("joiningDate")} />
+                        <div className="grid grid-cols-2 gap-2">
+                          <TextField label="Shift Start" type="time" value={editForm.shiftStart} hint={formatClock(editForm.shiftStart)} onChange={setField("shiftStart")} />
+                          <TextField label="Shift End" type="time" value={editForm.shiftEnd} hint={formatClock(editForm.shiftEnd)} onChange={setField("shiftEnd")} />
+                        </div>
+                      </FormGroup>
+                      <FormGroup title="Personal">
+                        <TextField label="Father Name" value={editForm.fatherName} onChange={setField("fatherName")} />
+                        <TextField label="CNIC" value={editForm.cnic} onChange={setField("cnic")} placeholder="XXXXX-XXXXXXX-X" hint="Stored encrypted" />
+                        <TextField label="Date of birth" type="date" value={editForm.dob} onChange={setField("dob")} />
+                        <TextField label="Location / Residence" value={editForm.address} onChange={setField("address")} />
+                      </FormGroup>
+                      <FormGroup title="Education">
+                        <TextField label="Education" value={editForm.education} onChange={setField("education")} placeholder="e.g. BS Computer Science" />
+                        <TextField label="University" value={editForm.currentUniversity} onChange={setField("currentUniversity")} />
+                        <TextField label="LinkedIn URL" value={editForm.linkedinUrl} onChange={setField("linkedinUrl")} placeholder="https://www.linkedin.com/in/..." />
+                      </FormGroup>
+                      <FormGroup title="Payroll & bank">
+                        <TextField
+                          label="Base Salary (PKR / month)"
+                          type="number"
+                          min="25000"
+                          step="5000"
+                          value={editForm.baseSalary}
+                          onChange={setField("baseSalary")}
+                          hint="Minimum PKR 25,000 used to generate this employee's payroll"
+                        />
+                        <TextField label="Bank Name" value={editForm.bankName} onChange={setField("bankName")} placeholder="e.g. HBL, Meezan Bank" />
+                        <TextField label="Bank Account Number" value={editForm.bankAccountNumber} onChange={setField("bankAccountNumber")} hint="Stored encrypted used for payroll disbursement" />
+                      </FormGroup>
+                    </>
+                  )}
+                  {editError && <p className="col-span-full text-sm text-danger">{editError}</p>}
+                  <button type="submit" disabled={saveEdit.isPending} className="pill-accent col-span-full flex items-center justify-center gap-1.5 justify-self-end px-5 py-2.5 text-sm disabled:opacity-60">
+                    <Check size={14} /> {saveEdit.isPending ? "Saving…" : "Save changes"}
+                  </button>
+                </form>
+              ) : (
+                <div className="space-y-5">
+                  {/* Department, role, status, level and employee type are
+                      already shown in the profile card, so they aren't
+                      repeated here. */}
+                  <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(210px,1fr))]">
+                  <DetailGroup title="Contact">
+                    <FieldValue label="Company Email" value={employee.email} />
+                    <FieldValue label="Phone" value={employee.phone} />
+                    <FieldValue label="Personal Email" value={employee.personalEmail} />
+                  </DetailGroup>
+                  <DetailGroup title="Employment">
+                    <FieldValue label="Designation" value={employee.designation} />
+                    <FieldValue label="Reporting Manager" value={employee.manager?.name} />
+                    <FieldValue label="Skill" value={employee.skill} />
+                    <FieldValue label="Joining date" value={fmtDate(employee.joiningDate)} />
+                    <FieldValue label="Shift" value={employee.shiftStart || employee.shiftEnd ? `${formatClock(employee.shiftStart) || "—"} - ${formatClock(employee.shiftEnd) || "—"}` : null} />
+                  </DetailGroup>
+                  {showPersonalDetails && (
+                    <>
+                      <DetailGroup title="Personal">
+                        <FieldValue label="Father Name" value={employee.fatherName} />
+                        <FieldValue label="CNIC" value={employee.cnic} />
+                        <FieldValue label="Date of birth" value={fmtDate(employee.dob)} />
+                        <FieldValue label="Location / Residence" value={employee.address} />
+                      </DetailGroup>
+                      <DetailGroup title="Education">
+                        <FieldValue label="Education" value={employee.education} />
+                        <FieldValue label="University" value={employee.currentUniversity} />
+                        <FieldValue
+                          label="LinkedIn"
+                          value={employee.linkedinUrl && <a href={employee.linkedinUrl} target="_blank" rel="noreferrer" className="break-all text-accent hover:underline">{employee.linkedinUrl}</a>}
+                        />
+                      </DetailGroup>
+                    </>
+                  )}
+                  {showFinancial && (
+                    <DetailGroup title="Payroll & bank">
+                      <FieldValue label="Base Salary" value={employee.baseSalary != null && employee.baseSalary !== "" ? `PKR ${Number(employee.baseSalary).toLocaleString()} / month` : null} />
+                      <FieldValue label="Bank Name" value={employee.bankName} />
+                      <FieldValue label="Bank Account Number" value={employee.bankAccountNumber} />
+                    </DetailGroup>
+                  )}
+                  </div>
+
+                  {canManageCertifications && (
+                    <div className="w-full border-t border-border pt-4 text-left">
+                      <div className="flex items-center justify-between gap-2">
+                        <div>
+                          <p className="text-xs font-semibold uppercase tracking-wide text-muted">Certifications</p>
+                          <p className="mt-0.5 text-[11px] text-muted-2">{isSelf ? "Add your certificates and credentials." : "Add verified certificates and credentials."}</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setCertificateDrafts((items) => [...items, { name: "", institute: "", credentialId: "", credentialUrl: "", issuedDate: "", expiryDate: "", notes: "" }])}
+                          className="flex h-8 w-8 items-center justify-center rounded-full border border-border-strong bg-surface text-ink hover:bg-surface-2"
+                          title="Add certification"
+                          aria-label="Add certification"
+                        >
+                          <Plus size={14} />
+                        </button>
+                      </div>
+
+                      <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                        {certificateDrafts.map((certificate, index) => (
+                          <div key={certificate.id || `new-${index}`} className="rounded-2xl border border-border bg-surface-2 p-3">
+                            <div className="grid grid-cols-1 gap-2">
+                              <TextField label="Certificate name" value={certificate.name} onChange={(e) => setCertificateDrafts((items) => items.map((item, i) => i === index ? { ...item, name: e.target.value } : item))} placeholder="e.g. AWS Certified Developer" />
+                              <TextField label="Institute" value={certificate.institute} onChange={(e) => setCertificateDrafts((items) => items.map((item, i) => i === index ? { ...item, institute: e.target.value } : item))} placeholder="Issuing institute" />
+                              <TextField label="Credential ID" value={certificate.credentialId} onChange={(e) => setCertificateDrafts((items) => items.map((item, i) => i === index ? { ...item, credentialId: e.target.value } : item))} />
+                              <TextField label="Verification URL" type="url" value={certificate.credentialUrl} onChange={(e) => setCertificateDrafts((items) => items.map((item, i) => i === index ? { ...item, credentialUrl: e.target.value } : item))} placeholder="https://..." />
+                              <div className="grid grid-cols-2 gap-2">
+                                <TextField label="Issued" type="date" value={certificate.issuedDate} onChange={(e) => setCertificateDrafts((items) => items.map((item, i) => i === index ? { ...item, issuedDate: e.target.value } : item))} />
+                                <TextField label="Expiry" type="date" value={certificate.expiryDate} onChange={(e) => setCertificateDrafts((items) => items.map((item, i) => i === index ? { ...item, expiryDate: e.target.value } : item))} />
+                              </div>
+                              <div className="flex items-center justify-end gap-2 pt-1">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (certificate.id) deleteCertification.mutate(certificate.id)
+                                    else setCertificateDrafts((items) => items.filter((_, i) => i !== index))
+                                  }}
+                                  className="flex h-8 w-8 items-center justify-center rounded-full border border-border-strong bg-surface text-danger hover:bg-chip-pink-bg"
+                                  title="Remove certification"
+                                  aria-label="Remove certification"
+                                >
+                                  <Minus size={13} />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => saveCertification.mutate({ certificateId: certificate.id, data: certificate, index })}
+                                  disabled={saveCertification.isPending || !certificate.name.trim() || !certificate.institute.trim()}
+                                  className="flex items-center gap-1.5 rounded-full bg-accent px-3 py-1.5 text-[11px] font-semibold text-white disabled:opacity-50"
+                                >
+                                  <Save size={12} /> Save
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                        {certificateError && <p className="col-span-full text-xs text-danger">{certificateError}</p>}
+                        {certificateDrafts.length === 0 && <p className="col-span-full text-xs text-muted">No certifications added. Use + to add one.</p>}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+              </div>}
+            </section>
+      )}
+
+      {/* Decorative organization-name particles — a subtle footer element in
+          normal flow after all content, so it never overlaps cards. It takes
+          pointer input (dots scatter away from the cursor), but the canvas's
+          own touch-none is overridden so swiping over it still scrolls. */}
+      <div
+        aria-hidden="true"
+        className="mt-8 h-[155px] w-full select-none overflow-hidden sm:h-[170px] [&_canvas]:touch-auto"
+        style={{
+          maskImage: "linear-gradient(to bottom, transparent, #000 30%, #000 70%, transparent)",
+          WebkitMaskImage: "linear-gradient(to bottom, transparent, #000 30%, #000 70%, transparent)",
+        }}
+      >
+        <ParticleText
+          text={(organizationName && organizationName.trim() ? organizationName : "MANAGEMENTDOCK").toUpperCase()}
+          height={170}
+          background="transparent"
+          // Black dots in light mode, white in dark mode; the yellow accent
+          // dots stay the same in both.
+          dotColor={themeMode === "dark" ? "rgba(255, 255, 255, 0.9)" : "rgba(17, 17, 17, 0.85)"}
+          accentColor="rgba(211, 151, 0, 0.9)"
+          repelRadius={140}
+          repelStrength={210}
+          ease={0.065}
+        />
       </div>
     </div>
   )

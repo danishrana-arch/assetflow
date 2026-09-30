@@ -160,11 +160,11 @@ export default function AttendanceSnapshot({ timeZone, children }) {
         // marked absence. Leave is never absent.
         absent: future ? 0 : rows.filter((r) => r.status === "ABSENT" && (scheduled || r.recordId)).length,
       },
-      // Earliest arrival first; manual marks without a check-in time last.
+      // Most recent arrival first; manual marks without a check-in time last.
       arrivals: [...attended].sort((a, b) => {
         if (!a.checkInAt) return 1
         if (!b.checkInAt) return -1
-        return a.checkInAt.localeCompare(b.checkInAt)
+        return b.checkInAt.localeCompare(a.checkInAt)
       }),
     }
   }, [data, todayKey])

@@ -31,7 +31,6 @@ const Tasks = lazy(() => import("./pages/Tasks"))
 const Performance = lazy(() => import("./pages/Performance"))
 const AdvancedCalendar = lazy(() => import("./pages/AdvancedCalendar"))
 const OrganizationComparison = lazy(() => import("./pages/OrganizationComparison"))
-const Employee360 = lazy(() => import("./pages/Employee360"))
 const Attendance = lazy(() => import("./pages/Attendance"))
 const AttendanceSites = lazy(() => import("./pages/AttendanceSites"))
 const LeaveRequests = lazy(() => import("./pages/LeaveRequests"))
@@ -135,7 +134,6 @@ function ProtectedShell() {
           <Route path="/employees" element={<RequireEmployeeDirectory><Employees /></RequireEmployeeDirectory>} />
           <Route path="/employees/:id" element={<EmployeeProfile />} />
           <Route path="/employees/:id/attendance" element={<EmployeeAttendanceHistory />} />
-          <Route path="/employee-360/:id" element={<Employee360 />} />
           <Route path="/inventory" element={<RequireInventoryAccess><Inventory /></RequireInventoryAccess>} />
           <Route path="/inventory/:id" element={<RequireInventoryAccess><AssetProfile /></RequireInventoryAccess>} />
           <Route path="/assignments" element={<RequireInventoryAccess><Assignments /></RequireInventoryAccess>} />

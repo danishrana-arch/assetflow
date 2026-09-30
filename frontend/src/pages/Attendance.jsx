@@ -1,40 +1,27 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { createPortal } from "react-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useSearchParams } from "react-router-dom"
-import { Save, Download, CheckCircle2, XCircle, Palmtree, MapPin, AlertTriangle, ShieldAlert, X } from "lucide-react"
+import { Link, useSearchParams } from "react-router-dom"
+import {
+  Save, Download, CheckCircle2, XCircle, Palmtree, MapPin, AlertTriangle, ShieldAlert, X,
+  ChevronLeft, ChevronRight, CalendarDays, Search, SlidersHorizontal, LayoutGrid, List,
+  ClipboardCheck, ClipboardX, CalendarOff, FileBarChart, ArrowUp, ArrowDown,
+  ArrowUpDown, User, Clock, Timer, StickyNote, ChevronDown, Check, Plus, Pencil, Fingerprint, Home,
+} from "lucide-react"
 import api from "../api/client"
 import { useAuth } from "../context/AuthContext"
-import PageHeader from "../components/ui/PageHeader"
 import Avatar from "../components/ui/Avatar"
 import StatusPill from "../components/ui/StatusPill"
 import EmptyState from "../components/ui/EmptyState"
-import WorkingTimeProgress from "../components/ui/WorkingTimeProgress"
+import WorkingTimeProgress, { effectiveWorkingMinutes } from "../components/ui/WorkingTimeProgress"
+import { formatTime } from "../utils/time"
 
+// Buttons an admin can mark (LATE is set by the server's late rule).
 const STATUS_CONFIG = {
   PRESENT: { label: "Present", tone: "green", icon: CheckCircle2 },
   ABSENT: { label: "Absent", tone: "pink", icon: XCircle },
   LEAVE: { label: "Leave", tone: "yellow", icon: Palmtree },
 }
-
-function formatPunchTime(value) {
-  if (!value) return "—"
-  return new Date(value).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: true })
-}
-
-
-// ?status= filters. "present" includes LATE, same as the header count.
-// "absent" uses the dashboard snapshot's rule: nobody on a future day, and
-// on a non-working day only an explicitly marked absence.
-const STATUS_FILTERS = {
-  present: { label: "Present", match: (r) => r.status === "PRESENT" || r.status === "LATE" },
-  late: { label: "Late", match: (r) => r.status === "LATE" },
-  absent: {
-    label: "Absent",
-    match: (r, ctx) => r.status === "ABSENT" && !ctx.isFuture && (ctx.scheduled || !!r.recordId),
-  },
-}
-
-// Display-only: LATE is set by the server's late rule, not a button.
 const LATE_CONFIG = { label: "Late", tone: "yellow" }
 
 function statusPill(status) {
@@ -42,66 +29,324 @@ function statusPill(status) {
   return <StatusPill tone={cfg.tone}>{cfg.label}</StatusPill>
 }
 
+/* ------------------------------------------------------------------------
+   Summary metrics + filters. Every summary number is the count of one of
+   these filters, so clicking a number filters the table to exactly those
+   rows. ctx = { scheduled, isPast, isFuture } for that day.
+   "absent" matches the dashboard snapshot's rule (no one on a future day,
+   only explicitly marked absences on a non-working day); "noclockin" is the
+   subset of absent employees with no attendance record at all.
+------------------------------------------------------------------------ */
+const attended = (r) => r.status === "PRESENT" || r.status === "LATE"
+const FILTERS = {
+  ontime: { label: "On time", match: (r) => r.status === "PRESENT", good: true },
+  late: { label: "Late clock-in", match: (r) => r.status === "LATE" },
+  early: { label: "Early clock-in", match: (r) => attended(r) && r.arrivalOffsetMinutes != null && r.arrivalOffsetMinutes < 0, good: true },
+  absent: { label: "Absent", match: (r, c) => r.status === "ABSENT" && !c.isFuture && (c.scheduled || !!r.recordId) },
+  noclockin: { label: "No clock-in", match: (r, c) => r.status === "ABSENT" && !r.recordId && !c.isFuture && c.scheduled },
+  noclockout: { label: "No clock-out", match: (r, c) => !!r.checkInAt && !r.checkOutAt && c.isPast },
+  dayoff: { label: "Day off", match: (r, c) => !c.scheduled && !r.recordId },
+  timeoff: { label: "Time off", match: (r) => r.status === "LEAVE" },
+  // Not a summary tile — kept for the dashboard's "Present" deep link.
+  present: { label: "Present", match: attended },
+}
+
+const SUMMARIES = [
+  { title: "Present Summary", icon: ClipboardCheck, tone: "text-chip-green-fg", keys: ["ontime", "late", "early"] },
+  { title: "Not Present Summary", icon: ClipboardX, tone: "text-chip-pink-fg", keys: ["absent", "noclockin", "noclockout"] },
+  { title: "Away Summary", icon: CalendarOff, tone: "text-chip-blue-fg", keys: ["dayoff", "timeoff"] },
+]
+
+// Literal class names so Tailwind picks them up.
+const METRIC_COLS = { 2: "sm:grid-cols-2", 3: "sm:grid-cols-3", 4: "sm:grid-cols-4" }
+
+/* Dates are YYYY-MM-DD keys (what GET /attendance takes), stepped in UTC. */
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+function todayKeyIn(timeZone) {
+  try { return new Intl.DateTimeFormat("en-CA", { timeZone: timeZone || undefined }).format(new Date()) }
+  catch { return new Intl.DateTimeFormat("en-CA").format(new Date()) }
+}
+function addDays(key, n) {
+  const d = new Date(`${key}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + n)
+  return d.toISOString().slice(0, 10)
+}
+const longDateFmt = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "long", day: "numeric", month: "long", year: "numeric" })
+
+function formatDuration(minutes) {
+  if (minutes == null) return "—"
+  const m = Math.max(0, Math.round(minutes))
+  return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`
+}
+
 function mapsLink(lat, lng) {
   return `https://www.google.com/maps?q=${lat},${lng}`
 }
 
-// Shown next to a row when the employee's "Present" attempt landed
-// outside the office geofence and was auto-flipped to Absent by the
-// system. Admin can click through to see exactly where they were, then
-// use the status buttons to override the call either way.
+// Where the attendance was recorded:
+//   biometric punch            → "On site · <device>"
+//   check-in inside a site     → "On site · <site name>" (links to the spot)
+//   check-in inside the office → "On site · Office"
+//   check-in outside premises  → red "Outside premises · Xm" (links to the
+//                                exact spot so HR can review it)
 function LocationFlag({ row }) {
   const hasLocation = row.latitude != null && row.longitude != null
+  const plain = (Icon, text, tone = "text-muted-2") => (
+    <span className={`inline-flex max-w-[200px] items-center gap-1 text-xs ${tone}`}>
+      <Icon size={12} className="shrink-0" /> <span className="truncate">{text}</span>
+    </span>
+  )
 
-  if (!hasLocation) {
-    if (row.locationMode === "WFH") {
-      return (
-        <span className="mt-1 inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-2">
-          <MapPin size={10} /> Working from home
-        </span>
-      )
-    }
-    if (row.workLocationType === "FIELD") {
-      return (
-        <span className="mt-1 inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-2">
-          <MapPin size={10} /> Field employee · No location
-        </span>
-      )
-    }
-    return (
-      <span className="mt-1 inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-2">
-        <MapPin size={10} /> No location recorded
-      </span>
-    )
+  if (row.source === "BIOMETRIC") {
+    return plain(Fingerprint, `On site · ${row.deviceName || "Biometric device"}`, "font-medium text-chip-green-fg")
   }
+  if (!row.checkInAt) return <span className="text-xs text-muted-2">—</span>
+  if (row.locationMode === "WFH") return plain(Home, "Working from home")
+  if (!hasLocation) return plain(MapPin, row.workLocationType === "FIELD" ? "Field · No location" : "No location recorded")
 
+  const outside = row.autoFlagged
+  const label = outside
+    ? `Outside premises${row.distanceMeters != null ? ` · ${row.distanceMeters}m away` : ""}`
+    : row.siteName ? `On site · ${row.siteName}`
+    : row.distanceMeters != null ? "On site · Office"
+    : "Location recorded"
+  const onSite = !outside && label.startsWith("On site")
   return (
-    <div className="mt-1 space-y-0.5">
-      <a
-        href={mapsLink(row.latitude, row.longitude)}
-        target="_blank"
-        rel="noreferrer"
-        className={`inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide hover:underline ${
-          row.autoFlagged ? "text-chip-pink-fg" : "text-muted"
-        }`}
-        title="Open the exact recorded attendance location in Google Maps"
-      >
-        {row.autoFlagged ? <AlertTriangle size={10} /> : <MapPin size={10} />}
-        {row.autoFlagged
-          ? row.distanceMeters != null
-            ? `${row.distanceMeters}m away · View exact location`
-            : "Outside site · View exact location"
-          : "View exact location"}
-      </a>
-      <p className="text-[10px] text-muted-2">
-        {Number(row.latitude).toFixed(6)}, {Number(row.longitude).toFixed(6)}
-      </p>
+    <a
+      href={mapsLink(row.latitude, row.longitude)}
+      target="_blank"
+      rel="noreferrer"
+      className={`inline-flex max-w-[200px] items-center gap-1 text-xs hover:underline ${outside ? "font-semibold text-chip-pink-fg" : onSite ? "font-medium text-chip-green-fg" : "text-accent"}`}
+      title={`${Number(row.latitude).toFixed(6)}, ${Number(row.longitude).toFixed(6)} — open in Google Maps`}
+    >
+      {outside ? <AlertTriangle size={12} className="shrink-0" /> : <MapPin size={12} className="shrink-0" />}
+      <span className="truncate">{label}</span>
+    </a>
+  )
+}
+
+
+function overtimeMinutes(row, date) {
+  if (!row.checkOutAt) return null
+  const worked = effectiveWorkingMinutes({ ...row, date })
+  const over = worked - (Number(row.expectedWorkingMinutes) || 480)
+  return over > 0 ? over : null
+}
+
+// Clock-in —— duration —— clock-out. Late clock-in and overtime clock-out
+// are highlighted in amber.
+function ClockInOut({ row, date, timeZone }) {
+  if (!row.checkInAt) return <span className="text-xs text-muted-2">—</span>
+  const worked = effectiveWorkingMinutes({ ...row, date })
+  const late = row.status === "LATE"
+  const overtime = overtimeMinutes(row, date) != null
+  return (
+    <div className="flex items-center gap-2 whitespace-nowrap text-[13px] font-semibold tabular-nums">
+      <span className={late ? "text-[#D97706]" : "text-ink"}>{formatTime(row.checkInAt, { timeZone })}</span>
+      <span className="flex min-w-[64px] flex-1 items-center gap-1 text-[10px] font-medium text-muted-2">
+        <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-border-strong" />
+        <span className="h-px flex-1 bg-border-strong" />
+        <span>{formatDuration(worked)}</span>
+        <span className="h-px flex-1 bg-border-strong" />
+        <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-border-strong" />
+      </span>
+      <span className={row.checkOutAt ? (overtime ? "text-[#D97706]" : "text-ink") : "text-xs font-medium text-muted-2"}>
+        {row.checkOutAt ? formatTime(row.checkOutAt, { timeZone }) : "Still in"}
+      </span>
     </div>
   )
 }
 
+// Closes a popover when clicking outside it or pressing Escape.
+function usePopover() {
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
+    const onKey = (e) => { if (e.key === "Escape") setOpen(false) }
+    document.addEventListener("mousedown", onDown)
+    document.addEventListener("keydown", onKey)
+    return () => { document.removeEventListener("mousedown", onDown); document.removeEventListener("keydown", onKey) }
+  }, [open])
+  return { open, setOpen, ref }
+}
+
+// Popover anchored to a button with position:fixed, so it isn't clipped by
+// the table's horizontal-scroll container. Closes on outside click, Escape,
+// scroll or resize.
+function useAnchoredPopover(width) {
+  const [pos, setPos] = useState(null)
+  const anchorRef = useRef(null)
+  const panelRef = useRef(null)
+  const open = !!pos
+  function toggle() {
+    if (pos) return setPos(null)
+    const r = anchorRef.current.getBoundingClientRect()
+    const left = Math.max(8, Math.min(r.right - width, window.innerWidth - width - 8))
+    const below = window.innerHeight - r.bottom > 260
+    setPos(below ? { left, top: r.bottom + 6 } : { left, bottom: window.innerHeight - r.top + 6 })
+  }
+  useEffect(() => {
+    if (!open) return
+    const close = () => setPos(null)
+    const onDown = (e) => {
+      if (!panelRef.current?.contains(e.target) && !anchorRef.current?.contains(e.target)) close()
+    }
+    const onKey = (e) => { if (e.key === "Escape") close() }
+    const onScroll = (e) => { if (!panelRef.current?.contains(e.target)) close() }
+    document.addEventListener("mousedown", onDown)
+    document.addEventListener("keydown", onKey)
+    window.addEventListener("scroll", onScroll, true)
+    window.addEventListener("resize", close)
+    return () => {
+      document.removeEventListener("mousedown", onDown)
+      document.removeEventListener("keydown", onKey)
+      window.removeEventListener("scroll", onScroll, true)
+      window.removeEventListener("resize", close)
+    }
+  }, [open])
+  const panelStyle = pos ? { position: "fixed", width, zIndex: 40, ...pos } : undefined
+  return { open, toggle, close: () => setPos(null), anchorRef, panelRef, panelStyle }
+}
+
+// One pill showing the current status; writers click it to pick another.
+// The change is local until Save (same as before).
+function StatusMenu({ row, canWrite, onMark }) {
+  const pop = useAnchoredPopover(170)
+  if (!canWrite) return statusPill(row.status)
+  const current = STATUS_CONFIG[row.status] || (row.status === "LATE" ? LATE_CONFIG : { tone: "slate" })
+  return (
+    <>
+      <button
+        ref={pop.anchorRef}
+        type="button"
+        onClick={pop.toggle}
+        aria-haspopup="menu"
+        aria-expanded={pop.open}
+        aria-label={`Status for ${row.name}: ${(current.label || row.status)}. Change status`}
+        className="inline-flex items-center gap-1 rounded-full transition-opacity hover:opacity-80"
+      >
+        {statusPill(row.status)}
+        <ChevronDown size={13} className="text-muted" />
+      </button>
+      {pop.open && createPortal(
+        <div ref={pop.panelRef} style={pop.panelStyle} role="menu" className="rounded-2xl border border-border bg-surface p-1.5 shadow-pop">
+          {Object.entries(STATUS_CONFIG).map(([key, cfg]) => {
+            // A normal late arrival counts as "Present" here. A flagged one
+            // (checked in outside the premises) doesn't, so HR can pick
+            // Present to approve it.
+            const active = row.status === key || (key === "PRESENT" && row.status === "LATE" && !row.autoFlagged)
+            return (
+              <button
+                key={key}
+                type="button"
+                role="menuitemradio"
+                aria-checked={active}
+                onClick={() => { if (!active) onMark(row.employeeId, key); pop.close() }}
+                className={`flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-sm ${active ? "bg-surface-2 font-semibold text-ink" : "text-ink hover:bg-surface-2"}`}
+              >
+                <cfg.icon size={14} className={`text-chip-${cfg.tone}-fg`} />
+                <span className="flex-1">{cfg.label}</span>
+                {active && <Check size={14} className="text-accent" />}
+              </button>
+            )
+          })}
+          {row.status === "LATE" && (
+            <p className="px-2.5 pb-1 pt-1.5 text-[10px] leading-4 text-muted">
+              {row.autoFlagged
+                ? "Checked in outside the premises. Present approves it (it stays Late only if the check-in time itself was late)."
+                : "Late is set from the check-in time; marking Present keeps it Late."}
+            </p>
+          )}
+        </div>,
+        document.body
+      )}
+    </>
+  )
+}
+
+const NOTE_MAX = 500
+
+// Day note: read-only for everyone, editable by HR/ADMIN/CEO. Saved on its
+// own (PUT /attendance/notes) — independent of the status Save button.
+function NoteCell({ row, date, canEdit, onSaved }) {
+  const pop = useAnchoredPopover(300)
+  const [draft, setDraft] = useState("")
+  const save = useMutation({
+    mutationFn: (note) => api.put("/attendance/notes", { employeeId: row.employeeId, date, note }).then((r) => r.data),
+    onSuccess: (res) => { onSaved(row.employeeId, res); pop.close() },
+  })
+  const meta = row.note && row.noteAuthorName ? `${row.noteAuthorName}${row.noteUpdatedAt ? ` · ${new Date(row.noteUpdatedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}` : ""}` : ""
+
+  if (!canEdit) {
+    return row.note
+      ? <p className="line-clamp-2 text-xs text-ink" title={meta ? `${row.note}\n— ${meta}` : row.note}>{row.note}</p>
+      : <span className="text-xs text-muted-2">-</span>
+  }
+
+  return (
+    <>
+      <button
+        ref={pop.anchorRef}
+        type="button"
+        onClick={() => { if (!pop.open) { setDraft(row.note || ""); save.reset() } pop.toggle() }}
+        className="group flex w-full max-w-[240px] items-start gap-1.5 rounded-lg px-1.5 py-1 text-left hover:bg-surface-2"
+        title={row.note ? (meta ? `${row.note}\n— ${meta}` : row.note) : "Add a note"}
+        aria-label={row.note ? `Edit note for ${row.name}` : `Add note for ${row.name}`}
+      >
+        {row.note
+          ? <span className="line-clamp-2 flex-1 text-xs text-ink">{row.note}</span>
+          : <span className="flex items-center gap-1 text-xs text-muted-2 group-hover:text-accent"><Plus size={12} /> Add note</span>}
+        {row.note && <Pencil size={11} className="mt-0.5 shrink-0 text-muted-2 opacity-0 group-hover:opacity-100" />}
+      </button>
+      {pop.open && createPortal(
+        <form
+          ref={pop.panelRef}
+          style={pop.panelStyle}
+          onSubmit={(e) => { e.preventDefault(); save.mutate(draft) }}
+          className="rounded-2xl border border-border bg-surface p-3 shadow-pop"
+        >
+          <p className="text-xs font-semibold text-ink">Note for {row.name}</p>
+          {meta && <p className="mt-0.5 text-[10px] text-muted">Last edited by {meta}</p>}
+          <textarea
+            value={draft}
+            onChange={(e) => setDraft(e.target.value.slice(0, NOTE_MAX))}
+            rows={4}
+            autoFocus
+            placeholder="e.g. Doctor's appointment in the morning"
+            className="field mt-2 resize-none text-xs"
+            aria-label="Note"
+          />
+          <div className="mt-1 flex items-center justify-between text-[10px] text-muted-2">
+            <span>{draft.length}/{NOTE_MAX}</span>
+            {save.isError && <span className="text-danger">{save.error?.response?.data?.error || "Couldn't save."}</span>}
+          </div>
+          <div className="mt-2 flex items-center justify-between gap-2">
+            {row.note
+              ? <button type="button" onClick={() => save.mutate("")} disabled={save.isPending} className="text-xs font-semibold text-danger disabled:opacity-50">Remove</button>
+              : <span />}
+            <div className="flex gap-2">
+              <button type="button" onClick={pop.close} className="pill-secondary px-3 py-1.5 text-xs">Cancel</button>
+              <button type="submit" disabled={save.isPending || draft.trim() === (row.note || "")} className="pill-accent px-3 py-1.5 text-xs disabled:opacity-50">
+                {save.isPending ? "Saving…" : "Save note"}
+              </button>
+            </div>
+          </div>
+        </form>,
+        document.body
+      )}
+    </>
+  )
+}
+
+const VIEW_KEY = "assetflow_attendance_view"
+function readView() {
+  try { return localStorage.getItem(VIEW_KEY) === "grid" ? "grid" : "list" } catch { return "list" }
+}
+
 export default function Attendance() {
-  const { user } = useAuth()
+  const { user, organization } = useAuth()
   const queryClient = useQueryClient()
 
   const { data: permission, isLoading: permissionLoading } = useQuery({
@@ -112,61 +357,130 @@ export default function Attendance() {
   const canWrite = !!(permission?.canCreate || permission?.canUpdate)
   const canResolve = !!permission?.canUpdate
 
-  // The dashboard's Attendance Snapshot tiles deep-link here with
-  // ?date=YYYY-MM-DD and ?status=present|late|absent (display filter only —
-  // Save still sends every row).
+  // URL state: ?date=YYYY-MM-DD, ?status=<FILTERS key>, ?dept=<name>. The
+  // dashboard snapshot deep-links with date + status=present|late|absent.
   const [searchParams, setSearchParams] = useSearchParams()
+  const todayKey = todayKeyIn(organization?.timezone)
   const dateParam = searchParams.get("date")
-  const [today] = useState(() => new Date().toISOString().slice(0, 10))
-  const date = dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam) ? dateParam : today
-  const statusFilter = STATUS_FILTERS[searchParams.get("status")] ? searchParams.get("status") : null
-  const [exportRange, setExportRange] = useState(() => ({ startDate: date, endDate: date }))
+  const date = dateParam && DATE_RE.test(dateParam) ? dateParam : todayKey
+  const statusFilter = FILTERS[searchParams.get("status")] ? searchParams.get("status") : null
+  const deptFilter = searchParams.get("dept") || ""
+
+  function setParams(changes) {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      for (const [k, v] of Object.entries(changes)) {
+        if (v) next.set(k, v)
+        else next.delete(k)
+      }
+      return next
+    }, { replace: true })
+  }
+
   const [rows, setRows] = useState([])
   const [dirty, setDirty] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [search, setSearch] = useState("")
+  const [sort, setSort] = useState({ key: "name", dir: "asc" })
+  const [view, setView] = useState(readView)
+  const [exportRange, setExportRange] = useState(() => ({ startDate: date, endDate: date }))
+  const [exportError, setExportError] = useState("")
+  const report = usePopover()
+  const filterPop = usePopover()
+  const dateInputRef = useRef(null)
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["attendance", date],
     queryFn: () => api.get("/attendance", { params: { date } }).then((r) => r.data),
     enabled: hasAccess,
   })
+  const prevDate = addDays(date, -1)
+  const { data: prevData } = useQuery({
+    queryKey: ["attendance", prevDate],
+    queryFn: () => api.get("/attendance", { params: { date: prevDate } }).then((r) => r.data),
+    enabled: hasAccess,
+  })
+
+  // Unsaved status changes, by employee. A refetch (window focus, a saved
+  // note) re-applies them on top of the fresh rows instead of wiping them.
+  const editsRef = useRef(new Map())
 
   useEffect(() => {
-    if (data?.rows) { setRows(data.rows); setDirty(false) }
+    if (!data?.rows) return
+    const edits = editsRef.current
+    setRows(data.rows.map((r) => (edits.has(r.employeeId) ? { ...r, ...edits.get(r.employeeId) } : r)))
+    setDirty(edits.size > 0)
   }, [data])
 
+  // Switching days: drop the previous day's rows and edits instead of
+  // showing them under the new date while it loads.
+  useEffect(() => {
+    editsRef.current = new Map()
+    setRows(data?.rows || [])
+    setDirty(false)
+  }, [date]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    try { localStorage.setItem(VIEW_KEY, view) } catch { /* per-viewer convenience only */ }
+  }, [view])
+
+  function goToDate(key) {
+    if (!key || !DATE_RE.test(key) || key === date) return
+    if (dirty && !window.confirm("You have unsaved attendance changes for this day. Discard them?")) return
+    setSaved(false)
+    setExportRange({ startDate: key, endDate: key })
+    setParams({ date: key === todayKey ? null : key })
+  }
+
   function setLocalStatus(employeeId, status) {
-    const nowIso = new Date().toISOString()
-    setRows((prev) =>
-      prev.map((r) =>
-        r.employeeId === employeeId
-          ? { ...r, status, time: nowIso, markedByName: user?.name || r.markedByName, autoFlagged: false }
-          : r
-      )
-    )
+    const patch = { status, time: new Date().toISOString(), markedByName: user?.name, markedById: user?.id }
+    editsRef.current.set(employeeId, patch)
+    setRows((prev) => prev.map((r) => (r.employeeId === employeeId ? { ...r, ...patch } : r)))
     setDirty(true); setSaved(false)
+  }
+
+  // Note saved server-side: patch the cached day so it survives a refetch
+  // (pending status edits are re-applied by the effect above).
+  function onNoteSaved(employeeId, res) {
+    const apply = (r) => (r.employeeId === employeeId
+      ? { ...r, note: res.note, noteAuthorName: res.noteAuthorName, noteUpdatedAt: res.noteUpdatedAt }
+      : r)
+    queryClient.setQueryData(["attendance", date], (old) => (old ? { ...old, rows: old.rows.map(apply) } : old))
+  }
+
+  const canNote = ["ADMIN", "CEO", "HR"].includes(user?.role)
+
+  function invalidateDay() {
+    queryClient.invalidateQueries({ queryKey: ["attendance", date] })
+    queryClient.invalidateQueries({ queryKey: ["dashboard-attendance-snapshot"] })
   }
 
   const saveDay = useMutation({
     mutationFn: () =>
-      api.post("/attendance/save", { date, records: rows.map((r) => ({ employeeId: r.employeeId, status: r.status })) }),
-    onSuccess: () => {
-      setDirty(false); setSaved(true)
-      queryClient.invalidateQueries({ queryKey: ["attendance", date] })
-    },
+      // Only the rows actually changed — re-sending every row would stamp
+      // "marked by" on everyone and clear their outside-premises flags.
+      api.post("/attendance/save", {
+        date,
+        records: [...editsRef.current].map(([employeeId, patch]) => ({ employeeId, status: patch.status })),
+      }),
+    onSuccess: () => { editsRef.current = new Map(); setDirty(false); setSaved(true); invalidateDay() },
   })
 
-  async function exportSheet() {
-    const { startDate, endDate } = exportRange
-    const res = await api.get("/attendance/export", { params: { startDate, endDate }, responseType: "blob" })
-    const url = window.URL.createObjectURL(new Blob([res.data]))
-    const link = document.createElement("a")
-    link.href = url
-    const rangeLabel = startDate === endDate ? startDate : `${startDate}_to_${endDate}`
-    link.setAttribute("download", `Attendance_${rangeLabel}.xlsx`)
-    document.body.appendChild(link); link.click(); link.remove()
-    setTimeout(() => window.URL.revokeObjectURL(url), 1000)
-  }
+  const exportSheet = useMutation({
+    mutationFn: async () => {
+      const { startDate, endDate } = exportRange
+      const res = await api.get("/attendance/export", { params: { startDate, endDate }, responseType: "blob" })
+      const url = window.URL.createObjectURL(new Blob([res.data]))
+      const link = document.createElement("a")
+      link.href = url
+      link.setAttribute("download", `Attendance_${startDate === endDate ? startDate : `${startDate}_to_${endDate}`}.xlsx`)
+      document.body.appendChild(link); link.click(); link.remove()
+      setTimeout(() => window.URL.revokeObjectURL(url), 1000)
+    },
+    onMutate: () => setExportError(""),
+    onSuccess: () => report.setOpen(false),
+    onError: () => setExportError("Couldn't generate the report. Check the date range and try again."),
+  })
 
   const { data: anomalies = [] } = useQuery({
     queryKey: ["attendance-anomalies"],
@@ -180,6 +494,55 @@ export default function Attendance() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["attendance-anomalies"] }),
   })
 
+  const timeZone = data?.schedule?.timezone || organization?.timezone
+  const ctxFor = (d, key) => ({
+    scheduled: d?.schedule?.isScheduledWorkday !== false,
+    isPast: key < todayKey,
+    isFuture: key > todayKey,
+  })
+  const ctx = ctxFor(data, date)
+
+  const counts = useMemo(() => {
+    const out = {}
+    for (const k of Object.keys(FILTERS)) out[k] = rows.filter((r) => FILTERS[k].match(r, ctx)).length
+    return out
+  }, [rows, ctx.scheduled, ctx.isPast, ctx.isFuture]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const prevCounts = useMemo(() => {
+    if (!prevData?.rows) return null
+    const c = ctxFor(prevData, prevDate)
+    const out = {}
+    for (const k of Object.keys(FILTERS)) out[k] = prevData.rows.filter((r) => FILTERS[k].match(r, c)).length
+    return out
+  }, [prevData, prevDate, todayKey]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const departments = useMemo(
+    () => [...new Set(rows.map((r) => r.department).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
+    [rows]
+  )
+
+  const visibleRows = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    const filtered = rows.filter((r) =>
+      (!statusFilter || FILTERS[statusFilter].match(r, ctx)) &&
+      (!deptFilter || r.department === deptFilter) &&
+      (!q || r.name.toLowerCase().includes(q) || (r.department || "").toLowerCase().includes(q))
+    )
+    const val = (r) => {
+      switch (sort.key) {
+        case "clock": return r.checkInAt || "￿"
+        case "worked": return effectiveWorkingMinutes({ ...r, date }) ?? -1
+        case "status": return r.status
+        default: return r.name.toLowerCase()
+      }
+    }
+    const dir = sort.dir === "asc" ? 1 : -1
+    return filtered.sort((a, b) => {
+      const va = val(a), vb = val(b)
+      return (va < vb ? -1 : va > vb ? 1 : 0) * dir || a.name.localeCompare(b.name)
+    })
+  }, [rows, statusFilter, deptFilter, search, sort, date, ctx.scheduled, ctx.isPast, ctx.isFuture]) // eslint-disable-line react-hooks/exhaustive-deps
+
   if (permissionLoading) return <p className="text-sm text-muted">Loading...</p>
 
   if (!hasAccess) {
@@ -191,92 +554,169 @@ export default function Attendance() {
     )
   }
 
-  const presentCount = rows.filter((r) => r.status === "PRESENT" || r.status === "LATE").length
-  const filterCtx = {
-    scheduled: data?.schedule?.isScheduledWorkday !== false,
-    isFuture: !!data?.date && data.date > new Intl.DateTimeFormat("en-CA", { timeZone: data?.schedule?.timezone || undefined }).format(new Date()),
-  }
-  const visibleRows = statusFilter ? rows.filter((r) => STATUS_FILTERS[statusFilter].match(r, filterCtx)) : rows
+  const isToday = date === todayKey
+  const compareLabel = isToday ? "vs yesterday" : "vs previous day"
+  const activeFilterCount = (statusFilter ? 1 : 0) + (deptFilter ? 1 : 0)
 
-  function clearStatusFilter() {
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev)
-      next.delete("status")
-      return next
-    }, { replace: true })
+  function toggleSort(key) {
+    setSort((s) => (s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" }))
+  }
+
+  function SortHeader({ label, icon: Icon, sortKey }) {
+    const active = sort.key === sortKey
+    const DirIcon = !active ? ArrowUpDown : sort.dir === "asc" ? ArrowUp : ArrowDown
+    return (
+      <th className="px-4 py-3" aria-sort={active ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}>
+        {sortKey ? (
+          <button type="button" onClick={() => toggleSort(sortKey)} className="flex w-full items-center justify-between gap-2 font-semibold hover:text-ink">
+            <span className="flex items-center gap-1.5"><Icon size={13} /> {label}</span>
+            <DirIcon size={12} className={active ? "text-ink" : "text-muted-2"} />
+          </button>
+        ) : (
+          <span className="flex items-center gap-1.5"><Icon size={13} /> {label}</span>
+        )}
+      </th>
+    )
   }
 
   return (
-    <div>
-      <PageHeader
-        backTo="/"
-        title={`Attendance · ${data?.date || date}`}
-        subtitle={
-          <span>
-            {presentCount} of {rows.length} marked present
-            {data?.schedule && <span className="ml-2">· {data.schedule.workingHoursPerDay}h/day · {data.schedule.workingDaysPerWeek} days/week</span>}
-            {dirty && <span className="ml-2 rounded-full bg-chip-yellow-bg px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-chip-yellow-fg">Unsaved</span>}
-            {saved && !dirty && <span className="ml-2 rounded-full bg-chip-green-bg px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-chip-green-fg">Saved</span>}
-          </span>
-        }
-        actions={
-          <>
-            <div className="flex items-center gap-1.5">
-              <input
-                type="date"
-                value={exportRange.startDate}
-                max={exportRange.endDate}
-                onChange={(e) => setExportRange((r) => ({ ...r, startDate: e.target.value }))}
-                className="field px-2 py-2 text-xs"
-                aria-label="Export start date"
-              />
-              <span className="text-xs text-muted">to</span>
-              <input
-                type="date"
-                value={exportRange.endDate}
-                min={exportRange.startDate}
-                onChange={(e) => setExportRange((r) => ({ ...r, endDate: e.target.value }))}
-                className="field px-2 py-2 text-xs"
-                aria-label="Export end date"
-              />
-            </div>
-            <button onClick={exportSheet} className="pill-secondary flex items-center gap-1.5 px-4 py-2.5 text-sm">
-              <Download size={15} /> Export
+    <div className="min-w-0">
+      {/* ── Header: title + day navigator | report + add ── */}
+      <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex min-w-0 flex-wrap items-center gap-3">
+          <h1 className="text-2xl font-semibold text-ink sm:text-[26px]" style={{ letterSpacing: "-0.02em" }}>Attendance</h1>
+          <span className="hidden h-7 w-px bg-border-strong sm:block" aria-hidden="true" />
+          <div className="flex items-center gap-1.5">
+            <button type="button" onClick={() => goToDate(addDays(date, -1))} className="flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-surface text-muted hover:bg-surface-2 hover:text-ink" aria-label="Previous day">
+              <ChevronLeft size={15} />
             </button>
-            {canWrite && (
-              <button
-                onClick={() => saveDay.mutate()}
-                disabled={!dirty || saveDay.isPending}
-                className="pill-accent flex items-center gap-1.5 px-4 py-2.5 text-sm disabled:opacity-40"
-              >
-                <Save size={15} />
-                {saveDay.isPending ? "Saving…" : "Save"}
+            <button
+              type="button"
+              onClick={() => { try { dateInputRef.current?.showPicker() } catch { dateInputRef.current?.focus() } }}
+              className="relative flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm font-semibold text-ink hover:bg-surface-2"
+              title="Pick a date"
+            >
+              {longDateFmt.format(new Date(`${date}T00:00:00Z`))}
+              <CalendarDays size={14} className="text-muted" />
+              <input
+                ref={dateInputRef}
+                type="date"
+                value={date}
+                onChange={(e) => goToDate(e.target.value)}
+                className="pointer-events-none absolute inset-0 opacity-0"
+                tabIndex={-1}
+                aria-label="Attendance date"
+              />
+            </button>
+            <button type="button" onClick={() => goToDate(addDays(date, 1))} className="flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-surface text-muted hover:bg-surface-2 hover:text-ink" aria-label="Next day">
+              <ChevronRight size={15} />
+            </button>
+            {!isToday && (
+              <button type="button" onClick={() => goToDate(todayKey)} className="ml-1 rounded-lg px-2 py-1 text-xs font-semibold text-accent hover:bg-surface-2">
+                Today
               </button>
             )}
-          </>
-        }
-      />
-
-      {isLoading && <p className="text-sm text-muted">Loading...</p>}
-      {statusFilter && (
-        <div className="mb-4 flex items-center gap-2">
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-accent-soft px-3 py-1.5 text-xs font-semibold text-accent-ink">
-            Showing: {STATUS_FILTERS[statusFilter].label}{!isLoading && ` (${visibleRows.length})`}
-            <button type="button" onClick={clearStatusFilter} className="rounded-full p-0.5 hover:bg-black/5" aria-label="Show all employees">
-              <X size={12} />
-            </button>
-          </span>
-        </div>
-      )}
-      {anomalies.length > 0 && (
-        <div className="mb-5 card overflow-hidden">
-          <div className="flex items-center justify-between gap-3 border-b border-border px-5 py-4">
-            <div>
-              <p className="flex items-center gap-2 text-sm font-semibold text-ink"><ShieldAlert size={16} /> Attendance anomalies</p>
-              <p className="mt-1 text-xs text-muted">Location, device and attendance events requiring review.</p>
-            </div>
-            <span className="rounded-full bg-chip-pink-bg px-2.5 py-1 text-[10px] font-semibold text-chip-pink-fg">{anomalies.length} open</span>
           </div>
+          {dirty && <span className="rounded-full bg-chip-yellow-bg px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-chip-yellow-fg">Unsaved</span>}
+          {saved && !dirty && <span className="rounded-full bg-chip-green-bg px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-chip-green-fg">Saved</span>}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative" ref={report.ref}>
+            <button type="button" onClick={() => report.setOpen((v) => !v)} className="pill-secondary flex items-center gap-1.5 px-4 py-2.5 text-sm" aria-expanded={report.open}>
+              <FileBarChart size={15} /> Attendance Report
+            </button>
+            {report.open && (
+              <div className="absolute right-0 z-30 mt-2 w-72 rounded-2xl border border-border bg-surface p-4 shadow-pop">
+                <p className="text-sm font-semibold text-ink">Export attendance</p>
+                <p className="mt-0.5 text-xs text-muted">Excel sheet for a date range.</p>
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <label className="text-[11px] font-medium text-muted">
+                    From
+                    <input type="date" value={exportRange.startDate} max={exportRange.endDate} onChange={(e) => setExportRange((r) => ({ ...r, startDate: e.target.value }))} className="field mt-1 px-2 py-2 text-xs" />
+                  </label>
+                  <label className="text-[11px] font-medium text-muted">
+                    To
+                    <input type="date" value={exportRange.endDate} min={exportRange.startDate} onChange={(e) => setExportRange((r) => ({ ...r, endDate: e.target.value }))} className="field mt-1 px-2 py-2 text-xs" />
+                  </label>
+                </div>
+                {exportError && <p className="mt-2 text-xs text-danger">{exportError}</p>}
+                <button
+                  type="button"
+                  onClick={() => exportSheet.mutate()}
+                  disabled={!exportRange.startDate || !exportRange.endDate || exportSheet.isPending}
+                  className="pill-accent mt-3 flex w-full items-center justify-center gap-1.5 px-4 py-2.5 text-sm disabled:opacity-50"
+                >
+                  <Download size={14} /> {exportSheet.isPending ? "Preparing…" : "Download .xlsx"}
+                </button>
+              </div>
+            )}
+          </div>
+          {canWrite && (
+            <button
+              type="button"
+              onClick={() => saveDay.mutate()}
+              disabled={!dirty || saveDay.isPending}
+              className="pill-accent flex items-center gap-1.5 px-4 py-2.5 text-sm disabled:opacity-40"
+              title={dirty ? "Save status changes" : "No unsaved status changes"}
+            >
+              <Save size={15} /> {saveDay.isPending ? "Saving…" : "Save"}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {saveDay.isError && <div className="mb-4 rounded-2xl bg-chip-pink-bg px-4 py-2.5 text-sm text-chip-pink-fg">Couldn't save attendance: {saveDay.error?.response?.data?.error || "please try again."}</div>}
+      {isError && <div className="mb-4 rounded-2xl bg-chip-pink-bg px-4 py-2.5 text-sm text-chip-pink-fg">Couldn't load attendance for this day.</div>}
+
+      {/* ── Summary cards (each number filters the table) ── */}
+      <div className="mb-5 grid grid-cols-1 gap-3 md:grid-cols-[3fr_3fr_2fr]">
+        {SUMMARIES.map((s) => (
+          <div key={s.title} className="card min-w-0 p-4">
+            <p className="flex items-center gap-2 text-sm font-semibold text-ink">
+              <s.icon size={16} className={s.tone} /> {s.title}
+            </p>
+            <div className={`mt-3 grid grid-cols-2 gap-y-3 ${METRIC_COLS[s.keys.length]}`}>
+              {s.keys.map((k, i) => {
+                const f = FILTERS[k]
+                const delta = prevCounts ? counts[k] - prevCounts[k] : null
+                // Up is good for on-time/early, bad for everything else.
+                const tone = !delta ? "text-muted-2" : (delta > 0) === !!f.good ? "text-chip-green-fg" : "text-danger"
+                const active = statusFilter === k
+                return (
+                  <button
+                    key={k}
+                    type="button"
+                    onClick={() => setParams({ status: active ? null : k })}
+                    aria-pressed={active}
+                    title={active ? "Show everyone" : `Show ${f.label.toLowerCase()}`}
+                    className={`min-w-0 rounded-xl px-2.5 py-1.5 text-left transition-colors ${i > 0 ? "sm:border-l sm:border-border sm:rounded-l-none" : ""} ${active ? "bg-accent-soft" : "hover:bg-surface-2"}`}
+                  >
+                    <p className={`truncate text-xs ${active ? "font-semibold text-accent-ink" : "text-muted"}`}>{f.label}</p>
+                    <p className="mt-0.5 text-2xl font-semibold leading-tight text-ink">{isLoading ? "—" : counts[k]}</p>
+                    <p className="mt-0.5 truncate text-[10px] text-muted-2">
+                      {delta == null ? " " : (
+                        <><span className={`font-semibold ${tone}`}>{delta > 0 ? `+ ${delta}` : delta < 0 ? `− ${Math.abs(delta)}` : "0"}</span> {compareLabel}</>
+                      )}
+                    </p>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* ── Anomalies needing review (unchanged behavior) ── */}
+      {anomalies.length > 0 && (
+        <details className="mb-5 card overflow-hidden" open>
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 border-b border-border px-5 py-3.5">
+            <span>
+              <span className="flex items-center gap-2 text-sm font-semibold text-ink"><ShieldAlert size={16} /> Attendance anomalies</span>
+              <span className="mt-0.5 block text-xs text-muted">Location, device and attendance events requiring review.</span>
+            </span>
+            <span className="rounded-full bg-chip-pink-bg px-2.5 py-1 text-[10px] font-semibold text-chip-pink-fg">{anomalies.length} open</span>
+          </summary>
           <div className="divide-y divide-border">
             {anomalies.slice(0, 8).map((a) => (
               <div key={a.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3">
@@ -290,131 +730,161 @@ export default function Attendance() {
               </div>
             ))}
           </div>
-        </div>
+        </details>
       )}
 
+      {/* ── Toolbar: search, filters, view toggle ── */}
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        {/* Icon is a flex sibling of the input (not absolutely positioned
+            over it), so it can never overlap the placeholder. */}
+        <label className="flex h-9 w-full items-center gap-2 rounded-xl border border-border bg-surface px-3 text-sm focus-within:border-accent sm:w-60" style={{ maxWidth: 260 }}>
+          <Search size={14} className="shrink-0 text-muted-2" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search employee"
+            className="min-w-0 flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-muted-2"
+            aria-label="Search employee"
+          />
+          {search && (
+            <button type="button" onClick={() => setSearch("")} className="shrink-0 text-muted-2 hover:text-ink" aria-label="Clear search">
+              <X size={13} />
+            </button>
+          )}
+        </label>
 
-      <div className="space-y-3 md:hidden">
+        <div className="relative" ref={filterPop.ref}>
+          <button type="button" onClick={() => filterPop.setOpen((v) => !v)} aria-expanded={filterPop.open} className="flex h-9 items-center gap-1.5 rounded-xl border border-border bg-surface px-3 text-sm font-semibold text-ink hover:bg-surface-2">
+            <SlidersHorizontal size={14} /> Advance Filter
+            {activeFilterCount > 0 && <span className="rounded-full bg-accent px-1.5 text-[10px] font-bold text-white">{activeFilterCount}</span>}
+          </button>
+          {filterPop.open && (
+            <div className="absolute left-0 z-30 mt-2 w-64 space-y-3 rounded-2xl border border-border bg-surface p-4 shadow-pop">
+              <label className="block text-[11px] font-medium text-muted">
+                Status
+                <select value={statusFilter || ""} onChange={(e) => setParams({ status: e.target.value || null })} className="field mt-1 py-2 text-sm">
+                  <option value="">All statuses</option>
+                  {Object.entries(FILTERS).map(([k, f]) => <option key={k} value={k}>{f.label}</option>)}
+                </select>
+              </label>
+              <label className="block text-[11px] font-medium text-muted">
+                Department
+                <select value={deptFilter} onChange={(e) => setParams({ dept: e.target.value || null })} className="field mt-1 py-2 text-sm">
+                  <option value="">All departments</option>
+                  {departments.map((d) => <option key={d} value={d}>{d}</option>)}
+                </select>
+              </label>
+              <button type="button" onClick={() => { setParams({ status: null, dept: null }); filterPop.setOpen(false) }} disabled={!activeFilterCount} className="text-xs font-semibold text-accent disabled:opacity-40">
+                Clear filters
+              </button>
+            </div>
+          )}
+        </div>
+
+        {statusFilter && (
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-accent-soft px-3 py-1.5 text-xs font-semibold text-accent-ink">
+            Showing: {FILTERS[statusFilter].label}{!isLoading && ` (${visibleRows.length})`}
+            <button type="button" onClick={() => setParams({ status: null })} className="rounded-full p-0.5 hover:bg-black/5" aria-label="Show all employees"><X size={12} /></button>
+          </span>
+        )}
+        {deptFilter && (
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-accent-soft px-3 py-1.5 text-xs font-semibold text-accent-ink">
+            {deptFilter}
+            <button type="button" onClick={() => setParams({ dept: null })} className="rounded-full p-0.5 hover:bg-black/5" aria-label="Clear department filter"><X size={12} /></button>
+          </span>
+        )}
+
+        <div className="ml-auto flex rounded-xl border border-border bg-surface p-0.5" role="group" aria-label="View">
+          {[["grid", LayoutGrid, "Grid view"], ["list", List, "List view"]].map(([v, Icon, label]) => (
+            <button key={v} type="button" onClick={() => setView(v)} aria-pressed={view === v} title={label} aria-label={label}
+              className={`flex h-8 w-8 items-center justify-center rounded-lg ${view === v ? "bg-surface-2 text-ink" : "text-muted hover:text-ink"}`}>
+              <Icon size={15} />
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {isLoading && <p className="mb-3 text-sm text-muted">Loading...</p>}
+
+      {/* ── Grid view (always used on phones) ── */}
+      <div className={`grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 ${view === "list" ? "md:hidden" : ""}`}>
         {visibleRows.map((row) => (
-          <div key={row.employeeId} className="card p-4">
+          <div key={row.employeeId} className="card min-w-0 p-4">
             <div className="flex items-center gap-3">
               <Avatar name={row.name} size="sm" />
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-semibold text-ink">{row.name}</p>
+                <Link to={`/employees/${row.employeeId}`} className="block truncate text-sm font-semibold text-ink hover:text-accent hover:underline" title={`Open ${row.name}'s profile`}>{row.name}</Link>
                 <p className="truncate text-xs text-muted">{row.department || "—"}</p>
-                {row.time && (
-                  <p className="mt-0.5 text-xs text-muted-2">{formatPunchTime(row.time)}</p>
-                )}
-                <p className="mt-0.5 text-xs text-muted-2">
-                  {formatPunchTime(row.checkInAt)} → {formatPunchTime(row.checkOutAt)}
-                </p>
-                <WorkingTimeProgress
-                  workingMinutes={row.workingMinutes}
-                  checkInAt={row.checkInAt}
-                  checkOutAt={row.checkOutAt}
-                  expectedMinutes={row.expectedWorkingMinutes}
-                  date={data?.date || date}
-                  className="mt-1.5"
-                />
-                {row.markedByName && (
-                  <p className="mt-0.5 text-xs text-muted-2">Marked by {row.markedByName}</p>
-                )}
-                <LocationFlag row={row} />
               </div>
-              {statusPill(row.status)}
+              <StatusMenu row={row} canWrite={canWrite} onMark={setLocalStatus} />
             </div>
-            {canWrite && (
-              <div className="mt-3 grid grid-cols-3 gap-2">
-                {Object.entries(STATUS_CONFIG).map(([key, cfg]) => (
-                  <button
-                    key={key}
-                    onClick={() => setLocalStatus(row.employeeId, key)}
-                    className={`flex items-center justify-center gap-1.5 rounded-full py-2 text-[11px] font-semibold transition-colors ${
-                      row.status === key
-                        ? `bg-chip-${cfg.tone}-bg text-chip-${cfg.tone}-fg`
-                        : "bg-surface-2 text-muted hover:text-ink"
-                    }`}
-                  >
-                    <cfg.icon size={12} strokeWidth={2.5} />
-                    {cfg.label}
-                  </button>
-                ))}
-              </div>
-            )}
+            <div className="mt-3 space-y-2">
+              <ClockInOut row={row} date={data?.date || date} timeZone={timeZone} />
+              <WorkingTimeProgress workingMinutes={row.workingMinutes} checkInAt={row.checkInAt} checkOutAt={row.checkOutAt} expectedMinutes={row.expectedWorkingMinutes} date={data?.date || date} className="!max-w-none" />
+              <LocationFlag row={row} />
+              {(row.note || canNote) && (
+                <div className="border-t border-border pt-2">
+                  <NoteCell row={row} date={date} canEdit={canNote} onSaved={onNoteSaved} />
+                </div>
+              )}
+            </div>
           </div>
         ))}
-        {visibleRows.length === 0 && !isLoading && <EmptyState title={statusFilter ? `No ${STATUS_FILTERS[statusFilter].label.toLowerCase()} employees on this day` : "No active employees"} />}
+        {visibleRows.length === 0 && !isLoading && (
+          <div className="sm:col-span-2 xl:col-span-3">
+            <EmptyState title={rows.length ? "No employees match these filters" : "No active employees"} />
+          </div>
+        )}
       </div>
 
-      <div className="hidden card overflow-hidden md:block">
-        <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="text-left text-[11px] font-semibold uppercase tracking-wide text-muted">
-            <tr className="border-b border-border">
-              <th className="px-5 py-3.5">Employee</th>
-              <th className="px-5 py-3.5">Department</th>
-              <th className="px-5 py-3.5">Check in / out</th>
-              <th className="px-5 py-3.5">Working time</th>
-              <th className="px-5 py-3.5">Location</th>
-              <th className="px-5 py-3.5">Status</th>
-              {canWrite && <th className="px-5 py-3.5">Mark</th>}
-            </tr>
-          </thead>
-          <tbody>
-            {visibleRows.map((row) => (
-              <tr key={row.employeeId} className="border-b border-border last:border-0 hover:bg-surface-2">
-                <td className="px-5 py-3.5">
-                  <div className="flex items-center gap-3">
-                    <Avatar name={row.name} size="sm" />
-                    <p className="font-semibold text-ink">{row.name}</p>
-                  </div>
-                </td>
-                <td className="px-5 py-3.5 text-muted">{row.department || "—"}</td>
-                <td className="px-5 py-3.5 text-muted">{formatPunchTime(row.checkInAt)} → {formatPunchTime(row.checkOutAt)}</td>
-                <td className="px-5 py-3.5">
-                  <WorkingTimeProgress
-                    workingMinutes={row.workingMinutes}
-                    checkInAt={row.checkInAt}
-                    checkOutAt={row.checkOutAt}
-                    expectedMinutes={row.expectedWorkingMinutes}
-                    date={data?.date || date}
-                  />
-                </td>
-                <td className="px-5 py-3.5">
-                  <LocationFlag row={row} />
-                </td>
-                <td className="px-5 py-3.5">
-                  {statusPill(row.status)}
-                </td>
-                {canWrite && (
-                  <td className="px-5 py-3.5">
-                    <div className="flex gap-1.5">
-                      {Object.entries(STATUS_CONFIG).map(([key, cfg]) => (
-                        <button
-                          key={key}
-                          onClick={() => setLocalStatus(row.employeeId, key)}
-                          className={`flex items-center gap-1 rounded-full px-3 py-1.5 text-[11px] font-semibold transition-colors ${
-                            row.status === key
-                              ? `bg-chip-${cfg.tone}-bg text-chip-${cfg.tone}-fg`
-                              : "bg-surface-2 text-muted hover:text-ink"
-                          }`}
-                        >
-                          <cfg.icon size={11} strokeWidth={2.5} />
-                          {cfg.label}
-                        </button>
-                      ))}
-                    </div>
-                  </td>
+      {/* ── List (table) view ── */}
+      {view === "list" && (
+        <div className="hidden card overflow-hidden md:block">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[980px] text-sm">
+              <thead className="border-b border-border bg-surface-2/60 text-left text-xs text-muted">
+                <tr>
+                  <SortHeader label="Employee Name" icon={User} sortKey="name" />
+                  <SortHeader label="Clock-in & Out" icon={Clock} sortKey="clock" />
+                  <SortHeader label="Working time" icon={Timer} sortKey="worked" />
+                  <SortHeader label="Location" icon={MapPin} />
+                  <SortHeader label="Note" icon={StickyNote} />
+                  <SortHeader label="Status" icon={CheckCircle2} sortKey="status" />
+                </tr>
+              </thead>
+              <tbody>
+                {visibleRows.map((row) => (
+                  <tr key={row.employeeId} className="border-b border-border last:border-0 hover:bg-surface-2/60">
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2.5">
+                        <Avatar name={row.name} size="xs" />
+                        <div className="min-w-0">
+                          <Link to={`/employees/${row.employeeId}`} className="block truncate font-semibold text-ink hover:text-accent hover:underline" title={`Open ${row.name}'s profile`}>{row.name}</Link>
+                          <p className="truncate text-[11px] text-muted">{row.department || "—"}</p>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3"><ClockInOut row={row} date={data?.date || date} timeZone={timeZone} /></td>
+                    <td className="px-4 py-3">
+                      <WorkingTimeProgress workingMinutes={row.workingMinutes} checkInAt={row.checkInAt} checkOutAt={row.checkOutAt} expectedMinutes={row.expectedWorkingMinutes} date={data?.date || date} />
+                    </td>
+                    <td className="px-4 py-3"><LocationFlag row={row} /></td>
+                    <td className="w-[250px] px-4 py-3">
+                      <NoteCell row={row} date={date} canEdit={canNote} onSaved={onNoteSaved} />
+                    </td>
+                    <td className="px-4 py-3">
+                      <StatusMenu row={row} canWrite={canWrite} onMark={setLocalStatus} />
+                    </td>
+                  </tr>
+                ))}
+                {visibleRows.length === 0 && !isLoading && (
+                  <tr><td colSpan={6} className="px-5 py-10 text-center text-muted">{rows.length ? "No employees match these filters." : "No active employees."}</td></tr>
                 )}
-              </tr>
-            ))}
-            {visibleRows.length === 0 && !isLoading && (
-              <tr><td colSpan={canWrite ? 7 : 6} className="px-5 py-10 text-center text-muted">{statusFilter ? `No ${STATUS_FILTERS[statusFilter].label.toLowerCase()} employees on this day.` : "No active employees."}</td></tr>
-            )}
-          </tbody>
-        </table>
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   )
 }

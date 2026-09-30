@@ -1406,8 +1406,9 @@ Per a live chat request (2026-09-29), `Dashboard.jsx` header:
   turbulence granulation; colour warms at dawn/dusk) or full moon (maria,
   craters, surface grain, edge shading) from 18:30–06:00, ~150% of the
   header card's height and centred on its right edge so about half the disk
-  is clipped (half-clipped corner icon on mobile). Everything ticks once a
-  minute.
+  is clipped (half-clipped corner icon on mobile). Hovering the disk shows
+  a small "Sun"/"Moon" label to its left (hover target covers only the
+  disk; the glow stays click-through). Everything ticks once a minute.
 
 ## Post-module addition: clickable dashboard asset stat cards
 
@@ -1438,8 +1439,8 @@ Projects / Total assets) is replaced by
   labels only when today is selected) in one row (icon on top, number at
   the bottom) in the left 60%; 2×2 below `md`.
 - Right 40% (redesign to the user's mockup, same day): "Today Attendance"
-  list for the selected date — everyone PRESENT/LATE, earliest check-in
-  first, name (links to their profile), `+Nm`/`+Nh MMm` late badge, 12-hour
+  list for the selected date — everyone PRESENT/LATE, most recent check-in
+  first (manual marks with no check-in time last), name (links to their profile), `+Nm`/`+Nh MMm` late badge, 12-hour
   check-in time in the org timezone, status pill. Pinned to the tiles'
   height on desktop and scrolls inside. `getDailyAttendance` rows gained
   `lateMinutes` (check-in local minute − `shiftStartMinutes`, LATE rows
@@ -1491,6 +1492,131 @@ Per a live chat request (2026-09-29):
 - Utilization card: a small info line under Assigned/Available explains
   it's the share of assets assigned to employees ("N assigned out of M
   total", live values).
+
+## Post-module redesign: Attendance page (2026-09-30)
+
+`frontend/src/pages/Attendance.jsx` rewritten to the user's mockup; every
+pre-existing feature kept (permission gating, per-row Present/Absent/Leave
+marking + Save, export, anomalies + Resolve, location links, working-time
+bar, dashboard deep links).
+- Header: title + day navigator (`<`/`>`, click the date to open a picker,
+  "Today" shortcut); state lives in `?date=` (defaults to today in the
+  **org** timezone — the old page used the UTC date). Leaving a day with
+  unsaved marks asks to discard. "Attendance Report" = export popover
+  (date range → .xlsx via the existing `/attendance/export`). "Add
+  Attendance" = modal that marks one employee via the existing
+  `POST /attendance/mark` (canCreate/canUpdate only).
+- Three summary cards — Present (On time / Late clock-in / Early clock-in),
+  Not Present (Absent / No clock-in / No clock-out / Invalid), Away (Day off
+  / Time off) — each with a delta vs the previous day (second query for
+  date−1). Every number is a filter (`FILTERS` map) and clicking it sets
+  `?status=`, so the table always shows exactly that many rows. Absent uses
+  the dashboard snapshot's rule; No clock-in = absent with no record at all;
+  No clock-out = checked in, never out, past days only; Invalid =
+  `autoFlagged`; Day off = no record on a non-workday; Time off = LEAVE.
+  `present` (PRESENT+LATE) is kept only for the dashboard deep link.
+- Toolbar: employee search, "Advance Filter" (status + department →
+  `?status=`/`?dept=`), grid/list toggle (remembered in localStorage;
+  phones always get cards). Table: sortable Employee / Clock-in & Out /
+  Overtime / Working time / Status; Location; Note. The mockup's Picture
+  column was dropped (no photo field on attendance records); Note is built
+  from real data (late by, WFH, offline, biometric, self check-in, marked by).
+- `getDailyAttendance` rows gained `arrivalOffsetMinutes` (signed minutes
+  from shift start; negative = early), `markedById`, `offlineRecorded` —
+  additive.
+- Verified read-only against the running dev servers as a real ADMIN (27
+  checks: every summary filter's row count = its number, search, sort,
+  department filter, grid/list + persistence, day nav + discard prompt,
+  future day, dashboard deep links 7/6/1 for Sep 29, .xlsx download, Add
+  modal open/cancel, no mobile overflow, no page errors) + dark-mode
+  screenshot. Save / Add submit were not exercised (they write).
+- Pre-existing, unchanged: a check-in with no check-out shows working time
+  capped at 23:59 UTC of that day (`WorkingTimeProgress`), e.g. 16h 20m.
+
+### Follow-up (same day): simplified controls + HR/ADMIN/CEO day notes
+
+- Removed: "Add Attendance" button/modal, the "Invalid" summary tile
+  (auto-flagged rows still show the red "outside site" location link),
+  the Overtime column (late/overtime times are still amber in Clock-in &
+  Out), and the three per-row tick/cross/leave icon buttons. The three
+  summary cards now sit in one row from `md` up.
+- Status: one pill per row (`StatusMenu`); writers click it for a
+  Present/Absent/Leave menu (fixed-positioned so the table's scroll
+  container doesn't clip it). Still a local change until Save. Unsaved
+  edits are kept in `editsRef` and re-applied when the day refetches
+  (window focus, a saved note), so they're no longer lost to a background
+  refetch; cleared on Save or day change.
+- Search bar rebuilt as a flex row (icon beside the input, max 260px) — the
+  old absolutely-positioned icon could overlap the placeholder.
+- **Day notes**: new `AttendanceNote` model (`employeeId`+`date` unique,
+  `authorId` SET NULL, employee CASCADE) + migration
+  `20260930120000_attendance_notes` — **deployed** to the live DB (additive
+  table only; `migrate diff` also showed pre-existing drift on
+  `AttendancePermission` — FK/`updatedAt` default — deliberately left out).
+  `prisma generate` hit the usual EPERM on the engine DLL; JS client
+  verified (`prisma.attendanceNote` works). Separate table on purpose:
+  writing a note never creates an AttendanceRecord or changes a status.
+  `PUT /attendance/notes` {employeeId, date, note} — `requireRole("ADMIN",
+  "CEO","HR")` (+ `canRead`); empty note deletes; max 500 chars.
+  `getDailyAttendance` rows gained `note`, `noteAuthorName`,
+  `noteUpdatedAt`. The Note column/card shows it; HR/ADMIN/CEO get an
+  inline editor (add / edit / remove, shows last editor), everyone else
+  read-only. The earlier auto-generated note text was dropped.
+- Verified against the running dev servers (26 checks, all pass): EMPLOYEE
+  and IT_MANAGER get 403 on note writes, bad date 400; removed items gone;
+  cards one row at 1280/1024px; search 240px, no icon overlap; status menu
+  open/choose/Escape, change stays unsaved; note add → survives reload →
+  edit shows author → remove → gone after reload (one real note was
+  written and removed; 0 `AttendanceNote` rows afterwards); grid view has
+  both controls; no page errors. Save itself still not exercised.
+
+### Follow-up (same day): outside-premises = LATE + auto note, Location labels, menu fix
+
+- **Status menu / note editor position**: both popovers now render via
+  `createPortal(…, document.body)` — a transformed ancestor in the layout
+  made `position: fixed` resolve against it, so the menu appeared far
+  from its button. Opens below the button, or flush above it when there's
+  no room below.
+- **Outside-premises check-in — behavior change (supersedes the
+  "site-bound attendance … outside = ABSENT" section above)**: a check-in
+  outside every assigned site, *or* (non-site-bound, office geofence on)
+  outside the office radius, is now **accepted** with its check-in time,
+  recorded as **LATE** + `autoFlagged`, with an `OUTSIDE_SITE` anomaly and
+  an automatic `AttendanceNote` ("Marked attendance outside the office
+  premises (Nm from X) — recorded as Late automatically. HR can change it
+  to Present.", `authorId` null, appended to any existing note) —
+  `addOutsidePremisesNote()`. Previously site-bound → ABSENT without a
+  check-in time, and office-geofence → 403 not marked. Applies to
+  `markSelfAttendance` and the offline `CHECK_IN` sync. A second outside
+  check-in after an accepted one is still a 403. `MyAttendance.jsx` copy
+  updated to match (check-in fill completes, message explains Late + HR
+  review).
+- **HR approval**: choosing Present on a flagged Late row (the menu no
+  longer treats flagged Late as "already Present") + Save → PRESENT via
+  `resolveArrivalStatus` (stays LATE only if the check-in time itself was
+  late). `markAttendance` / `saveDayAttendance` no longer clear
+  `autoFlagged`: it's the fact of *where* they checked in, so the row keeps
+  showing "Outside premises" after approval.
+- **Save now sends only changed rows** (from `editsRef`), not every row —
+  re-sending all rows stamped "marked by <admin>" on everyone.
+- **Location column**: biometric → green "On site · <device name>";
+  inside a site → "On site · <site name>"; inside office geofence → "On
+  site · Office"; outside → red "Outside premises · Nm away" (links to the
+  exact spot); plus WFH / no location / "—" when not checked in.
+  `getDailyAttendance` rows gained `siteName`, `deviceName`.
+- **Pre-existing bug fixed**: the check-in presence-event insert used
+  `ON CONFLICT ("clientEventId")`, but that unique index is partial
+  (`WHERE "clientEventId" IS NOT NULL`), so Postgres rejected it — every
+  online check-in with coordinates returned 500 *after* the record was
+  saved (the client then silently re-sent it via the offline queue, and
+  the anomaly/note after the insert never ran). Both presence inserts now
+  include the index predicate.
+- Verified with two temporary employees in the real org (office geofence
+  80m; created, tested, then fully deleted — 0 real employees' records
+  touched): outside check-in 200 LATE flagged + note + anomaly; inside
+  PRESENT "On site · Office"; repeat outside 403; biometric row shows
+  "Cyber Earth Solution"; menu anchored (incl. after scroll); approve →
+  Save sends 1 row → PRESENT, still "Outside premises"; no page errors.
 
 ## Automated RBAC test run (2026-09-28)
 
