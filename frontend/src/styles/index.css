@@ -209,6 +209,85 @@ h1, h2, h3, h4 {
 
   /* Utility: soft divider */
   .divider { border-top: 1px solid var(--border); }
+
+  /* Frosted-glass panel (dashboard header). Layers, back to front:
+     tinted translucent fill + backdrop blur, a diagonal sheen (::before),
+     a bright top edge (inset shadow), and .glass-glow — a soft light that
+     follows the cursor (--gx/--gy set from JS) and fades in on hover. */
+  .glass-panel {
+    position: relative;
+    isolation: isolate;
+    border-radius: 24px;
+    background:
+      linear-gradient(135deg,
+        color-mix(in srgb, var(--surface) 78%, transparent) 0%,
+        color-mix(in srgb, var(--surface) 52%, transparent) 55%,
+        color-mix(in srgb, var(--surface) 66%, transparent) 100%);
+    -webkit-backdrop-filter: blur(18px) saturate(170%);
+    backdrop-filter: blur(18px) saturate(170%);
+    border: 1px solid rgba(255, 255, 255, 0.65);
+    box-shadow:
+      0 12px 32px rgba(26, 26, 26, 0.07),
+      0 2px 6px rgba(26, 26, 26, 0.04),
+      inset 0 1px 0 rgba(255, 255, 255, 0.85),
+      inset 0 -1px 0 rgba(255, 255, 255, 0.25);
+    transition: box-shadow 0.35s ease, border-color 0.35s ease, transform 0.35s ease;
+  }
+  .glass-panel::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    z-index: -1;
+    background:
+      linear-gradient(115deg, rgba(255, 255, 255, 0.55) 0%, rgba(255, 255, 255, 0.12) 28%, transparent 46%),
+      radial-gradient(120% 90% at 0% 0%, color-mix(in srgb, var(--accent) 7%, transparent), transparent 60%);
+  }
+  .glass-panel:hover {
+    border-color: rgba(255, 255, 255, 0.9);
+    box-shadow:
+      0 16px 40px rgba(26, 26, 26, 0.09),
+      0 2px 8px rgba(26, 26, 26, 0.05),
+      inset 0 1px 0 rgba(255, 255, 255, 1),
+      inset 0 -1px 0 rgba(255, 255, 255, 0.35);
+  }
+  .glass-glow {
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.35s ease;
+    background:
+      radial-gradient(300px circle at var(--gx, 50%) var(--gy, 50%), rgba(255, 255, 255, 0.75), rgba(255, 255, 255, 0.25) 45%, transparent 75%),
+      linear-gradient(rgba(255, 255, 255, 0.10), rgba(255, 255, 255, 0.10));
+  }
+  .glass-panel:hover { transform: translateY(-1px); }
+  .glass-panel:hover .glass-glow { opacity: 1; }
+
+  .dark .glass-panel {
+    border-color: rgba(255, 255, 255, 0.09);
+    box-shadow:
+      0 12px 32px rgba(0, 0, 0, 0.35),
+      inset 0 1px 0 rgba(255, 255, 255, 0.10),
+      inset 0 -1px 0 rgba(255, 255, 255, 0.03);
+  }
+  .dark .glass-panel::before {
+    background:
+      linear-gradient(115deg, rgba(255, 255, 255, 0.07) 0%, rgba(255, 255, 255, 0.02) 30%, transparent 48%),
+      radial-gradient(120% 90% at 0% 0%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 60%);
+  }
+  .dark .glass-panel:hover { border-color: rgba(255, 255, 255, 0.16); }
+  .dark .glass-glow {
+    background:
+      radial-gradient(300px circle at var(--gx, 50%) var(--gy, 50%), rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.05) 45%, transparent 75%),
+      linear-gradient(rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0.025));
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .glass-panel, .glass-glow { transition: none; }
+  }
 }
 
 ::-webkit-scrollbar { width: 8px; height: 8px; }

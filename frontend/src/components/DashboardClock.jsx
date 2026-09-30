@@ -96,14 +96,16 @@ export function DashboardSky({ timeZone, className = "" }) {
       </div>
       {/* Hover target over the disk only (r=30 of the 100-unit viewBox, i.e.
           the middle 60%) — the wrapper itself stays pointer-events-none so
-          the glow never blocks clicks. The label sits to the disk's left,
-          since the right half is clipped by the header's edge. */}
+          the glow never blocks clicks. The disk is centred on the header's
+          bottom-right corner, so only its upper-left quarter is visible:
+          the label sits just left of the disk, a little above the bottom
+          edge. */}
       <div
         className="group pointer-events-auto absolute left-[20%] top-[20%] h-[60%] w-[60%] rounded-full"
         role="img"
         aria-label={name}
       >
-        <span className="pointer-events-none absolute right-full top-1/2 mr-2 -translate-y-1/2 whitespace-nowrap rounded-md bg-ink-strong px-2 py-1 text-[11px] font-semibold text-on-strong opacity-0 shadow-pop transition-opacity duration-150 group-hover:opacity-100">
+        <span className="pointer-events-none absolute bottom-[56%] right-full mr-2 whitespace-nowrap rounded-md bg-ink-strong px-2 py-1 text-[11px] font-semibold text-on-strong opacity-0 shadow-pop transition-opacity duration-150 group-hover:opacity-100">
           {name}
         </span>
       </div>
@@ -302,7 +304,7 @@ export default function DashboardClock({ timeZone }) {
           <FlipDigit value={mm[1]} />
         </div>
         {/* Absolutely placed so the day/date stay centred under the digits. */}
-        <span className="absolute left-full top-0 ml-1.5 text-[10px] font-bold leading-none tracking-[0.1em] text-ink">
+        <span className="absolute left-full top-0 ml-1.5 whitespace-nowrap text-[10px] font-bold leading-none tracking-[0.1em] text-ink">
           {ampm}
         </span>
       </div>

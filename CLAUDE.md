@@ -1407,11 +1407,18 @@ Per a live chat request (2026-09-29), `Dashboard.jsx` header:
   all computed from the org timezone. `DashboardSky` (same file)
   is a static, realistic SVG sun (limb-darkened gradient disk, corona glow,
   turbulence granulation; colour warms at dawn/dusk) or full moon (maria,
-  craters, surface grain, edge shading) from 18:30–06:00, ~150% of the
-  header card's height and centred on its right edge so about half the disk
-  is clipped (half-clipped corner icon on mobile). Hovering the disk shows
-  a small "Sun"/"Moon" label to its left (hover target covers only the
-  disk; the glow stays click-through). Everything ticks once a minute.
+  craters, surface grain, edge shading) from 18:30–06:00, centred on the
+  header card's **bottom-right corner** (460px box on desktop, 224px on
+  mobile) so only its upper-left quarter rises out of the corner. Hovering
+  the disk shows a small "Sun"/"Moon" label to its left (hover target
+  covers only the disk; the glow stays click-through). Everything ticks
+  once a minute.
+- The header card is a frosted-glass panel (`.glass-panel` in
+  `styles/index.css`: translucent tinted fill + `backdrop-filter` blur,
+  diagonal sheen, bright top edge; dark-mode variant). `.glass-glow` is a
+  soft light that follows the cursor (`--gx`/`--gy` set in the section's
+  `onMouseMove`) and fades in on hover, with a 1px lift; disabled under
+  `prefers-reduced-motion`.
 
 ## Post-module addition: clickable dashboard asset stat cards
 

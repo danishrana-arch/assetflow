@@ -655,8 +655,17 @@ export default function Dashboard() {
           DASHBOARD HEADER
       ======================================================= */}
 
-      <section className="card relative w-full overflow-hidden">
-        <div className="flex flex-col gap-4 p-4 sm:gap-5 sm:p-5 lg:flex-row lg:items-center lg:justify-between lg:p-6 lg:pr-36">
+      <section
+        className="glass-panel w-full overflow-hidden"
+        onMouseMove={(e) => {
+          // Position the hover light under the cursor (CSS vars read by .glass-glow).
+          const r = e.currentTarget.getBoundingClientRect()
+          e.currentTarget.style.setProperty("--gx", `${e.clientX - r.left}px`)
+          e.currentTarget.style.setProperty("--gy", `${e.clientY - r.top}px`)
+        }}
+      >
+        <div className="glass-glow" aria-hidden="true" />
+        <div className="relative flex flex-col gap-4 p-4 sm:gap-5 sm:p-5 lg:flex-row lg:items-center lg:justify-between lg:p-6 lg:pr-48">
 
           <div className="min-w-0 pr-12 lg:pr-0">
             <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted sm:text-xs">
@@ -697,9 +706,11 @@ export default function Dashboard() {
           <DashboardClock timeZone={organization?.timezone} />
         </div>
 
+        {/* Centred on the bottom-right corner, so it rises out of the corner
+            with only its upper-left quarter showing. */}
         <DashboardSky
           timeZone={organization?.timezone}
-          className="pointer-events-none absolute -right-14 -top-4 h-28 w-28 lg:right-0 lg:top-1/2 lg:h-[150%] lg:w-auto lg:aspect-square lg:-translate-y-1/2 lg:translate-x-1/2"
+          className="pointer-events-none absolute bottom-0 right-0 h-56 w-56 translate-x-1/2 translate-y-1/2 lg:h-[460px] lg:w-[460px]"
         />
       </section>
 
