@@ -34,60 +34,100 @@ function fmtTime(dateStr, timezone) {
   return new Date(dateStr).toLocaleTimeString("en-US", { timeZone: timezone || undefined, hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: true })
 }
 
-const SELF_NOTE_DAYS = 7
-function fmtMinutes(m) {
-  const h = Math.floor(m / 60), min = m % 60
-  return h ? `${h}h${min ? ` ${String(min).padStart(2, "0")}m` : ""}` : `${min}m`
+// "YYYY-MM-DD" + "HH:mm" as wall-clock time in `timeZone` → ISO instant, so
+// a correction means the org's local time whatever the browser's zone is.
+function zonedToIso(dayKey, hhmm, timeZone) {
+  const [y, mo, d] = dayKey.split("-").map(Number)
+  const [h, mi] = hhmm.split(":").map(Number)
+  const guess = Date.UTC(y, mo - 1, d, h, mi)
+  try {
+    const parts = Object.fromEntries(
+      new Intl.DateTimeFormat("en-US", { timeZone, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
+        .formatToParts(new Date(guess)).map((p) => [p.type, p.value])
+    )
+    const asLocal = Date.UTC(+parts.year, +parts.month - 1, +parts.day, +parts.hour, +parts.minute)
+    return new Date(guess - (asLocal - guess)).toISOString()
+  } catch {
+    return new Date(`${dayKey}T${hhmm}`).toISOString()
+  }
+}
+function timeIn(value, timeZone) {
+  if (!value) return ""
+  try {
+    return new Intl.DateTimeFormat("en-GB", { timeZone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(value))
+  } catch { return "" }
 }
 
-// Employee's own note on a day they checked in (e.g. extra hours worked),
-// editable for today and the last SELF_NOTE_DAYS days. HR sees it in the
-// Note column of the Attendance page (PUT /attendance/self/note).
-function SelfNote({ record, today }) {
+const CORRECTION_TONE = { PENDING: "yellow", APPROVED: "green", REJECTED: "pink" }
+
+// Ask HR to fix a day's check-in/check-out (forgot to check out, phone died,
+// wrong time). HR approves it on the Attendance page, which updates this
+// same record.
+function CorrectionRequest({ record, timeZone, latest }) {
   const queryClient = useQueryClient()
   const [open, setOpen] = useState(false)
-  const [note, setNote] = useState("")
-  const [hours, setHours] = useState("")
-  const [minutes, setMinutes] = useState("")
+  const [form, setForm] = useState({ checkIn: "", checkOut: "", reason: "" })
+  const [error, setError] = useState("")
   const dayKey = String(record.date).slice(0, 10)
-  const ageDays = Math.round((new Date(`${today}T00:00:00Z`) - new Date(`${dayKey}T00:00:00Z`)) / 86400000)
-  const editable = !!record.checkInAt && ageDays >= 0 && ageDays <= SELF_NOTE_DAYS
-  const save = useMutation({
-    mutationFn: () => api.put("/attendance/self/note", {
-      date: dayKey, note, extraMinutes: (Number(hours) || 0) * 60 + (Number(minutes) || 0),
-    }).then((r) => r.data),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["attendance-self"] }); setOpen(false) },
+  const send = useMutation({
+    mutationFn: () => api.post("/attendance/self/corrections", {
+      attendanceId: record.id,
+      requestedCheckInAt: form.checkIn && form.checkIn !== timeIn(record.checkInAt, timeZone) ? zonedToIso(dayKey, form.checkIn, timeZone) : null,
+      requestedCheckOutAt: form.checkOut && form.checkOut !== timeIn(record.checkOutAt, timeZone) ? zonedToIso(dayKey, form.checkOut, timeZone) : null,
+      reason: form.reason,
+    }),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["attendance-self-corrections"] }); setOpen(false) },
+    onError: (e) => setError(e.response?.data?.error || "Could not send the request."),
   })
   const start = () => {
-    const extra = record.extraMinutes || 0
-    setNote(record.employeeNote || ""); setHours(extra ? String(Math.floor(extra / 60)) : ""); setMinutes(extra ? String(extra % 60) : "")
-    save.reset(); setOpen(true)
+    setForm({ checkIn: timeIn(record.checkInAt, timeZone), checkOut: timeIn(record.checkOutAt, timeZone), reason: "" })
+    setError(""); setOpen(true)
   }
-  const hasNote = record.employeeNote || record.extraMinutes
+  function submit(e) {
+    e.preventDefault()
+    if (!form.checkIn && !form.checkOut) return setError("Enter the correct check-in and/or check-out time.")
+    if (form.checkIn && form.checkOut && form.checkOut <= form.checkIn) return setError("Check-out must be after check-in.")
+    if (!form.reason.trim()) return setError("Add a short reason for HR.")
+    // Only send the times that actually change.
+    const unchangedIn = form.checkIn === timeIn(record.checkInAt, timeZone)
+    const unchangedOut = form.checkOut === timeIn(record.checkOutAt, timeZone)
+    if (unchangedIn && unchangedOut) return setError("Change at least one time.")
+    send.mutate()
+  }
+
   if (!open) {
-    if (!hasNote && !editable) return null
     return (
-      <div className="mt-1 flex items-start justify-between gap-2 text-[11px]">
-        <span className="min-w-0 text-muted">
-          {record.extraMinutes > 0 && <span className="mr-1.5 rounded-full bg-chip-blue-bg px-2 py-0.5 font-semibold text-chip-blue-fg">+{fmtMinutes(record.extraMinutes)} extra</span>}
-          {record.employeeNote}
+      <div className="mt-1 flex items-center justify-between gap-2 text-[11px]">
+        <span className="text-muted-2">
+          {latest && (
+            <>
+              Correction <StatusPill tone={CORRECTION_TONE[latest.status] || "slate"}>{latest.status === "PENDING" ? "Waiting for HR" : latest.status.toLowerCase()}</StatusPill>
+              {latest.reviewNote && <span className="ml-1">· {latest.reviewNote}</span>}
+            </>
+          )}
         </span>
-        {editable && <button type="button" onClick={start} className="shrink-0 font-semibold text-accent hover:underline">{hasNote ? "Edit note" : "Add note / extra hours"}</button>}
+        {latest?.status !== "PENDING" && (
+          <button type="button" onClick={start} className="shrink-0 font-semibold text-accent hover:underline">Request time correction</button>
+        )}
       </div>
     )
   }
   return (
-    <form onSubmit={(e) => { e.preventDefault(); save.mutate() }} className="mt-2 space-y-2 rounded-2xl bg-surface-2 p-3">
-      <p className="text-[11px] font-semibold text-muted">Extra time worked (optional)</p>
-      <div className="flex items-center gap-2">
-        <input type="number" min="0" max="12" className="field w-20 py-1.5 text-xs" placeholder="0" value={hours} onChange={(e) => setHours(e.target.value)} aria-label="Extra hours" /><span className="text-xs text-muted">h</span>
-        <input type="number" min="0" max="59" step="5" className="field w-20 py-1.5 text-xs" placeholder="0" value={minutes} onChange={(e) => setMinutes(e.target.value)} aria-label="Extra minutes" /><span className="text-xs text-muted">m</span>
+    <form onSubmit={submit} className="mt-2 space-y-2 rounded-2xl bg-surface-2 p-3">
+      <p className="text-[11px] font-semibold text-muted">Correct times for {fmt(record.date)} — HR reviews this before it changes your record.</p>
+      <div className="grid grid-cols-2 gap-2">
+        <label className="text-[11px] text-muted">Check-in
+          <input type="time" className="field mt-1 py-1.5 text-xs" value={form.checkIn} onChange={(e) => setForm((f) => ({ ...f, checkIn: e.target.value }))} />
+        </label>
+        <label className="text-[11px] text-muted">Check-out
+          <input type="time" className="field mt-1 py-1.5 text-xs" value={form.checkOut} onChange={(e) => setForm((f) => ({ ...f, checkOut: e.target.value }))} />
+        </label>
       </div>
-      <textarea className="field w-full text-xs" rows="2" maxLength={500} placeholder="e.g. Stayed late to finish the client delivery" value={note} onChange={(e) => setNote(e.target.value)} />
-      {save.isError && <p className="text-[11px] text-danger">{save.error?.response?.data?.error || "Could not save note."}</p>}
+      <textarea className="field w-full text-xs" rows="2" maxLength={1000} placeholder="e.g. Forgot to check out, left at 6:10 PM" value={form.reason} onChange={(e) => setForm((f) => ({ ...f, reason: e.target.value }))} />
+      {error && <p className="text-[11px] text-danger">{error}</p>}
       <div className="flex justify-end gap-2">
         <button type="button" onClick={() => setOpen(false)} className="rounded-xl px-3 py-1.5 text-xs text-muted hover:bg-surface-3">Cancel</button>
-        <button disabled={save.isPending} className="pill-accent px-3 py-1.5 text-xs disabled:opacity-50">{save.isPending ? "Saving…" : "Save"}</button>
+        <button disabled={send.isPending} className="pill-accent px-3 py-1.5 text-xs disabled:opacity-50">{send.isPending ? "Sending…" : "Send to HR"}</button>
       </div>
     </form>
   )
@@ -110,33 +150,56 @@ export default function MyAttendance() {
   const [checkInFill, setCheckInFill] = useState(0)
   const [checkInFillDuration, setCheckInFillDuration] = useState(4)
 
+  // The device copy is only a placeholder (shown while loading or offline),
+  // never treated as current data — so every visit/refresh fetches fresh
+  // attendance, and the copy is per user. Keys include the user id so one
+  // person's data can't be served to the next login in the same tab.
   const { data: attendance, isLoading: loadingAttendance } = useQuery({
-    queryKey: ["attendance-self"],
+    queryKey: ["attendance-self", user?.id],
     queryFn: () => api.get("/attendance/self").then((r) => {
       cacheAttendanceSnapshot(r.data)
       return r.data
     }),
-    initialData: readCachedAttendanceSnapshot,
+    placeholderData: readCachedAttendanceSnapshot,
+    staleTime: 0,
+    refetchOnMount: "always",
+    enabled: !!user?.id,
     retry: online ? 1 : false,
   })
   const { data: sites = [] } = useQuery({
-    queryKey: ["attendance-assigned-sites"],
+    queryKey: ["attendance-assigned-sites", user?.id],
     queryFn: () => api.get("/attendance-sites/assigned").then((r) => {
       cacheAssignedSites(r.data)
       return r.data
     }),
-    initialData: readCachedAssignedSites,
-    staleTime: 5 * 60 * 1000,
+    placeholderData: readCachedAssignedSites,
+    staleTime: 0,
+    refetchOnMount: "always",
+    enabled: !!user?.id,
     retry: 1,
   })
   const { data: leaves, isLoading: loadingLeaves } = useQuery({
-    queryKey: ["leaves-self"],
+    queryKey: ["leaves-self", user?.id],
     queryFn: () => api.get("/leaves").then((r) => r.data),
+    enabled: !!user?.id,
   })
   const { data: balance } = useQuery({
-    queryKey: ["leave-balance"],
+    queryKey: ["leave-balance", "self", user?.id],
     queryFn: () => api.get("/leaves/balance").then((r) => r.data),
+    enabled: !!user?.id,
   })
+  const { data: myCorrections = [] } = useQuery({
+    queryKey: ["attendance-self-corrections", user?.id],
+    queryFn: () => api.get("/attendance/self/corrections").then((r) => r.data),
+    enabled: online,
+    retry: false,
+  })
+  // Newest request per attendance record (list is newest first).
+  const correctionByRecord = useMemo(() => {
+    const map = new Map()
+    for (const c of myCorrections) if (c.attendanceId && !map.has(c.attendanceId)) map.set(c.attendanceId, c)
+    return map
+  }, [myCorrections])
 
   const primarySite = useMemo(() => sites.find((s) => s.isPrimary) || sites[0] || null, [sites])
   const activeSite = primarySite
@@ -418,9 +481,6 @@ export default function MyAttendance() {
               {effectiveCheckOutAt && (
                 <p className="mb-3 text-sm text-muted">Check out: <strong>{fmtTime(effectiveCheckOutAt, attendance?.timezone)}</strong>{!attendance?.today?.checkOutAt && <span className="ml-2 text-[10px] text-chip-yellow-fg">offline</span>}{attendance?.today?.autoCheckedOut && <span className="ml-2 text-[10px] text-muted-2">recorded automatically at shift end</span>}</p>
               )}
-              {attendance?.today?.checkInAt && (
-                <div className="mb-3"><SelfNote record={attendance.today} today={String(attendance.today.date).slice(0, 10)} /></div>
-              )}
 
               {activeSite && effectiveLocationMode !== "WFH" && (
                 <div className="mb-4 rounded-2xl bg-surface-2 p-3">
@@ -503,7 +563,9 @@ export default function MyAttendance() {
                     <span className="text-muted">{fmt(r.date)}{r.autoCheckedOut && <span className="ml-2 text-[10px] text-muted-2">auto check-out</span>}</span>
                     <StatusPill tone={ATTENDANCE_TONE[r.status] || "slate"}>{r.status}</StatusPill>
                   </div>
-                  {attendance?.today?.id !== r.id && <SelfNote record={r} today={historyToday} />}
+                  {online && r.id && r.status !== "LEAVE" && String(r.date).slice(0, 10) <= historyToday && (
+                    <CorrectionRequest record={r} timeZone={attendance?.timezone || organization?.timezone} latest={correctionByRecord.get(r.id)} />
+                  )}
                 </li>
               ))}
               {(attendance?.history || []).length === 0 && <li className="text-sm text-muted">No attendance recorded yet.</li>}

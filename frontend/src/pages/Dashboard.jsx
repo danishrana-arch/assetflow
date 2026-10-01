@@ -44,6 +44,7 @@ import { canManageInventory } from "../utils/roles"
 import IconChip from "../components/ui/IconChip"
 import SectionHeader from "../components/ui/SectionHeader"
 import DashboardClock, { DashboardSky, greetingFor, useOrgClock } from "../components/DashboardClock"
+import { groupLeaveEvents, eventDateLabel } from "../utils/calendarEvents"
 
 
 /* ============================================================
@@ -1152,10 +1153,10 @@ export default function Dashboard() {
           <div className="mt-4 space-y-2">
             {loadingEvents && <p className="text-sm text-muted">Loading events…</p>}
             {!loadingEvents && (calendarData.events || []).length === 0 && <p className="text-sm text-muted">No events in this period.</p>}
-            {(calendarData.events || []).map((event) => (
+            {groupLeaveEvents(calendarData.events || []).map((event) => (
               <button key={event.id} type="button" onClick={() => setSelectedEvent(event)} className="flex w-full min-w-0 items-start gap-3 rounded-2xl bg-surface-2 p-3 text-left hover:bg-surface-2/70">
                 <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-surface text-muted"><CalendarDays size={15} /></div>
-                <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-ink">{event.title}</p><p className="mt-0.5 truncate text-xs text-muted">{new Date(`${event.date}T00:00:00`).toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'})} · {(event.type || 'EVENT').replaceAll('_',' ')}</p></div>
+                <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-ink">{event.title}</p><p className="mt-0.5 truncate text-xs text-muted">{eventDateLabel(event)} · {(event.type || 'EVENT').replaceAll('_',' ')}</p></div>
                 <span className="shrink-0 text-[11px] font-semibold text-accent">View</span>
               </button>
             ))}
@@ -1190,8 +1191,8 @@ export default function Dashboard() {
             })}
           </div>
           <div className="mt-4 space-y-2 border-t border-border pt-3">
-            {(calendarData.calendar || []).filter((e) => e.type === 'EMPLOYEE_LEAVE').slice(0,3).map((e) => (
-              <button key={e.id} type="button" onClick={() => setSelectedEvent(e)} className="flex w-full min-w-0 items-center gap-2 text-left text-xs text-muted"><span className="h-2 w-2 shrink-0 rounded-full bg-accent" /><span className="truncate"><span className="font-semibold text-ink">{e.employeeName}</span> is on leave · {new Date(`${e.date}T00:00:00`).toLocaleDateString(undefined,{month:'short',day:'numeric'})}</span></button>
+            {groupLeaveEvents((calendarData.calendar || []).filter((e) => e.type === 'EMPLOYEE_LEAVE')).slice(0,3).map((e) => (
+              <button key={e.id} type="button" onClick={() => setSelectedEvent(e)} className="flex w-full min-w-0 items-center gap-2 text-left text-xs text-muted"><span className="h-2 w-2 shrink-0 rounded-full bg-accent" /><span className="truncate"><span className="font-semibold text-ink">{e.employeeName}</span> is on leave · {eventDateLabel(e, { month: 'short', day: 'numeric' })}</span></button>
             ))}
           </div>
         </div>
@@ -1201,7 +1202,7 @@ export default function Dashboard() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={() => setSelectedEvent(null)}>
           <div className="w-full max-w-md overflow-hidden rounded-3xl bg-surface p-4 shadow-xl sm:p-5" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="text-xs font-semibold uppercase tracking-wide text-muted">{(selectedEvent.type || 'EVENT').replaceAll('_',' ')}</p><h3 className="mt-1 break-words text-lg font-semibold text-ink">{selectedEvent.title}</h3></div><button type="button" onClick={() => setSelectedEvent(null)} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-surface-2 text-muted"><X size={14} /></button></div>
-            <p className="mt-4 text-sm text-muted">{new Date(`${selectedEvent.date}T00:00:00`).toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric',year:'numeric'})}</p>
+            <p className="mt-4 text-sm text-muted">{eventDateLabel(selectedEvent, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</p>
             {selectedEvent.description && <p className="mt-3 break-words rounded-2xl bg-surface-2 p-3 text-sm leading-6 text-ink">{selectedEvent.description}</p>}
             {selectedEvent.employeeName && <p className="mt-3 text-xs text-muted">Employee: <span className="font-semibold text-ink">{selectedEvent.employeeName}</span></p>}
           </div>

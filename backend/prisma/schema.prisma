@@ -22,6 +22,9 @@ model Organization {
   casualLeaveAllowance      Int                       @default(6)
   sickLeaveAllowance        Int                       @default(8)
   lateDeductionAmount       Decimal                   @default(500) @db.Decimal(10, 2)
+  // Flat fine per ABSENT day, set from the Attendance page. Null = the
+  // salary-banded rate (same as unpaid leave).
+  absentFineAmount          Decimal?                  @db.Decimal(10, 2)
   payrollAccountNumber      String?
   payrollBankName           String?
   workingHoursPerDay        Decimal                   @default(8) @db.Decimal(4, 2)
@@ -191,7 +194,9 @@ model User {
   attendanceRecords                                            AttendanceRecord[]        @relation("AttendanceOf")
   attendanceMarkedBy                                           AttendanceRecord[]        @relation("AttendanceMarkedBy")
   attendanceNotes                                              AttendanceNote[]          @relation("AttendanceNoteEmployee")
-  attendanceNotesWritten                                       AttendanceNote[]          @relation("AttendanceNoteAuthor")
+  attendanceFines                                              AttendanceFine[]          @relation("AttendanceFineEmployee")
+  attendanceFinesUpdated                                       AttendanceFine[]          @relation("AttendanceFineUpdatedBy")
+  attendanceNotesWritten                                      AttendanceNote[]          @relation("AttendanceNoteAuthor")
   AttendanceSite                                               AttendanceSite[]
   AttendanceSiteEmployee                                       AttendanceSiteEmployee[]
   AttendanceSyncEvent                                          AttendanceSyncEvent[]
@@ -675,6 +680,9 @@ model AttendanceRecord {
   // from the HR/ADMIN/CEO AttendanceNote. extraMinutes = extra time claimed.
   employeeNote            String?
   extraMinutes            Int?
+  // HR/ADMIN/CEO marked the employee's note as seen (Attendance page).
+  employeeNoteSeenAt      DateTime?
+  employeeNoteSeenById    String?
   AttendanceAnomaly      AttendanceAnomaly[]
   AttendanceCorrection    AttendanceCorrection[]
   AttendancePresenceEvent AttendancePresenceEvent[]
@@ -702,6 +710,28 @@ model AttendanceNote {
   updatedAt      DateTime @updatedAt
   employee       User     @relation("AttendanceNoteEmployee", fields: [employeeId], references: [id], onDelete: Cascade)
   author         User?    @relation("AttendanceNoteAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+
+  @@unique([employeeId, date])
+  @@index([organizationId, date])
+}
+
+// Fine decisions for one employee's day, set by HR/ADMIN/CEO from the
+// Attendance page. The automatic late/absent fine comes from the day's
+// status (payroll rules); `waived` cancels it for this day, `extraAmount`
+// adds a manual fine. Payroll reads these when (re)generating a payslip.
+model AttendanceFine {
+  id             String   @id @default(cuid())
+  organizationId String
+  employeeId     String
+  date           DateTime @db.Date
+  waived         Boolean  @default(false)
+  extraAmount    Decimal  @default(0) @db.Decimal(10, 2)
+  reason         String?
+  updatedById    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  employee       User     @relation("AttendanceFineEmployee", fields: [employeeId], references: [id], onDelete: Cascade)
+  updatedBy      User?    @relation("AttendanceFineUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
 
   @@unique([employeeId, date])
   @@index([organizationId, date])
@@ -743,6 +773,8 @@ model PayrollRecord {
   taxPercent            Decimal   @default(0) @db.Decimal(5, 2)
   absentDeduction       Decimal   @default(0) @db.Decimal(12, 2)
   lateDeduction         Decimal   @default(0) @db.Decimal(12, 2)
+  // Manual attendance fines (AttendanceFine.extraAmount) for the month.
+  fineDeduction         Decimal   @default(0) @db.Decimal(12, 2)
   otherDeduction        Decimal   @default(0) @db.Decimal(12, 2)
   // Sum of this employee's APPROVED expense claims assigned to this month.
   expenseReimbursement  Decimal   @default(0) @db.Decimal(12, 2)

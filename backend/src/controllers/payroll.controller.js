@@ -4,6 +4,8 @@ const { logAudit } = require("../utils/audit")
 const { toNumber, round2, computePayrollTotals, approvedExpenseTotal, performanceBonusTotal } = require("../utils/payroll")
 const { streamPayslipPdf } = require("../utils/payslip-pdf")
 const { hasModuleAccess } = require("../utils/roles")
+const { isScheduledWorkday } = require("../utils/work-schedule")
+const { dateKeyInTimeZone } = require("../utils/timezone")
 
 // Counts how many of an (inclusive) date range's days fall within the
 // given month, so a multi-day unpaid-leave request that only partly
@@ -20,42 +22,38 @@ function daysInMonthOverlap(start, end, monthStart, monthEnd) {
 // Creates one DRAFT record per ACTIVE employee with a baseSalary set, for
 // employees who don't already have a record for that month; an existing
 // DRAFT has its attendance-derived lines refreshed, submitted/paid ones
-// are left untouched (safe to re-run). Deductions: each ABSENT attendance
-// day and each unpaid-leave day is a percentage of the employee's base
-// salary per day (not
-// a flat amount), banded by salary so it stays proportional — plus the
-// org's configured lateDeductionAmount (default 500 PKR) per day marked
-// LATE. Bonus is always manual, applied afterward via updatePayroll.
-//
-// Unpaid-leave daily deduction rate, by monthly base salary:
-//   < 70,000            -> 2.7%
-//   70,000 - 119,999.99 -> 3.3%
-//   120,000 - 179,999.99 -> 3.8%
-//   >= 180,000          -> 4.5%
-// A half-day unpaid leave deducts half of that day's amount.
-function unpaidLeaveDailyRate(baseSalary) {
-  if (baseSalary >= 180000) return 0.045
-  if (baseSalary >= 120000) return 0.038
-  if (baseSalary >= 70000) return 0.033
-  return 0.027
-}
+// are left untouched (safe to re-run). Deductions: the org's absent fine
+// (Organization.absentFineAmount, set on the Attendance page → Fines) per
+// ABSENT day and per unpaid-leave day (half of it for a half-day), plus
+// lateDeductionAmount per LATE day. No absent fine set = no absent/unpaid
+// deduction. Bonus is always manual, applied afterward via updatePayroll.
 
 const PAYSLIP_EMPLOYEE_SELECT = { id: true, name: true, baseSalary: true, bankName: true, bankAccountNumber: true }
 
 // The attendance/leave-derived part of a payslip for one employee/month:
 // late days, absent days (attendance marked ABSENT — no check-in, or set
 // by an admin), unpaid leave, and approved expense claims. Absent days and
-// full unpaid-leave days are deducted at the same per-day rate (a half-day
-// unpaid leave at half of it); an unpaid-leave day is recorded as LEAVE in
-// attendance, never ABSENT, so the two never overlap.
+// full unpaid-leave days are deducted at the org's absent fine per day (a
+// half-day unpaid leave at half of it); an unpaid-leave day is recorded as
+// LEAVE in attendance, never ABSENT, so the two never overlap.
+// (`base` is kept in the signature for callers; the deduction no longer
+// depends on salary.)
 async function computeAttendanceLines({ employeeId, base, month, year, lateRate }) {
   const monthStart = new Date(Date.UTC(year, month - 1, 1))
   const monthEnd = new Date(Date.UTC(year, month, 1)) // exclusive
 
-  const [lateDays, absentDays] = await Promise.all([
-    prisma.attendanceRecord.count({ where: { employeeId, status: "LATE", date: { gte: monthStart, lt: monthEnd } } }),
-    prisma.attendanceRecord.count({ where: { employeeId, status: "ABSENT", date: { gte: monthStart, lt: monthEnd } } }),
+  // Days whose automatic fine HR/ADMIN/CEO waived on the Attendance page
+  // aren't counted; manual fines added there become fineDeduction.
+  const [lateRecords, absentRecords, fines] = await Promise.all([
+    prisma.attendanceRecord.findMany({ where: { employeeId, status: "LATE", date: { gte: monthStart, lt: monthEnd } }, select: { date: true } }),
+    prisma.attendanceRecord.findMany({ where: { employeeId, status: "ABSENT", date: { gte: monthStart, lt: monthEnd } }, select: { date: true } }),
+    prisma.attendanceFine.findMany({ where: { employeeId, date: { gte: monthStart, lt: monthEnd } }, select: { date: true, waived: true, extraAmount: true } }),
   ])
+  const waivedKeys = new Set(fines.filter((f) => f.waived).map((f) => f.date.toISOString().slice(0, 10)))
+  const notWaived = (r) => !waivedKeys.has(r.date.toISOString().slice(0, 10))
+  const lateDays = lateRecords.filter(notWaived).length
+  const absentDays = absentRecords.filter(notWaived).length
+  const fineDeduction = round2(fines.reduce((s, f) => s + toNumber(f.extraAmount), 0))
 
   const unpaidLeaves = await prisma.leaveApplication.findMany({
     where: {
@@ -78,14 +76,17 @@ async function computeAttendanceLines({ employeeId, base, month, year, lateRate 
     }
   }
 
-  const perDayDeduction = base * unpaidLeaveDailyRate(base)
+  // The only per-day rate: the org's absent fine (Attendance page → Fines).
+  const employee = await prisma.user.findUnique({ where: { id: employeeId }, select: { organization: { select: { absentFineAmount: true } } } })
+  const perDay = toNumber(employee?.organization?.absentFineAmount)
   return {
     absentDays,
     unpaidLeaveDays: fullUnpaidDays,
     halfDayLeaveDays: halfUnpaidDays,
     lateDays,
-    absentDeduction: round2((absentDays + fullUnpaidDays) * perDayDeduction + halfUnpaidDays * (perDayDeduction / 2)),
+    absentDeduction: round2((absentDays + fullUnpaidDays) * perDay + halfUnpaidDays * (perDay / 2)),
     lateDeduction: round2(lateDays * lateRate),
+    fineDeduction,
     expenseReimbursement: await approvedExpenseTotal(prisma, employeeId, month, year),
     performanceBonus: await performanceBonusTotal(prisma, employeeId, month, year),
   }
@@ -113,6 +114,28 @@ async function buildPayslipData({ emp, month, year, organizationId, userId, late
 async function orgLateRate(organizationId) {
   const organization = await prisma.organization.findUnique({ where: { id: organizationId } })
   return toNumber(organization?.lateDeductionAmount) || 500
+}
+
+// After the org's fine amounts change: refresh every DRAFT payslip in the
+// organization (submitted/paid ones are fixed records). Returns the count.
+async function refreshAllDraftPayslips(organizationId) {
+  const drafts = await prisma.payrollRecord.findMany({ where: { organizationId, status: "DRAFT" }, select: { employeeId: true, month: true, year: true } })
+  for (const d of drafts) await refreshDraftPayslip({ organizationId, ...d })
+  return drafts.length
+}
+
+// After a fine/status change on the Attendance page: recompute the
+// attendance-derived lines of that month's payslip if it's still a DRAFT
+// (same as re-running Generate for one employee). Submitted/paid payslips
+// are never touched. Returns the payslip status, or null if there is none.
+async function refreshDraftPayslip({ organizationId, employeeId, month, year }) {
+  const existing = await prisma.payrollRecord.findUnique({ where: { employeeId_month_year: { employeeId, month, year } } })
+  if (!existing) return null
+  if (existing.status !== "DRAFT") return existing.status
+  const lateRate = await orgLateRate(organizationId)
+  const lines = await computeAttendanceLines({ employeeId, base: toNumber(existing.baseSalary), month, year, lateRate })
+  await prisma.payrollRecord.update({ where: { id: existing.id }, data: { ...lines, ...computePayrollTotals({ ...existing, ...lines }) } })
+  return "DRAFT"
 }
 
 async function generatePayroll(req, res, next) {
@@ -173,6 +196,195 @@ async function generatePayroll(req, res, next) {
         employees.length === 0
           ? "No active employees have a base salary set. Add one from an employee's profile first."
           : undefined,
+    })
+  } catch (err) {
+    next(err)
+  }
+}
+
+// GET /api/payroll/preview?month=&year=
+// Read-only "review before you generate" view. For every employee Generate
+// would touch (ACTIVE with a base salary) plus anyone who already has a
+// payslip this month, it shows the attendance the payslip is built from and
+// the amounts Generate would write — using the same computeAttendanceLines,
+// so the preview always matches the real run. Nothing is written.
+// Also lists what HR should look at first: employees Generate will skip
+// (no base salary), pending leave / attendance corrections in the month,
+// open check-outs, and scheduled workdays with no attendance record (those
+// are not deducted — only ABSENT records are).
+async function previewPayroll(req, res, next) {
+  try {
+    const { organizationId } = req.user
+    const month = Number(req.query.month)
+    const year = Number(req.query.year)
+    if (!month || month < 1 || month > 12 || !year) {
+      return res.status(400).json({ error: "Valid month (1-12) and year are required" })
+    }
+
+    const monthStart = new Date(Date.UTC(year, month - 1, 1))
+    const monthEnd = new Date(Date.UTC(year, month, 1)) // exclusive
+    const organization = await prisma.organization.findUnique({
+      where: { id: organizationId },
+      select: { lateDeductionAmount: true, workingDaysPerWeek: true, timezone: true },
+    })
+    const lateRate = toNumber(organization?.lateDeductionAmount) || 500
+    const todayKey = dateKeyInTimeZone(new Date(), organization?.timezone || "UTC")
+    const today = new Date(`${todayKey}T00:00:00Z`)
+
+    const [existingRecords, activeUsers, records, holidays, approvedLeaves, pendingLeaves, pendingCorrections] = await Promise.all([
+      prisma.payrollRecord.findMany({ where: { organizationId, month, year } }),
+      prisma.user.findMany({
+        where: { organizationId, status: "ACTIVE" },
+        select: { ...PAYSLIP_EMPLOYEE_SELECT, joiningDate: true, createdAt: true, department: { select: { name: true } } },
+        orderBy: { name: "asc" },
+      }),
+      prisma.attendanceRecord.findMany({
+        where: { organizationId, date: { gte: monthStart, lt: monthEnd } },
+        select: { employeeId: true, date: true, status: true, checkInAt: true, checkOutAt: true },
+      }),
+      prisma.holiday.findMany({ where: { organizationId, date: { gte: monthStart, lt: monthEnd } }, select: { date: true } }),
+      prisma.leaveApplication.findMany({
+        where: { organizationId, status: "APPROVED", startDate: { lt: monthEnd }, endDate: { gte: monthStart } },
+        select: { employeeId: true, type: true, startDate: true, endDate: true, isHalfDay: true },
+      }),
+      prisma.leaveApplication.findMany({
+        where: { organizationId, status: "PENDING", startDate: { lt: monthEnd }, endDate: { gte: monthStart } },
+        select: { id: true, employeeId: true, type: true, startDate: true, endDate: true, employee: { select: { name: true } } },
+      }),
+      prisma.$queryRaw`
+        SELECT c.id, c."employeeId", u.name AS "employeeName", c."requestedCheckInAt", c."requestedCheckOutAt", r.date
+        FROM "AttendanceCorrection" c
+        JOIN "User" u ON u.id=c."employeeId"
+        LEFT JOIN "AttendanceRecord" r ON r.id=c."attendanceId"
+        WHERE c."organizationId"=${organizationId} AND c.status='PENDING'
+          AND COALESCE(r.date, c."requestedCheckInAt"::date, c."requestedCheckOutAt"::date) >= ${monthStart}
+          AND COALESCE(r.date, c."requestedCheckInAt"::date, c."requestedCheckOutAt"::date) < ${monthEnd}
+      `,
+    ])
+
+    const recordByEmployee = new Map(existingRecords.map((r) => [r.employeeId, r]))
+    const holidayKeys = new Set(holidays.map((h) => h.date.toISOString().slice(0, 10)))
+
+    // Scheduled workdays in the month (holidays excluded), and the subset
+    // that has already happened (before today) — used for "no record" days.
+    const workdayKeys = []
+    for (let d = new Date(monthStart); d < monthEnd; d.setUTCDate(d.getUTCDate() + 1)) {
+      const key = d.toISOString().slice(0, 10)
+      if (isScheduledWorkday(d, organization) && !holidayKeys.has(key)) workdayKeys.push(key)
+    }
+
+    const attendanceByEmployee = new Map()
+    for (const r of records) {
+      const a = attendanceByEmployee.get(r.employeeId) || { PRESENT: 0, LATE: 0, ABSENT: 0, LEAVE: 0, openCheckOuts: 0, days: new Set() }
+      a[r.status] = (a[r.status] || 0) + 1
+      a.days.add(r.date.toISOString().slice(0, 10))
+      if (r.checkInAt && !r.checkOutAt && r.date < today) a.openCheckOuts += 1
+      attendanceByEmployee.set(r.employeeId, a)
+    }
+
+    const paidLeaveByEmployee = new Map()
+    for (const l of approvedLeaves) {
+      if (l.type === "UNPAID") continue // already part of computeAttendanceLines
+      const days = l.isHalfDay ? 0.5 : daysInMonthOverlap(l.startDate, l.endDate, monthStart, monthEnd)
+      paidLeaveByEmployee.set(l.employeeId, (paidLeaveByEmployee.get(l.employeeId) || 0) + days)
+    }
+
+    // Everyone Generate would touch, plus anyone who already has a payslip
+    // (e.g. a termination payslip for someone no longer ACTIVE).
+    const eligible = activeUsers.filter((u) => u.baseSalary !== null)
+    const eligibleIds = new Set(eligible.map((u) => u.id))
+    const extraIds = existingRecords.map((r) => r.employeeId).filter((id) => !eligibleIds.has(id))
+    const extraUsers = extraIds.length
+      ? await prisma.user.findMany({
+          where: { id: { in: extraIds } },
+          select: { ...PAYSLIP_EMPLOYEE_SELECT, joiningDate: true, createdAt: true, department: { select: { name: true } } },
+        })
+      : []
+
+    const employees = []
+    for (const emp of [...eligible, ...extraUsers]) {
+      const existing = recordByEmployee.get(emp.id)
+      const locked = existing && existing.status !== "DRAFT"
+      const a = attendanceByEmployee.get(emp.id) || { PRESENT: 0, LATE: 0, ABSENT: 0, LEAVE: 0, openCheckOuts: 0, days: new Set() }
+      const startKey = (emp.joiningDate || emp.createdAt).toISOString().slice(0, 10)
+      const unrecordedDays = workdayKeys.filter((k) => k >= startKey && k < todayKey && !a.days.has(k)).length
+
+      let action, amounts
+      if (locked) {
+        action = "locked"
+        amounts = existing
+      } else {
+        const base = toNumber(existing ? existing.baseSalary : emp.baseSalary)
+        const lines = await computeAttendanceLines({ employeeId: emp.id, base, month, year, lateRate })
+        const manual = existing || { baseSalary: base, bonus: 0, tax: 0, otherDeduction: 0, terminationSettlement: 0, terminationDeduction: 0 }
+        action = existing ? "refresh" : eligibleIds.has(emp.id) ? "create" : "locked"
+        amounts = { ...manual, ...lines, ...computePayrollTotals({ ...manual, ...lines }) }
+      }
+
+      employees.push({
+        employeeId: emp.id,
+        name: emp.name,
+        department: emp.department?.name || null,
+        action, // create | refresh (existing DRAFT) | locked (submitted/paid — left untouched)
+        payslipStatus: existing?.status || null,
+        attendance: {
+          present: a.PRESENT,
+          late: a.LATE,
+          absent: a.ABSENT,
+          leave: a.LEAVE,
+          paidLeaveDays: paidLeaveByEmployee.get(emp.id) || 0,
+          unpaidLeaveDays: toNumber(amounts.unpaidLeaveDays) + toNumber(amounts.halfDayLeaveDays) / 2,
+          openCheckOuts: a.openCheckOuts,
+          unrecordedDays,
+        },
+        baseSalary: round2(toNumber(amounts.baseSalary)),
+        absentDeduction: round2(toNumber(amounts.absentDeduction)),
+        lateDeduction: round2(toNumber(amounts.lateDeduction)),
+        fineDeduction: round2(toNumber(amounts.fineDeduction)),
+        expenseReimbursement: round2(toNumber(amounts.expenseReimbursement)),
+        performanceBonus: round2(toNumber(amounts.performanceBonus)),
+        bonus: round2(toNumber(amounts.bonus)),
+        tax: round2(toNumber(amounts.tax)),
+        otherDeductions: round2(toNumber(amounts.otherDeduction) + toNumber(amounts.terminationDeduction)),
+        deductions: round2(toNumber(amounts.deductions)),
+        netPay: round2(toNumber(amounts.netPay)),
+      })
+    }
+
+    const sum = (key) => round2(employees.reduce((s, e) => s + (key(e) || 0), 0))
+    res.json({
+      month,
+      year,
+      period: {
+        start: monthStart.toISOString().slice(0, 10),
+        end: new Date(monthEnd.getTime() - 86400000).toISOString().slice(0, 10),
+        workingDays: workdayKeys.length,
+        holidays: holidayKeys.size,
+        isComplete: monthEnd <= today,
+      },
+      lateDeductionPerDay: lateRate,
+      totals: {
+        employees: employees.length,
+        create: employees.filter((e) => e.action === "create").length,
+        refresh: employees.filter((e) => e.action === "refresh").length,
+        locked: employees.filter((e) => e.action === "locked").length,
+        absentDays: sum((e) => e.attendance.absent),
+        lateDays: sum((e) => e.attendance.late),
+        absentDeduction: sum((e) => e.absentDeduction),
+        lateDeduction: sum((e) => e.lateDeduction),
+        netPay: sum((e) => e.netPay),
+      },
+      issues: {
+        missingSalary: activeUsers.filter((u) => u.baseSalary === null).map((u) => ({ id: u.id, name: u.name })),
+        pendingLeaves: pendingLeaves.map((l) => ({
+          id: l.id, employeeId: l.employeeId, name: l.employee?.name, type: l.type,
+          startDate: l.startDate.toISOString().slice(0, 10), endDate: l.endDate.toISOString().slice(0, 10),
+        })),
+        pendingCorrections: pendingCorrections.map((c) => ({ id: c.id, employeeId: c.employeeId, name: c.employeeName })),
+        openCheckOuts: employees.filter((e) => e.attendance.openCheckOuts > 0).map((e) => ({ employeeId: e.employeeId, name: e.name, count: e.attendance.openCheckOuts })),
+        unrecordedDays: employees.filter((e) => e.attendance.unrecordedDays > 0).map((e) => ({ employeeId: e.employeeId, name: e.name, count: e.attendance.unrecordedDays })),
+      },
+      employees,
     })
   } catch (err) {
     next(err)
@@ -663,7 +875,10 @@ async function ensurePayslip({ organizationId, userId, employeeId, month, year }
 
 module.exports = {
   ensurePayslip,
+  refreshDraftPayslip,
+  refreshAllDraftPayslips,
   generatePayroll,
+  previewPayroll,
   listPayroll,
   getPayrollSummary,
   myPayroll,

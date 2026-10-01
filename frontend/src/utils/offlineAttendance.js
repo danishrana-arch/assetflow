@@ -5,38 +5,67 @@ const META_STORE = "meta"
 const LEGACY_QUEUE_KEY = "assetflow_attendance_offline_queue_v1"
 const DEVICE_KEY = "assetflow_attendance_device_id_v1"
 
-const ATTENDANCE_CACHE_KEY = "assetflow_attendance_snapshot_v1"
-const SITES_CACHE_KEY = "assetflow_attendance_sites_v1"
+// Offline copies of My Attendance are kept per logged-in user. They used to
+// be one shared key per browser, so the next person to log in on the same
+// device was shown the previous person's attendance and sites.
+const ATTENDANCE_CACHE_KEY = "assetflow_attendance_snapshot_v2"
+const SITES_CACHE_KEY = "assetflow_attendance_sites_v2"
+const LEGACY_CACHE_KEYS = ["assetflow_attendance_snapshot_v1", "assetflow_attendance_sites_v1"]
+const USER_CACHE_KEY = "assetflow_user_cache" // written by AuthContext
 
-export function cacheAttendanceSnapshot(snapshot) {
+// The logged-in user's id (from the auth cache), or null.
+export function currentAttendanceUserId() {
   try {
-    localStorage.setItem(ATTENDANCE_CACHE_KEY, JSON.stringify(snapshot || null))
+    return JSON.parse(localStorage.getItem(USER_CACHE_KEY) || "null")?.user?.id || null
+  } catch {
+    return null
+  }
+}
+
+function writeOwned(key, data) {
+  const userId = currentAttendanceUserId()
+  if (!userId) return
+  try {
+    LEGACY_CACHE_KEYS.forEach((k) => localStorage.removeItem(k))
+    localStorage.setItem(key, JSON.stringify({ userId, savedAt: new Date().toISOString(), data }))
   } catch {}
 }
 
-export function readCachedAttendanceSnapshot() {
+// Only returns the copy if it belongs to whoever is logged in now.
+function readOwned(key) {
+  const userId = currentAttendanceUserId()
+  if (!userId) return undefined
   try {
-    const value = localStorage.getItem(ATTENDANCE_CACHE_KEY)
-    return value ? JSON.parse(value) : undefined
+    const value = JSON.parse(localStorage.getItem(key) || "null")
+    return value && value.userId === userId ? value.data : undefined
   } catch {
     return undefined
   }
 }
 
+export function cacheAttendanceSnapshot(snapshot) {
+  writeOwned(ATTENDANCE_CACHE_KEY, snapshot || null)
+}
+
+export function readCachedAttendanceSnapshot() {
+  return readOwned(ATTENDANCE_CACHE_KEY) || undefined
+}
+
 export function cacheAssignedSites(sites) {
-  try {
-    localStorage.setItem(SITES_CACHE_KEY, JSON.stringify(Array.isArray(sites) ? sites : []))
-  } catch {}
+  writeOwned(SITES_CACHE_KEY, Array.isArray(sites) ? sites : [])
 }
 
 export function readCachedAssignedSites() {
+  const sites = readOwned(SITES_CACHE_KEY)
+  return Array.isArray(sites) ? sites : []
+}
+
+// Called on logout: drop the offline copies (the queue is kept — it's
+// tagged per user and only ever synced by its owner).
+export function clearAttendanceCaches() {
   try {
-    const value = localStorage.getItem(SITES_CACHE_KEY)
-    const parsed = value ? JSON.parse(value) : []
-    return Array.isArray(parsed) ? parsed : []
-  } catch {
-    return []
-  }
+    ;[ATTENDANCE_CACHE_KEY, SITES_CACHE_KEY, ...LEGACY_CACHE_KEYS].forEach((k) => localStorage.removeItem(k))
+  } catch {}
 }
 
 function createId(prefix = "evt") {
@@ -129,6 +158,9 @@ export async function queueOfflineAttendance(event) {
     ...event,
     clientEventId: event.clientEventId || createId("att"),
     queuedAt: new Date().toISOString(),
+    // Owner — only this user's session ever syncs it (a shared device must
+    // never submit one person's check-in under someone else's login).
+    ownerUserId: event.ownerUserId || currentAttendanceUserId(),
     deviceId: event.deviceId || getAttendanceDeviceId(),
     syncAttempts: 0,
   }
@@ -146,13 +178,23 @@ export async function queueOfflineAttendance(event) {
   }
 }
 
-export async function getOfflineAttendanceQueue() {
+async function readWholeQueue() {
   try {
     await migrateLegacyQueue()
     return await readAllIndexed()
   } catch {
     return readLegacyQueue()
   }
+}
+
+// The current user's queued events only. Events queued before owners were
+// recorded (no ownerUserId) are kept as before — they can only have come
+// from the single user this device had then.
+export async function getOfflineAttendanceQueue() {
+  const userId = currentAttendanceUserId()
+  const all = await readWholeQueue()
+  if (!userId) return []
+  return all.filter((item) => !item.ownerUserId || item.ownerUserId === userId)
 }
 
 export async function clearOfflineAttendanceEvents(clientEventIds) {

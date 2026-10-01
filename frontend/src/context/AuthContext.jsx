@@ -1,5 +1,7 @@
 import { createContext, useContext, useEffect, useState, useCallback, useRef } from "react"
+import { useQueryClient } from "@tanstack/react-query"
 import api from "../api/client"
+import { clearAttendanceCaches } from "../utils/offlineAttendance"
 
 const AuthContext = createContext(null)
 const TOKEN_KEY = "assetflow_token"
@@ -59,6 +61,7 @@ export function AuthProvider({ children }) {
   const [organizations, setOrganizations] = useState(cached?.organizations || normalizeOrganizations(cached?.user, []))
   const [loading, setLoading] = useState(!cached?.user)
   const lastActivityWriteRef = useRef(0)
+  const queryClient = useQueryClient()
 
   const markActivity = useCallback(() => {
     if (!localStorage.getItem(TOKEN_KEY)) return
@@ -131,6 +134,8 @@ export function AuthProvider({ children }) {
     // Always start a new session on the user's own organization. A previous
     // management session may have left another company's org selected.
     localStorage.removeItem(ORG_KEY)
+    // Nothing from a previous login in this tab may be shown to this user.
+    queryClient.clear()
     applyAuthData(normalizeAuthPayload(res.data))
     return res.data
   }
@@ -173,10 +178,12 @@ export function AuthProvider({ children }) {
     localStorage.removeItem(USER_CACHE_KEY)
     localStorage.removeItem(ORG_KEY)
     localStorage.removeItem(LAST_ACTIVITY_KEY)
+    clearAttendanceCaches()
+    queryClient.clear()
     setUser(null)
     setOrganization(null)
     setOrganizations([])
-  }, [])
+  }, [queryClient])
 
   useEffect(() => {
     if (!user) return undefined

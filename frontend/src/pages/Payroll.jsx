@@ -1,6 +1,6 @@
 import { Fragment, useMemo, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Wallet, Play, Send, CheckCircle2, XCircle, Trash2, ChevronLeft, ChevronRight, UserX, Pencil, Plus, Minus, Receipt, Percent } from "lucide-react"
+import { Wallet, Play, Send, CheckCircle2, XCircle, Trash2, ChevronLeft, ChevronRight, UserX, Pencil, Plus, Minus, Receipt, Percent, ClipboardCheck } from "lucide-react"
 import { Link } from "react-router-dom"
 import api from "../api/client"
 import { useAuth } from "../context/AuthContext"
@@ -72,9 +72,9 @@ function Stepper({ label, value, onChange, step, min = 0, max, suffix, hint }) {
         <div className="relative flex-1">
           <input
             type="number"
-            min={min}
+            min={500}
             max={max}
-            step="any"
+            step="100"
             value={value}
             onChange={(e) => onChange(e.target.value === "" ? "" : clamp(Number(e.target.value)))}
             className="field pr-9 text-center font-mono"
@@ -122,7 +122,7 @@ function PayslipEditor({ record, state, setState, onSave, onCancel, saving, erro
         <TextField label="Other deductions (−)" type="number" min="0" step="any" placeholder="0" value={state.otherDeduction} onChange={set("otherDeduction")} />
       </div>
       <p className="text-xs text-muted-2">
-        Calculated automatically: absent {money(record.absentDeduction)}, late {money(record.lateDeduction)}, office expenses {money(record.expenseReimbursement)}, performance bonus {money(record.performanceBonus)}.
+        Calculated automatically: absent {money(record.absentDeduction)}, late {money(record.lateDeduction)}, attendance fines {money(record.fineDeduction)} (set on the Attendance page), office expenses {money(record.expenseReimbursement)}, performance bonus {money(record.performanceBonus)}.
       </p>
       <TextField label="Note on payslip (optional)" maxLength={1000} value={state.note} onChange={set("note")} />
 
@@ -152,6 +152,223 @@ function PayslipEditor({ record, state, setState, onSave, onCancel, saving, erro
   )
 }
 
+const REVIEW_ACTION = {
+  create: { label: "New payslip", tone: "blue" },
+  refresh: { label: "Draft — will update", tone: "slate" },
+  locked: { label: "Submitted/paid — unchanged", tone: "green" },
+}
+
+// Literal class names so Tailwind picks them up.
+const ISSUE_TONE = {
+  pink: "bg-chip-pink-bg text-chip-pink-fg",
+  yellow: "bg-chip-yellow-bg text-chip-yellow-fg",
+  slate: "bg-chip-slate-bg text-chip-slate-fg",
+}
+
+function plural(n, word) {
+  return `${n} ${word}${n === 1 ? "" : "s"}`
+}
+
+// "Attendance → payroll" review: what Generate would write for the month,
+// straight from GET /payroll/preview (same calculation, nothing written),
+// plus the things worth fixing first. Generate itself is the existing
+// POST /payroll/generate.
+function PayrollReview({ month, year, canGenerate, onGenerate, generating, onClose }) {
+  const [onlyIssues, setOnlyIssues] = useState(false)
+  const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
+    queryKey: ["payroll-preview", month, year],
+    queryFn: () => api.get("/payroll/preview", { params: { month, year } }).then((r) => r.data),
+  })
+
+  const issues = data?.issues
+  const issueItems = issues
+    ? [
+        issues.missingSalary.length > 0 && {
+          tone: "pink",
+          text: `${plural(issues.missingSalary.length, "active employee")} without a base salary will be skipped`,
+          names: issues.missingSalary.map((e) => ({ id: e.id, name: e.name })),
+          hint: "Add a salary on their profile, then review again.",
+        },
+        issues.pendingCorrections.length > 0 && {
+          tone: "yellow",
+          text: `${plural(issues.pendingCorrections.length, "attendance correction")} waiting for approval`,
+          names: issues.pendingCorrections.map((c) => ({ id: c.employeeId, name: c.name })),
+          link: { to: "/attendance", label: "Review on Attendance" },
+        },
+        issues.pendingLeaves.length > 0 && {
+          tone: "yellow",
+          text: `${plural(issues.pendingLeaves.length, "leave request")} in this month not decided yet`,
+          names: issues.pendingLeaves.map((l) => ({ id: l.employeeId, name: `${l.name} (${l.type.toLowerCase()})` })),
+          link: { to: "/leave-requests", label: "Review leave requests" },
+          hint: "Approved unpaid leave is deducted; pending leave is not.",
+        },
+        issues.unrecordedDays.length > 0 && {
+          tone: "yellow",
+          text: `${plural(issues.unrecordedDays.length, "employee")} with past workdays that have no attendance record`,
+          names: issues.unrecordedDays.map((e) => ({ id: e.employeeId, name: `${e.name} (${plural(e.count, "day")})` })),
+          hint: "Only days marked Absent are deducted — mark these on the Attendance page if they were absences.",
+        },
+        issues.openCheckOuts.length > 0 && {
+          tone: "slate",
+          text: `${plural(issues.openCheckOuts.length, "employee")} with a missing check-out`,
+          names: issues.openCheckOuts.map((e) => ({ id: e.employeeId, name: `${e.name} (${e.count})` })),
+          hint: "Doesn't change pay — shown so worked hours can be corrected.",
+        },
+      ].filter(Boolean)
+    : []
+
+  const rows = (data?.employees || []).filter((e) =>
+    !onlyIssues || e.attendance.absent || e.attendance.late || e.attendance.unrecordedDays || e.attendance.openCheckOuts || e.attendance.unpaidLeaveDays
+  )
+  const toWrite = (data?.totals.create || 0) + (data?.totals.refresh || 0)
+
+  return (
+    <div className="mb-4 rounded-card bg-surface p-4 shadow-card">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-semibold text-ink">Attendance review · {MONTHS[month - 1]} {year}</div>
+          <p className="mt-0.5 text-xs text-muted">
+            What each payslip will be built from — attendance, leave and approved claims already recorded. Nothing is saved until you generate.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button onClick={() => refetch()} disabled={isFetching} className="rounded-full border border-border-strong px-3.5 py-1.5 text-xs font-semibold text-ink hover:bg-surface-2 disabled:opacity-50">
+            {isFetching ? "Refreshing…" : "Refresh"}
+          </button>
+          <button onClick={onClose} className="rounded-full border border-border-strong px-3.5 py-1.5 text-xs font-semibold text-ink hover:bg-surface-2">Close</button>
+        </div>
+      </div>
+
+      {isLoading && <p className="mt-4 text-sm text-muted">Reading attendance for the month…</p>}
+      {isError && <p className="mt-4 text-sm text-chip-pink-fg">{error?.response?.data?.error || "Couldn't load the review."}</p>}
+
+      {data && (
+        <>
+          <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {[
+              { label: "Working days", value: data.period.workingDays, sub: data.period.holidays ? `${plural(data.period.holidays, "holiday")} excluded` : "Mon–Fri schedule" },
+              { label: "Employees", value: data.totals.employees, sub: `${data.totals.create} new · ${data.totals.refresh} draft · ${data.totals.locked} locked` },
+              { label: "Absent / late days", value: `${data.totals.absentDays} / ${data.totals.lateDays}`, sub: `${money(data.totals.absentDeduction + data.totals.lateDeduction)} deducted` },
+              { label: "Estimated net payout", value: money(data.totals.netPay), sub: "Before any manual edits" },
+            ].map((s) => (
+              <div key={s.label} className="rounded-2xl border border-border bg-canvas px-3 py-2.5">
+                <p className="text-[11px] uppercase tracking-wide text-muted">{s.label}</p>
+                <p className="mt-0.5 font-mono text-base font-semibold text-ink">{s.value}</p>
+                <p className="mt-0.5 text-[11px] text-muted-2">{s.sub}</p>
+              </div>
+            ))}
+          </div>
+
+          {!data.period.isComplete && (
+            <p className="mt-3 rounded-2xl bg-chip-yellow-bg px-3 py-2 text-xs text-chip-yellow-fg">
+              This month isn't over yet — days still to come aren't counted. You can generate now and press Generate again later; drafts are refreshed with the latest attendance.
+            </p>
+          )}
+
+          {issueItems.length > 0 ? (
+            <div className="mt-3 space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted">Check before generating</p>
+              {issueItems.map((item) => (
+                <div key={item.text} className={`rounded-2xl px-3 py-2 text-xs ${ISSUE_TONE[item.tone]}`}>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-semibold">{item.text}</span>
+                    {item.link && <Link to={item.link.to} className="font-semibold underline">{item.link.label}</Link>}
+                  </div>
+                  <p className="mt-1 opacity-90">
+                    {item.names.slice(0, 8).map((n, i) => (
+                      <Fragment key={`${n.id}-${i}`}>{i > 0 && ", "}<Link to={`/employees/${n.id}`} className="hover:underline">{n.name}</Link></Fragment>
+                    ))}
+                    {item.names.length > 8 && ` and ${item.names.length - 8} more`}
+                  </p>
+                  {item.hint && <p className="mt-0.5 opacity-80">{item.hint}</p>}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="mt-3 rounded-2xl bg-chip-green-bg px-3 py-2 text-xs text-chip-green-fg">No open issues — attendance and leave for this month are settled.</p>
+          )}
+
+          <div className="mt-4 flex items-center justify-between gap-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted">Per employee</p>
+            <label className="flex items-center gap-1.5 text-xs text-muted">
+              <input type="checkbox" checked={onlyIssues} onChange={(e) => setOnlyIssues(e.target.checked)} className="h-3.5 w-3.5 accent-[var(--accent)]" />
+              Only employees with deductions or gaps
+            </label>
+          </div>
+          <div className="mt-2 max-h-[420px] overflow-auto rounded-2xl border border-border">
+            <table className="w-full min-w-[860px] text-left text-xs">
+              <thead className="sticky top-0 bg-surface">
+                <tr className="border-b border-border text-[10px] uppercase tracking-wide text-muted">
+                  <th className="px-3 py-2 font-semibold">Employee</th>
+                  <th className="px-3 py-2 font-semibold">Present</th>
+                  <th className="px-3 py-2 font-semibold">Late</th>
+                  <th className="px-3 py-2 font-semibold">Absent</th>
+                  <th className="px-3 py-2 font-semibold">Leave (paid / unpaid)</th>
+                  <th className="px-3 py-2 font-semibold">No record</th>
+                  <th className="px-3 py-2 font-semibold">Deductions</th>
+                  <th className="px-3 py-2 font-semibold">Additions</th>
+                  <th className="px-3 py-2 font-semibold">Net pay</th>
+                  <th className="px-3 py-2 font-semibold">On Generate</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {rows.map((e) => {
+                  const a = e.attendance
+                  const additions = e.bonus + e.performanceBonus + e.expenseReimbursement
+                  return (
+                    <tr key={e.employeeId}>
+                      <td className="px-3 py-2">
+                        <Link to={`/employees/${e.employeeId}`} className="font-medium text-ink hover:underline">{e.name}</Link>
+                        <div className="text-[11px] text-muted">{e.department || "—"} · base {money(e.baseSalary)}</div>
+                      </td>
+                      <td className="px-3 py-2 font-mono">{a.present + a.late}</td>
+                      <td className="px-3 py-2 font-mono">{a.late || "—"}</td>
+                      <td className={`px-3 py-2 font-mono ${a.absent ? "text-chip-pink-fg" : ""}`}>{a.absent || "—"}</td>
+                      <td className="px-3 py-2 font-mono">{a.paidLeaveDays || 0} / {a.unpaidLeaveDays || 0}</td>
+                      <td className={`px-3 py-2 font-mono ${a.unrecordedDays ? "text-chip-yellow-fg" : ""}`}>{a.unrecordedDays || "—"}</td>
+                      <td className="px-3 py-2">
+                        <Amount value={e.deductions} tone="deduct" />
+                        {(e.absentDeduction > 0 || e.lateDeduction > 0) && (
+                          <div className="text-[10px] text-muted">absent {money(e.absentDeduction)} · late {money(e.lateDeduction)}</div>
+                        )}
+                      </td>
+                      <td className="px-3 py-2"><Amount value={additions} tone="add" /></td>
+                      <td className="px-3 py-2 font-mono font-semibold text-ink">{money(e.netPay)}</td>
+                      <td className="px-3 py-2"><StatusPill tone={REVIEW_ACTION[e.action].tone}>{REVIEW_ACTION[e.action].label}</StatusPill></td>
+                    </tr>
+                  )
+                })}
+                {rows.length === 0 && (
+                  <tr><td colSpan={10} className="px-3 py-6 text-center text-muted">
+                    {onlyIssues ? "No one has deductions or attendance gaps this month." : "No employees with a base salary yet — add one from an employee's profile."}
+                  </td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {canGenerate && (
+            <div className="mt-4 flex flex-wrap items-center justify-end gap-3">
+              <p className="text-xs text-muted">
+                {toWrite === 0
+                  ? "Nothing to generate — every payslip this month is already submitted or paid."
+                  : `Creates ${plural(data.totals.create, "payslip")} and updates ${plural(data.totals.refresh, "draft")}. Bonus, tax and other edits on drafts are kept.`}
+              </p>
+              <button
+                onClick={onGenerate}
+                disabled={generating || toWrite === 0}
+                className="flex items-center gap-1.5 rounded-full bg-accent px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50"
+              >
+                <Play size={14} /> {generating ? "Generating…" : "Generate payroll"}
+              </button>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
 export default function Payroll() {
   const { user } = useAuth()
   const canManagePayroll = user?.role === "ADMIN"
@@ -165,6 +382,7 @@ export default function Payroll() {
   const [terminationEmployeeId, setTerminationEmployeeId] = useState("")
   const [showTaxPanel, setShowTaxPanel] = useState(false)
   const [taxPercentAll, setTaxPercentAll] = useState(0)
+  const [showReview, setShowReview] = useState(false)
 
   const { data: records, isLoading } = useQuery({
     queryKey: ["payroll", month, year],
@@ -200,11 +418,14 @@ export default function Payroll() {
     )
   }, [records])
 
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["payroll", month, year] })
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: ["payroll", month, year] })
+    queryClient.invalidateQueries({ queryKey: ["payroll-preview", month, year] })
+  }
 
   const generate = useMutation({
     mutationFn: () => api.post("/payroll/generate", { month, year }).then((r) => r.data),
-    onSuccess: invalidate,
+    onSuccess: () => { setShowReview(false); invalidate() },
   })
 
   const save = useMutation({
@@ -283,7 +504,8 @@ export default function Payroll() {
     if (m > 12) { m = 1; y += 1 }
     if (m < 1) { m = 12; y -= 1 }
     setMonth(m); setYear(y)
-    setEditing(null); setShowTerminationPicker(false); setShowTaxPanel(false)
+    setEditing(null); setShowTerminationPicker(false); setShowTaxPanel(false); setShowReview(false)
+    generate.reset()
   }
 
   function handleDeleteAll() {
@@ -382,7 +604,9 @@ export default function Payroll() {
     <EmptyState
       icon={Wallet}
       title="No payroll for this month yet"
-      description="Generate it from active employees with a base salary set. Employees without a base salary are skipped — add one from their profile."
+      description={canManagePayroll
+        ? "Click Review & Generate to check this month's attendance, leave and deductions, then create the payslips. Employees without a base salary are skipped — add one from their profile."
+        : "Payslips appear here once an admin generates this month's payroll."}
       className="my-4"
     />
   )
@@ -425,15 +649,25 @@ export default function Payroll() {
               </Link>
             )}
 
+            {isCeo && (
+              <button
+                onClick={() => setShowReview((v) => !v)}
+                title="See the attendance and leave behind this month's payslips"
+                className="flex items-center gap-1.5 rounded-full border border-border-strong bg-surface px-4 py-2 text-sm font-semibold text-ink hover:bg-surface-2"
+              >
+                <ClipboardCheck size={14} /> Attendance review
+              </button>
+            )}
+
             {canManagePayroll && (
               <>
                 <button
-                  onClick={() => generate.mutate()}
-                  disabled={generate.isPending}
+                  onClick={() => { setShowReview((v) => !v); setShowTaxPanel(false); setShowTerminationPicker(false) }}
+                  title="Review the month's attendance, leave and deductions, then generate"
                   className="flex items-center gap-1.5 rounded-full bg-accent px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-60"
                 >
                   <Play size={14} />
-                  {generate.isPending ? "Generating…" : "Generate"}
+                  {generate.isPending ? "Generating…" : "Review & Generate"}
                 </button>
                 <button
                   onClick={openTaxPanel}
@@ -496,6 +730,17 @@ export default function Payroll() {
           </>
         }
       />
+
+      {showReview && (canManagePayroll || isCeo) && (
+        <PayrollReview
+          month={month}
+          year={year}
+          canGenerate={canManagePayroll}
+          onGenerate={() => generate.mutate()}
+          generating={generate.isPending}
+          onClose={() => setShowReview(false)}
+        />
+      )}
 
       {showTaxPanel && canManagePayroll && (
         <div className="mb-4 rounded-card bg-surface p-4 shadow-card">
@@ -617,6 +862,7 @@ export default function Payroll() {
               <div><p className="text-muted-2">Office expenses</p><Amount value={r.expenseReimbursement} tone="add" /></div>
               <div><p className="text-muted-2">Absent{absenceSummary(r) ? ` (${absenceSummary(r)})` : ""}</p><Amount value={r.absentDeduction} tone="deduct" /></div>
               <div><p className="text-muted-2">Late{r.lateDays ? ` (${r.lateDays})` : ""}</p><Amount value={r.lateDeduction} tone="deduct" /></div>
+              {Number(r.fineDeduction) > 0 && <div><p className="text-muted-2">Attendance fines</p><Amount value={r.fineDeduction} tone="deduct" /></div>}
               {Number(r.otherDeduction) > 0 && <div><p className="text-muted-2">Other</p><Amount value={r.otherDeduction} tone="deduct" /></div>}
               {Number(r.terminationSettlement) > 0 && <div><p className="text-muted-2">Settlement</p><Amount value={r.terminationSettlement} tone="add" /></div>}
               {Number(r.terminationDeduction) > 0 && <div><p className="text-muted-2">Termination ded.</p><Amount value={r.terminationDeduction} tone="deduct" /></div>}
@@ -698,6 +944,9 @@ export default function Payroll() {
                     <td className="px-4 py-3">
                       <Amount value={r.lateDeduction} tone="deduct" />
                       {r.lateDays > 0 && <div className="text-[11px] text-muted">{r.lateDays} day{r.lateDays === 1 ? "" : "s"}</div>}
+                      {Number(r.fineDeduction) > 0 && (
+                        <div className="text-[11px] text-muted">fines <Amount value={r.fineDeduction} tone="deduct" /></div>
+                      )}
                       {Number(r.otherDeduction) > 0 && (
                         <div className="text-[11px] text-muted">other <Amount value={r.otherDeduction} tone="deduct" /></div>
                       )}

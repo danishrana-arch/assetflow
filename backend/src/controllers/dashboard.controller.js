@@ -426,12 +426,17 @@ async function collectCalendarEvents({ organizationId, userId, role, start, end 
   }
   for (const h of holidays) push({ id: h.id, type: "NATIONAL_HOLIDAY", title: h.name, description: "National/company holiday", date: h.date })
   for (const p of projects) push({ id: `deadline-${p.id}`, type: "PROJECT_DEADLINE", title: `${p.name} deadline`, description: `Project deadline · ${p.status.replaceAll("_", " ")}`, date: p.deadline, projectId: p.id })
+  // One event per leave day (calendar grids mark each day), each carrying
+  // the leave's id and full range so lists can show a multi-day leave as a
+  // single row ("Oct 15 – Oct 19").
   for (const l of leaves) {
     const cursor = new Date(l.startDate)
     const last = new Date(l.endDate)
+    const leaveStart = l.startDate.toISOString().slice(0, 10)
+    const leaveEnd = l.endDate.toISOString().slice(0, 10)
     while (cursor <= last) {
       const day = new Date(cursor)
-      if (day >= start && day <= end) push({ id: `leave-${l.id}-${day.toISOString().slice(0, 10)}`, type: "EMPLOYEE_LEAVE", title: `${l.employee.name} is on leave`, description: `${l.type} leave${l.reason ? ` · ${l.reason}` : ""}`, date: day, employeeId: l.employeeId, employeeName: l.employee.name })
+      if (day >= start && day <= end) push({ id: `leave-${l.id}-${day.toISOString().slice(0, 10)}`, type: "EMPLOYEE_LEAVE", title: `${l.employee.name} is on leave`, description: `${l.type} leave${l.reason ? ` · ${l.reason}` : ""}`, date: day, employeeId: l.employeeId, employeeName: l.employee.name, leaveId: l.id, leaveStart, leaveEnd })
       cursor.setUTCDate(cursor.getUTCDate() + 1)
     }
   }

@@ -7,6 +7,12 @@ const { distanceMeters } = require("../utils/geo")
 const { siteDistance } = require("../utils/site-geofence")
 const { dateKeyInTimeZone, localMinutes } = require("../utils/timezone")
 const { isLateCheckIn, resolveArrivalStatus, formatTime12, shiftStartMinutes } = require("../utils/attendance-rules")
+const { createNotification, notifyManagement } = require("../utils/notifications")
+const { refreshDraftPayslip, refreshAllDraftPayslips } = require("./payroll.controller")
+const { logAudit } = require("../utils/audit")
+
+// Roles that manage fines and employee notes on the Attendance page.
+const FINE_ROLES = ["ADMIN", "CEO", "HR"]
 
 function startOfDay(dateStr, timeZone) {
   if (dateStr) return toDateOnly(dateStr)
@@ -59,11 +65,16 @@ async function getDailyAttendance(req, res, next) {
           breakStart: true,
           breakEnd: true,
           shiftStartDefault: true,
+          lateDeductionAmount: true,
+          absentFineAmount: true,
         },
       })
     const date = startOfDay(req.query.date, organization?.timezone)
+    // Fine amounts are salary-derived, so only the roles that manage fines
+    // (HR/ADMIN/CEO) get them.
+    const canFine = FINE_ROLES.includes(role)
 
-    const [employees, records, notes] = await Promise.all([
+    const [employees, records, notes, fines, payslips] = await Promise.all([
       prisma.user.findMany({
         where: {
           organizationId,
@@ -82,10 +93,51 @@ async function getDailyAttendance(req, res, next) {
         where: { organizationId, date },
         include: { author: { select: { name: true } } },
       }),
+      canFine
+        ? prisma.attendanceFine.findMany({ where: { organizationId, date }, include: { updatedBy: { select: { name: true } } } })
+        : [],
+      canFine
+        ? prisma.payrollRecord.findMany({
+            where: { organizationId, month: date.getUTCMonth() + 1, year: date.getUTCFullYear() },
+            select: { employeeId: true, status: true },
+          })
+        : [],
     ])
 
     const recordByEmployee = new Map(records.map((r) => [r.employeeId, r]))
     const noteByEmployee = new Map(notes.map((n) => [n.employeeId, n]))
+    const fineByEmployee = new Map(fines.map((f) => [f.employeeId, f]))
+    const payslipStatus = new Map(payslips.map((p) => [p.employeeId, p.status]))
+    const lateRate = Number(organization?.lateDeductionAmount) || 500
+    const seenByIds = [...new Set(records.map((r) => r.employeeNoteSeenById).filter(Boolean))]
+    const seenByName = new Map(
+      (seenByIds.length ? await prisma.user.findMany({ where: { id: { in: seenByIds } }, select: { id: true, name: true } }) : []).map((u) => [u.id, u.name])
+    )
+
+    // The automatic fine payroll applies for this day (same rules as
+    // computeAttendanceLines): LATE → org late fine; an ABSENT *record* →
+    // org absent fine (none set = no fine). A day with no record isn't fined.
+    const absentFine = Number(organization?.absentFineAmount) || 0
+    function fineFor(emp, record) {
+      const fine = fineByEmployee.get(emp.id)
+      const auto =
+        record?.status === "LATE" ? { type: "LATE", amount: lateRate }
+        : record?.status === "ABSENT" && absentFine > 0 ? { type: "ABSENT", amount: absentFine }
+        : null
+      const ps = payslipStatus.get(emp.id) || null
+      return {
+        autoType: auto?.type || null,
+        autoAmount: auto?.amount || 0,
+        waived: !!fine?.waived,
+        extraAmount: fine ? Number(fine.extraAmount) : 0,
+        reason: fine?.reason || null,
+        updatedByName: fine?.updatedBy?.name || null,
+        total: (auto && !fine?.waived ? auto.amount : 0) + (fine ? Number(fine.extraAmount) : 0),
+        payslipStatus: ps,
+        locked: !!ps && ps !== "DRAFT",
+        noSalary: emp.baseSalary == null,
+      }
+    }
 
     // Names for the Location column: the matched attendance site, or the
     // biometric device the punch came from.
@@ -129,6 +181,9 @@ async function getDailyAttendance(req, res, next) {
         noteUpdatedAt: noteByEmployee.get(emp.id)?.updatedAt?.toISOString() || null,
         employeeNote: record?.employeeNote || null,
         extraMinutes: record?.extraMinutes ?? null,
+        employeeNoteSeenAt: record?.employeeNoteSeenAt?.toISOString() || null,
+        employeeNoteSeenByName: record?.employeeNoteSeenById ? seenByName.get(record.employeeNoteSeenById) || null : null,
+        ...(canFine ? { fine: fineFor(emp, record) } : {}),
         autoCheckedOut: record?.autoCheckedOut || false,
         workingMinutes: record?.workingMinutes ?? null,
         expectedWorkingMinutes: workingMinutesPerDay(organization),
@@ -161,6 +216,14 @@ async function getDailyAttendance(req, res, next) {
         breakStart: organization?.breakStart || null,
         breakEnd: organization?.breakEnd || null,
       },
+      ...(canFine
+        ? {
+            fineSettings: {
+              lateFine: lateRate,
+              absentFine: organization?.absentFineAmount != null ? Number(organization.absentFineAmount) : null,
+            },
+          }
+        : {}),
       rows,
     })
   } catch (err) {
@@ -229,6 +292,138 @@ async function setAttendanceNote(req, res, next) {
   }
 }
 
+const MAX_FINE = 1000000
+
+// PUT /attendance/fines  { employeeId, date, waived, extraAmount, reason }
+// HR/ADMIN/CEO only (route). Waive the day's automatic late/absent fine
+// and/or add a manual fine; waived=false + extraAmount=0 clears it. A
+// DRAFT payslip for that month is refreshed right away; once the month's
+// payslip is submitted or paid the fine is locked (400).
+async function setAttendanceFine(req, res, next) {
+  try {
+    const { organizationId, userId } = req.user
+    const { employeeId, date } = req.body || {}
+    if (!employeeId || !date || !/^\d{4}-\d{2}-\d{2}$/.test(String(date))) {
+      return res.status(400).json({ error: "employeeId and date (YYYY-MM-DD) are required" })
+    }
+    const waived = !!req.body.waived
+    const extraAmount = req.body.extraAmount === "" || req.body.extraAmount == null ? 0 : Number(req.body.extraAmount)
+    if (Number.isNaN(extraAmount) || extraAmount < 0 || extraAmount > MAX_FINE) {
+      return res.status(400).json({ error: "Fine amount must be a number between 0 and 1,000,000" })
+    }
+    const reason = String(req.body.reason || "").trim().slice(0, 500) || null
+    if (extraAmount > 0 && !reason) return res.status(400).json({ error: "Give a reason for the fine — the employee sees it on their payslip line" })
+
+    const employee = await prisma.user.findFirst({ where: { id: employeeId, organizationId }, select: { id: true, name: true } })
+    if (!employee) return res.status(404).json({ error: "Employee not found" })
+
+    const day = toDateOnly(String(date))
+    const month = day.getUTCMonth() + 1
+    const year = day.getUTCFullYear()
+    const payslip = await prisma.payrollRecord.findUnique({ where: { employeeId_month_year: { employeeId, month, year } }, select: { status: true } })
+    if (payslip && payslip.status !== "DRAFT") {
+      return res.status(400).json({ error: `${employee.name}'s payslip for this month is already ${payslip.status === "PAID" ? "paid" : "submitted"} — fines can't be changed now` })
+    }
+
+    let fine = null
+    if (!waived && extraAmount === 0) {
+      await prisma.attendanceFine.deleteMany({ where: { employeeId, date: day } })
+    } else {
+      fine = await prisma.attendanceFine.upsert({
+        where: { employeeId_date: { employeeId, date: day } },
+        update: { waived, extraAmount, reason, updatedById: userId },
+        create: { organizationId, employeeId, date: day, waived, extraAmount, reason, updatedById: userId },
+      })
+    }
+    const payslipStatus = await refreshDraftPayslip({ organizationId, employeeId, month, year })
+    logAudit({
+      organizationId, actorId: userId, action: "attendance.fine_set", targetType: "User", targetId: employeeId,
+      note: `${employee.name} ${date}: ${waived ? "waived" : "not waived"}, extra ${extraAmount}${reason ? ` — ${reason}` : ""}`,
+    })
+    if (extraAmount > 0) {
+      createNotification({
+        organizationId, recipientId: employeeId, createdById: userId, type: "INFO",
+        title: "Attendance fine added",
+        message: `PKR ${extraAmount.toLocaleString()} for ${date}: ${reason}`,
+        link: "/payroll/me",
+      }).catch(() => {})
+    }
+    res.json({ employeeId, date, waived, extraAmount, reason, payslipStatus, id: fine?.id || null })
+  } catch (err) {
+    next(err)
+  }
+}
+
+// PUT /attendance/fine-settings  { lateFine, absentFine }
+// HR/ADMIN/CEO only (route). Fine per LATE day (Organization.lateDeductionAmount)
+// and per ABSENT / unpaid-leave day (absentFineAmount; null/"" = no fine). Every
+// DRAFT payslip is refreshed so the new amounts apply right away;
+// submitted/paid payslips keep what they were issued with.
+async function setFineSettings(req, res, next) {
+  try {
+    const { organizationId, userId } = req.user
+    const late = Number(req.body?.lateFine)
+    if (req.body?.lateFine === "" || req.body?.lateFine == null || Number.isNaN(late) || late < 0 || late > MAX_FINE) {
+      return res.status(400).json({ error: "Late fine must be a number between 0 and 1,000,000" })
+    }
+    const rawAbsent = req.body?.absentFine
+    const absent = rawAbsent === "" || rawAbsent == null ? null : Number(rawAbsent)
+    if (absent !== null && (Number.isNaN(absent) || absent < 0 || absent > MAX_FINE)) {
+      return res.status(400).json({ error: "Absent fine must be a number between 0 and 1,000,000 (or empty for no absent fine)" })
+    }
+    await prisma.organization.update({
+      where: { id: organizationId },
+      data: { lateDeductionAmount: late, absentFineAmount: absent },
+    })
+    const refreshed = await refreshAllDraftPayslips(organizationId)
+    logAudit({
+      organizationId, actorId: userId, action: "attendance.fine_settings",
+      note: `Late PKR ${late} / day, absent ${absent === null ? "none" : `PKR ${absent} / day`} — ${refreshed} draft payslip(s) refreshed`,
+    })
+    res.json({ lateFine: late, absentFine: absent, refreshedDrafts: refreshed })
+  } catch (err) {
+    next(err)
+  }
+}
+
+// PUT /attendance/employee-note { employeeId, date, action: "seen"|"unseen"|"delete" }
+// HR/ADMIN/CEO only (route). Acts on the note/extra hours the employee
+// wrote on My Attendance: mark it seen (shows who), undo that, or delete it.
+async function reviewEmployeeNote(req, res, next) {
+  try {
+    const { organizationId, userId } = req.user
+    const { employeeId, date, action } = req.body || {}
+    if (!employeeId || !date || !/^\d{4}-\d{2}-\d{2}$/.test(String(date)) || !["seen", "unseen", "delete"].includes(action)) {
+      return res.status(400).json({ error: "employeeId, date (YYYY-MM-DD) and action (seen, unseen, delete) are required" })
+    }
+    const record = await prisma.attendanceRecord.findFirst({
+      where: { employeeId, organizationId, date: toDateOnly(String(date)) },
+      select: { id: true, employeeNote: true, extraMinutes: true },
+    })
+    if (!record || (!record.employeeNote && !record.extraMinutes)) return res.status(404).json({ error: "No employee note on this day" })
+
+    const data =
+      action === "delete" ? { employeeNote: null, extraMinutes: null, employeeNoteSeenAt: null, employeeNoteSeenById: null }
+      : action === "seen" ? { employeeNoteSeenAt: new Date(), employeeNoteSeenById: userId }
+      : { employeeNoteSeenAt: null, employeeNoteSeenById: null }
+    const updated = await prisma.attendanceRecord.update({ where: { id: record.id }, data })
+    if (action === "delete") {
+      logAudit({ organizationId, actorId: userId, action: "attendance.employee_note_deleted", targetType: "User", targetId: employeeId, note: `${date}: ${String(record.employeeNote || "").slice(0, 200)}` })
+    }
+    const seenBy = updated.employeeNoteSeenById ? await prisma.user.findUnique({ where: { id: updated.employeeNoteSeenById }, select: { name: true } }) : null
+    res.json({
+      employeeId,
+      date,
+      employeeNote: updated.employeeNote,
+      extraMinutes: updated.extraMinutes,
+      employeeNoteSeenAt: updated.employeeNoteSeenAt?.toISOString() || null,
+      employeeNoteSeenByName: seenBy?.name || null,
+    })
+  } catch (err) {
+    next(err)
+  }
+}
+
 async function markAttendance(req, res, next) {
   try {
     const { organizationId, userId } = req.user
@@ -258,6 +453,7 @@ async function markAttendance(req, res, next) {
       update: { status: finalStatus, markedById: userId },
       create: { organizationId, employeeId, date: day, status: finalStatus, markedById: userId },
     })
+    await refreshDraftPayslip({ organizationId, employeeId, month: day.getUTCMonth() + 1, year: day.getUTCFullYear() }).catch(() => null)
 
     res.json(record)
   } catch (err) {
@@ -305,6 +501,12 @@ async function saveDayAttendance(req, res, next) {
       })
     )
 
+    // Status changes move the late/absent fines — keep DRAFT payslips current.
+    await Promise.all(
+      records.map((r) =>
+        refreshDraftPayslip({ organizationId, employeeId: r.employeeId, month: day.getUTCMonth() + 1, year: day.getUTCFullYear() }).catch(() => null)
+      )
+    )
     res.json({ date: day.toISOString().slice(0, 10), saved: results.length })
   } catch (err) {
     next(err)
@@ -591,7 +793,8 @@ async function setSelfAttendanceNote(req, res, next) {
 
     const updated = await prisma.attendanceRecord.update({
       where: { id: record.id },
-      data: { employeeNote: text || null, extraMinutes },
+      // An edited note counts as new for HR again.
+      data: { employeeNote: text || null, extraMinutes, employeeNoteSeenAt: null, employeeNoteSeenById: null },
     })
     res.json(updated)
   } catch (err) {
@@ -602,6 +805,9 @@ async function setSelfAttendanceNote(req, res, next) {
 module.exports = {
   getDailyAttendance,
   setAttendanceNote,
+  setAttendanceFine,
+  setFineSettings,
+  reviewEmployeeNote,
   setSelfAttendanceNote,
   markAttendance,
   saveDayAttendance,
@@ -920,39 +1126,174 @@ async function createAttendanceCorrection(req, res, next) {
     const { userId } = req.user
     const { requestedCheckInAt, requestedCheckOutAt, reason, attendanceId } = req.body
     if (!String(reason || "").trim()) return res.status(400).json({ error: "A reason is required" })
+    const checkIn = requestedCheckInAt ? new Date(requestedCheckInAt) : null
+    const checkOut = requestedCheckOutAt ? new Date(requestedCheckOutAt) : null
+    if ((checkIn && Number.isNaN(checkIn.getTime())) || (checkOut && Number.isNaN(checkOut.getTime()))) {
+      return res.status(400).json({ error: "Requested times are not valid dates" })
+    }
+    if (!checkIn && !checkOut) return res.status(400).json({ error: "Give the correct check-in and/or check-out time" })
+    if (checkIn && checkOut && checkOut <= checkIn) return res.status(400).json({ error: "Check-out must be after check-in" })
     // Same reasoning as markSelfAttendance — always resolve the employee's
     // real home organization, not the switched-scope req.user.organizationId.
     const employee = await prisma.user.findUnique({ where: { id: userId }, select: { organizationId: true } })
     if (!employee) return res.status(404).json({ error: "Employee not found" })
     const organizationId = employee.organizationId
+    // A correction may only point at the employee's own record — approving
+    // it rewrites that record's times.
+    if (attendanceId) {
+      const own = await prisma.attendanceRecord.findFirst({ where: { id: attendanceId, employeeId: userId }, select: { id: true } })
+      if (!own) return res.status(404).json({ error: "Attendance record not found" })
+      const pending = await prisma.$queryRaw`
+        SELECT id FROM "AttendanceCorrection" WHERE "attendanceId"=${attendanceId} AND status='PENDING' LIMIT 1
+      `
+      if (pending.length) return res.status(409).json({ error: "A correction for this day is already waiting for review" })
+    }
     const correctionId = `cor_${Date.now().toString(36)}_${crypto.randomBytes(4).toString("hex")}`
     await prisma.$executeRaw`
       INSERT INTO "AttendanceCorrection"
         ("id","organizationId","employeeId","attendanceId","requestedCheckInAt","requestedCheckOutAt","reason")
       VALUES
         (${correctionId},${organizationId},${userId},${attendanceId || null},
-         ${requestedCheckInAt ? new Date(requestedCheckInAt) : null},
-         ${requestedCheckOutAt ? new Date(requestedCheckOutAt) : null},
-         ${String(reason).trim()})
+         ${checkIn},
+         ${checkOut},
+         ${String(reason).trim().slice(0, 1000)})
     `
+    notifyManagement({
+      organizationId,
+      createdById: userId,
+      type: "REQUEST",
+      title: "Attendance correction request",
+      message: String(reason).trim().slice(0, 200),
+      link: "/attendance",
+      moduleKey: "attendance",
+    }).catch(() => {})
     res.status(201).json({ id: correctionId, status: "PENDING" })
   } catch (err) {
     next(err)
   }
 }
 
+// GET /attendance/corrections[?status=PENDING] — newest first. A
+// DEPARTMENT_HEAD only sees their own department (same as the daily grid).
 async function listAttendanceCorrections(req, res, next) {
   try {
+    const { organizationId, role, departmentId } = req.user
+    const status = ["PENDING", "APPROVED", "REJECTED"].includes(req.query.status) ? req.query.status : null
+    const deptOnly = role === "DEPARTMENT_HEAD" ? departmentId || "__none__" : null
     const rows = await prisma.$queryRaw`
-      SELECT c.*, u.name AS "employeeName", r.date
+      SELECT c.*, u.name AS "employeeName", r.date, r."checkInAt", r."checkOutAt", r.status AS "recordStatus"
       FROM "AttendanceCorrection" c
       JOIN "User" u ON u.id=c."employeeId"
       LEFT JOIN "AttendanceRecord" r ON r.id=c."attendanceId"
-      WHERE c."organizationId"=${req.user.organizationId}
+      WHERE c."organizationId"=${organizationId}
+        AND (${status}::text IS NULL OR c.status=${status})
+        AND (${deptOnly}::text IS NULL OR u."departmentId"=${deptOnly})
       ORDER BY c."createdAt" DESC
       LIMIT 100
     `
     res.json(rows)
+  } catch (err) {
+    next(err)
+  }
+}
+
+// GET /attendance/self/corrections — the employee's own requests.
+async function listSelfAttendanceCorrections(req, res, next) {
+  try {
+    const rows = await prisma.$queryRaw`
+      SELECT c.id, c."attendanceId", c."requestedCheckInAt", c."requestedCheckOutAt", c.reason, c.status,
+             c."reviewNote", c."createdAt", r.date
+      FROM "AttendanceCorrection" c
+      LEFT JOIN "AttendanceRecord" r ON r.id=c."attendanceId"
+      WHERE c."employeeId"=${req.user.userId}
+      ORDER BY c."createdAt" DESC
+      LIMIT 20
+    `
+    res.json(rows)
+  } catch (err) {
+    next(err)
+  }
+}
+
+// PATCH /attendance/corrections/:id  { decision: "APPROVED"|"REJECTED", note }
+// Approving writes the requested times onto the employee's existing
+// attendance record for that day (or creates the day's record when there was
+// none — the employee_date unique key means there is never a second one),
+// re-applies the late rule and recomputes worked minutes. Payroll reads
+// these same records, so the next Generate picks the correction up.
+async function reviewAttendanceCorrection(req, res, next) {
+  try {
+    const { organizationId, userId, role, departmentId } = req.user
+    const decision = req.body?.decision
+    if (!["APPROVED", "REJECTED"].includes(decision)) {
+      return res.status(400).json({ error: "decision must be APPROVED or REJECTED" })
+    }
+    const reviewNote = String(req.body?.note || "").trim().slice(0, 1000) || null
+
+    const [correction] = await prisma.$queryRaw`
+      SELECT c.*, u."departmentId" FROM "AttendanceCorrection" c
+      JOIN "User" u ON u.id=c."employeeId"
+      WHERE c.id=${req.params.id} AND c."organizationId"=${organizationId}
+    `
+    if (!correction || (role === "DEPARTMENT_HEAD" && correction.departmentId !== departmentId)) {
+      return res.status(404).json({ error: "Correction not found" })
+    }
+    if (correction.status !== "PENDING") return res.status(400).json({ error: "This correction has already been reviewed" })
+    if (correction.employeeId === userId) return res.status(403).json({ error: "You can't review your own correction" })
+
+    let attendanceId = correction.attendanceId
+    if (decision === "APPROVED") {
+      const [org, employee] = await Promise.all([
+        prisma.organization.findUnique({ where: { id: organizationId }, select: { timezone: true, shiftStartDefault: true, lateThresholdMinutes: true } }),
+        prisma.user.findUnique({ where: { id: correction.employeeId }, select: { shiftStart: true } }),
+      ])
+      const existing = attendanceId ? await prisma.attendanceRecord.findUnique({ where: { id: attendanceId } }) : null
+      const anchor = correction.requestedCheckInAt || correction.requestedCheckOutAt
+      const day = existing ? existing.date : toDateOnly(dateKeyInTimeZone(new Date(anchor), org?.timezone || "UTC"))
+      const current = existing || await prisma.attendanceRecord.findUnique({ where: { employeeId_date: { employeeId: correction.employeeId, date: day } } })
+
+      const checkInAt = correction.requestedCheckInAt || current?.checkInAt || null
+      const checkOutAt = correction.requestedCheckOutAt || current?.checkOutAt || null
+      if (checkInAt && checkOutAt && new Date(checkOutAt) <= new Date(checkInAt)) {
+        return res.status(400).json({ error: "The corrected check-out would be before the check-in — reject it or ask for a new request" })
+      }
+      // A worked day: PRESENT/LATE from the (corrected) check-in time.
+      const baseStatus = current && current.status !== "ABSENT" ? current.status : "PRESENT"
+      const status = resolveArrivalStatus(baseStatus === "LEAVE" ? "PRESENT" : baseStatus, checkInAt, employee, org)
+      const workingMinutes = checkInAt && checkOutAt ? Math.round((new Date(checkOutAt) - new Date(checkInAt)) / 60000) : null
+      const data = {
+        checkInAt,
+        checkOutAt,
+        status,
+        workingMinutes,
+        markedById: userId,
+        ...(correction.requestedCheckOutAt ? { autoCheckedOut: false } : {}),
+      }
+      const record = await prisma.attendanceRecord.upsert({
+        where: { employeeId_date: { employeeId: correction.employeeId, date: day } },
+        update: data,
+        create: { organizationId, employeeId: correction.employeeId, date: day, ...data },
+      })
+      attendanceId = record.id
+      await refreshDraftPayslip({ organizationId, employeeId: correction.employeeId, month: day.getUTCMonth() + 1, year: day.getUTCFullYear() }).catch(() => null)
+    }
+
+    await prisma.$executeRaw`
+      UPDATE "AttendanceCorrection"
+      SET status=${decision}, "reviewedById"=${userId}, "reviewNote"=${reviewNote},
+          "attendanceId"=${attendanceId}, "updatedAt"=CURRENT_TIMESTAMP
+      WHERE id=${correction.id}
+    `
+    createNotification({
+      organizationId,
+      recipientId: correction.employeeId,
+      createdById: userId,
+      type: "INFO",
+      title: decision === "APPROVED" ? "Attendance correction approved" : "Attendance correction rejected",
+      message: reviewNote,
+      link: "/attendance/me",
+    }).catch(() => {})
+    res.json({ id: correction.id, status: decision, attendanceId })
   } catch (err) {
     next(err)
   }
@@ -965,4 +1306,6 @@ module.exports = {
   resolveAttendanceAnomaly,
   createAttendanceCorrection,
   listAttendanceCorrections,
+  listSelfAttendanceCorrections,
+  reviewAttendanceCorrection,
 }

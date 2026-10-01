@@ -7,6 +7,7 @@ import {
   ChevronLeft, ChevronRight, CalendarDays, Search, SlidersHorizontal, LayoutGrid, List,
   ClipboardCheck, ClipboardX, CalendarOff, FileBarChart, ArrowUp, ArrowDown,
   ArrowUpDown, User, Clock, Timer, StickyNote, ChevronDown, Check, Plus, Pencil, Fingerprint, Home,
+  Trash2, Wallet,
 } from "lucide-react"
 import api from "../api/client"
 import { useAuth } from "../context/AuthContext"
@@ -269,19 +270,135 @@ function StatusMenu({ row, canWrite, onMark }) {
 const NOTE_MAX = 500
 
 // The employee's own note / extra hours claimed (from My Attendance), and a
-// marker when the system checked them out at shift end. Read-only here.
-function EmployeeNoteLine({ row }) {
+// marker when the system checked them out at shift end. HR/ADMIN/CEO can
+// mark it seen (or undo) and delete it (PUT /attendance/employee-note).
+function EmployeeNoteLine({ row, date, canReview, onChanged }) {
+  const act = useMutation({
+    mutationFn: (action) => api.put("/attendance/employee-note", { employeeId: row.employeeId, date, action }).then((r) => r.data),
+    onSuccess: (res) => onChanged(row.employeeId, res),
+  })
   if (!row.employeeNote && !row.extraMinutes && !row.autoCheckedOut) return null
   const extra = row.extraMinutes || 0
   const extraLabel = extra ? `+${Math.floor(extra / 60) ? `${Math.floor(extra / 60)}h ` : ""}${extra % 60 ? `${extra % 60}m` : ""}`.trim() : null
+  const hasNote = !!(extraLabel || row.employeeNote)
+  const seen = !!row.employeeNoteSeenAt
   return (
     <div className="mb-1.5 space-y-1 text-xs">
       {row.autoCheckedOut && <p className="text-[11px] text-muted-2">Auto check-out at shift end</p>}
-      {(extraLabel || row.employeeNote) && (
+      {hasNote && (
         <p className="line-clamp-3 text-ink" title={row.employeeNote || ""}>
+          {!seen && canReview && <span className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-accent align-middle" title="New — not marked as seen" />}
           {extraLabel && <span className="mr-1.5 rounded-full bg-chip-blue-bg px-2 py-0.5 text-[10px] font-semibold text-chip-blue-fg">{extraLabel} extra</span>}
           {row.employeeNote && <span><span className="text-muted">Employee:</span> {row.employeeNote}</span>}
         </p>
+      )}
+      {hasNote && canReview && (
+        <div className="flex flex-wrap items-center gap-2 text-[11px]">
+          {seen ? (
+            <button type="button" disabled={act.isPending} onClick={() => act.mutate("unseen")} className="inline-flex items-center gap-1 font-semibold text-chip-green-fg hover:underline disabled:opacity-50" title="Click to mark as not seen">
+              <Check size={11} /> Seen{row.employeeNoteSeenByName ? ` by ${row.employeeNoteSeenByName}` : ""}
+            </button>
+          ) : (
+            <button type="button" disabled={act.isPending} onClick={() => act.mutate("seen")} className="inline-flex items-center gap-1 font-semibold text-accent hover:underline disabled:opacity-50">
+              <Check size={11} /> Mark seen
+            </button>
+          )}
+          <button
+            type="button"
+            disabled={act.isPending}
+            onClick={() => window.confirm(`Delete ${row.name}'s note${extraLabel ? " and extra-hours claim" : ""} for this day?`) && act.mutate("delete")}
+            className="inline-flex items-center gap-1 font-semibold text-danger hover:underline disabled:opacity-50"
+          >
+            <Trash2 size={11} /> Delete
+          </button>
+          {act.isError && <span className="text-danger">{act.error?.response?.data?.error || "Couldn't update."}</span>}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function pkr(n) {
+  return `PKR ${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}`
+}
+
+// "Fines" header panel (HR/ADMIN/CEO): one late fine and one absent fine
+// per day for the whole organization (PUT /attendance/fine-settings).
+// Payroll applies them to every LATE / ABSENT day; draft payslips are
+// refreshed on save. Shows what today's late/absent rows add up to.
+function FineSettings({ settings, lateCount, absentCount, dayTotal, onSaved }) {
+  const pop = usePopover()
+  const [form, setForm] = useState({ lateFine: "", absentFine: "" })
+  const save = useMutation({
+    mutationFn: () => api.put("/attendance/fine-settings", { lateFine: form.lateFine, absentFine: form.absentFine }).then((r) => r.data),
+    onSuccess: (res) => onSaved(res),
+  })
+  function toggle() {
+    if (!pop.open) {
+      setForm({ lateFine: String(settings.lateFine ?? ""), absentFine: settings.absentFine == null ? "" : String(settings.absentFine) })
+      save.reset()
+    }
+    pop.setOpen((v) => !v)
+  }
+  const unchanged =
+    String(form.lateFine) === String(settings.lateFine ?? "") &&
+    String(form.absentFine) === (settings.absentFine == null ? "" : String(settings.absentFine))
+
+  return (
+    <div className="relative" ref={pop.ref}>
+      <button type="button" onClick={toggle} className="pill-secondary flex items-center gap-1.5 px-4 py-2.5 text-sm" aria-expanded={pop.open} title="Late and absent fine amounts">
+        <Wallet size={15} /> Fines
+        {dayTotal > 0 && <span className="rounded-full bg-chip-pink-bg px-2 py-0.5 text-[10px] font-semibold text-chip-pink-fg">{pkr(dayTotal)}</span>}
+      </button>
+      {pop.open && (
+        <form
+          onSubmit={(e) => { e.preventDefault(); save.mutate() }}
+          className="absolute right-0 z-30 mt-2 w-80 rounded-2xl border border-border bg-surface p-4 shadow-pop"
+        >
+          <p className="text-sm font-semibold text-ink">Attendance fines</p>
+          <p className="mt-0.5 text-xs text-muted">Deducted in payroll for every late or absent day.</p>
+
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <label className="text-[11px] font-medium text-muted">
+              Late fine / day
+              <div className="relative mt-1">
+                <input type="number" min="500" step="any" required value={form.lateFine} onChange={(e) => setForm((f) => ({ ...f, lateFine: e.target.value }))} className="field py-2 pr-10 text-xs" />
+                <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-muted-2">PKR</span>
+              </div>
+            </label>
+            <label className="text-[11px] font-medium text-muted">
+              Absent fine / day
+              <div className="relative mt-1">
+                <input type="number" min="1000" step="any" value={form.absentFine} placeholder="Not set" onChange={(e) => setForm((f) => ({ ...f, absentFine: e.target.value }))} className="field py-2 pr-10 text-xs" />
+                <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-muted-2">PKR</span>
+              </div>
+            </label>
+          </div>
+          <p className="mt-1.5 text-[10px] leading-4 text-muted-2">
+            The absent fine is also charged per unpaid-leave day (half for a half day). Leave it empty for no absent fine.
+          </p>
+
+          <div className="mt-3 rounded-xl bg-surface-2 px-3 py-2 text-xs text-ink">
+            <p className="font-semibold">This day</p>
+            <p className="mt-0.5 text-muted">
+              {lateCount} late · {absentCount} absent — <span className="font-semibold text-chip-pink-fg">{pkr(dayTotal)}</span> in fines
+            </p>
+          </div>
+
+          {save.isError && <p className="mt-2 text-xs text-danger">{save.error?.response?.data?.error || "Couldn't save the fines."}</p>}
+          {save.isSuccess && (
+            <p className="mt-2 text-xs text-chip-green-fg">
+              Saved{save.data.refreshedDrafts ? ` — ${save.data.refreshedDrafts} draft payslip${save.data.refreshedDrafts === 1 ? "" : "s"} updated` : ""}.
+            </p>
+          )}
+          <div className="mt-3 flex justify-end gap-2">
+            <button type="button" onClick={() => pop.setOpen(false)} className="pill-secondary px-3 py-1.5 text-xs">Close</button>
+            <button type="submit" disabled={save.isPending || unchanged || form.lateFine === ""} className="pill-accent px-3 py-1.5 text-xs disabled:opacity-50">
+              {save.isPending ? "Saving…" : "Save fines"}
+            </button>
+          </div>
+          <p className="mt-2 text-[10px] text-muted-2">Submitted or paid payslips keep the amounts they were issued with.</p>
+        </form>
       )}
     </div>
   )
@@ -468,6 +585,20 @@ export default function Attendance() {
   }
 
   const canNote = ["ADMIN", "CEO", "HR"].includes(user?.role)
+  // Fine settings/amounts come back only for HR/ADMIN/CEO (salary-derived).
+  const fineSettings = canNote ? data?.fineSettings : null
+
+  function onEmployeeNoteChanged(employeeId, res) {
+    const apply = (r) => (r.employeeId === employeeId
+      ? { ...r, employeeNote: res.employeeNote, extraMinutes: res.extraMinutes, employeeNoteSeenAt: res.employeeNoteSeenAt, employeeNoteSeenByName: res.employeeNoteSeenByName }
+      : r)
+    queryClient.setQueryData(["attendance", date], (old) => (old ? { ...old, rows: old.rows.map(apply) } : old))
+  }
+  function onFineSaved() {
+    queryClient.invalidateQueries({ queryKey: ["attendance", date] })
+    queryClient.invalidateQueries({ queryKey: ["payroll"] })
+    queryClient.invalidateQueries({ queryKey: ["payroll-preview"] })
+  }
 
   function invalidateDay() {
     queryClient.invalidateQueries({ queryKey: ["attendance", date] })
@@ -482,7 +613,11 @@ export default function Attendance() {
         date,
         records: [...editsRef.current].map(([employeeId, patch]) => ({ employeeId, status: patch.status })),
       }),
-    onSuccess: () => { editsRef.current = new Map(); setDirty(false); setSaved(true); invalidateDay() },
+    onSuccess: () => {
+      editsRef.current = new Map(); setDirty(false); setSaved(true); invalidateDay()
+      // Status changes move late/absent fines on draft payslips.
+      queryClient.invalidateQueries({ queryKey: ["payroll"] })
+    },
   })
 
   const exportSheet = useMutation({
@@ -513,6 +648,31 @@ export default function Attendance() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["attendance-anomalies"] }),
   })
 
+  // Correction requests employees sent from My Attendance. Approving writes
+  // the corrected times onto that day's record (payroll reads the same
+  // records), so it's an update permission, like marking.
+  const { data: corrections = [] } = useQuery({
+    queryKey: ["attendance-corrections", "PENDING"],
+    queryFn: () => api.get("/attendance/corrections", { params: { status: "PENDING" } }).then((r) => r.data),
+    enabled: hasAccess,
+    refetchInterval: 60000,
+  })
+  const reviewCorrection = useMutation({
+    mutationFn: ({ id, decision, note }) => api.patch(`/attendance/corrections/${id}`, { decision, note }).then((r) => r.data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["attendance-corrections"] })
+      queryClient.invalidateQueries({ queryKey: ["attendance"] })
+    },
+  })
+  function decideCorrection(c, decision) {
+    let note = ""
+    if (decision === "REJECTED") {
+      note = window.prompt(`Reason for rejecting ${c.employeeName}'s correction (optional):`, "")
+      if (note === null) return
+    }
+    reviewCorrection.mutate({ id: c.id, decision, note })
+  }
+
   const timeZone = data?.schedule?.timezone || organization?.timezone
   const ctxFor = (d, key) => ({
     scheduled: d?.schedule?.isScheduledWorkday !== false,
@@ -534,6 +694,8 @@ export default function Attendance() {
     for (const k of Object.keys(FILTERS)) out[k] = prevData.rows.filter((r) => FILTERS[k].match(r, c)).length
     return out
   }, [prevData, prevDate, todayKey]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const dayFineTotal = useMemo(() => rows.reduce((s, r) => s + (r.fine?.total || 0), 0), [rows])
 
   const departments = useMemo(
     () => [...new Set(rows.map((r) => r.department).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
@@ -641,6 +803,15 @@ export default function Attendance() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {fineSettings && (
+            <FineSettings
+              settings={fineSettings}
+              lateCount={rows.filter((r) => r.fine?.autoType === "LATE").length}
+              absentCount={rows.filter((r) => r.fine?.autoType === "ABSENT").length}
+              dayTotal={dayFineTotal}
+              onSaved={onFineSaved}
+            />
+          )}
           <div className="relative" ref={report.ref}>
             <button type="button" onClick={() => report.setOpen((v) => !v)} className="pill-secondary flex items-center gap-1.5 px-4 py-2.5 text-sm" aria-expanded={report.open}>
               <FileBarChart size={15} /> Attendance Report
@@ -725,6 +896,75 @@ export default function Attendance() {
           </div>
         ))}
       </div>
+
+      {/* ── Correction requests awaiting approval ── */}
+      {corrections.length === 0 && (
+        <div className="mb-5 card flex flex-wrap items-center justify-between gap-3 px-5 py-3.5">
+          <span>
+            <span className="flex items-center gap-2 text-sm font-semibold text-ink"><Clock size={16} /> Correction requests</span>
+            <span className="mt-0.5 block text-xs text-muted">
+              Nothing waiting. Employees send these from My Attendance ("Request time correction") when a check-in or check-out is wrong they appear here for approval.
+            </span>
+          </span>
+          <span className="rounded-full bg-chip-green-bg px-2.5 py-1 text-[10px] font-semibold text-chip-green-fg">0 waiting</span>
+        </div>
+      )}
+      {corrections.length > 0 && (
+        <details className="mb-5 card overflow-hidden" open>
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 border-b border-border px-5 py-3.5">
+            <span>
+              <span className="flex items-center gap-2 text-sm font-semibold text-ink"><Clock size={16} /> Correction requests</span>
+              <span className="mt-0.5 block text-xs text-muted">
+                Employees asking to fix a check-in or check-out. Approving updates that day's record — payroll uses it on the next Generate.
+              </span>
+            </span>
+            <span className="rounded-full bg-chip-yellow-bg px-2.5 py-1 text-[10px] font-semibold text-chip-yellow-fg">{corrections.length} waiting</span>
+          </summary>
+          {reviewCorrection.isError && (
+            <p className="border-b border-border bg-chip-pink-bg px-5 py-2 text-xs text-chip-pink-fg">
+              {reviewCorrection.error?.response?.data?.error || "Couldn't save the decision — please try again."}
+            </p>
+          )}
+          <div className="divide-y divide-border">
+            {corrections.slice(0, 10).map((c) => {
+              const dayKey = c.date ? String(c.date).slice(0, 10) : null
+              const anchor = c.requestedCheckInAt || c.requestedCheckOutAt
+              const dayLabel = dayKey
+                ? longDateFmt.format(new Date(`${dayKey}T00:00:00Z`))
+                : anchor ? new Date(anchor).toLocaleDateString("en-US", { timeZone, weekday: "long", day: "numeric", month: "long" }) : "—"
+              const busy = reviewCorrection.isPending && reviewCorrection.variables?.id === c.id
+              return (
+                <div key={c.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-ink">
+                      <Link to={`/employees/${c.employeeId}`} className="hover:underline">{c.employeeName}</Link>
+                      <span className="font-normal text-muted"> · {dayLabel}</span>
+                    </p>
+                    <p className="mt-0.5 text-xs text-muted">
+                      {c.requestedCheckInAt && <>In <span className="font-medium text-ink">{formatTime(c.requestedCheckInAt, { timeZone })}</span>{c.checkInAt ? ` (was ${formatTime(c.checkInAt, { timeZone })})` : ""}</>}
+                      {c.requestedCheckInAt && c.requestedCheckOutAt && " · "}
+                      {c.requestedCheckOutAt && <>Out <span className="font-medium text-ink">{formatTime(c.requestedCheckOutAt, { timeZone })}</span>{c.checkOutAt ? ` (was ${formatTime(c.checkOutAt, { timeZone })})` : ""}</>}
+                    </p>
+                    <p className="mt-0.5 text-xs text-muted-2">“{c.reason}”</p>
+                  </div>
+                  {canResolve && c.employeeId !== user?.id ? (
+                    <div className="flex items-center gap-2">
+                      <button type="button" disabled={busy} onClick={() => decideCorrection(c, "APPROVED")} className="pill-accent flex items-center gap-1 px-3 py-1.5 text-xs disabled:opacity-50">
+                        <Check size={12} /> Approve
+                      </button>
+                      <button type="button" disabled={busy} onClick={() => decideCorrection(c, "REJECTED")} className="pill-secondary flex items-center gap-1 px-3 py-1.5 text-xs disabled:opacity-50">
+                        <X size={12} /> Reject
+                      </button>
+                    </div>
+                  ) : (
+                    <span className="text-[11px] text-muted-2">{c.employeeId === user?.id ? "Your own request" : "View only"}</span>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </details>
+      )}
 
       {/* ── Anomalies needing review (unchanged behavior) ── */}
       {anomalies.length > 0 && (
@@ -843,7 +1083,7 @@ export default function Attendance() {
               <LocationFlag row={row} />
               {(row.note || canNote || row.employeeNote || row.extraMinutes) && (
                 <div className="border-t border-border pt-2">
-                  <EmployeeNoteLine row={row} />
+                  <EmployeeNoteLine row={row} date={date} canReview={canNote} onChanged={onEmployeeNoteChanged} />
                   <NoteCell row={row} date={date} canEdit={canNote} onSaved={onNoteSaved} />
                 </div>
               )}
@@ -869,8 +1109,7 @@ export default function Attendance() {
                   <SortHeader label="Working time" icon={Timer} sortKey="worked" />
                   <SortHeader label="Location" icon={MapPin} />
                   <SortHeader label="Note" icon={StickyNote} />
-                  <SortHeader label="Status" icon={CheckCircle2} sortKey="status" />
-                </tr>
+                  <SortHeader label="Status" icon={CheckCircle2} sortKey="status" />                </tr>
               </thead>
               <tbody>
                 {visibleRows.map((row) => (
@@ -890,13 +1129,12 @@ export default function Attendance() {
                     </td>
                     <td className="px-4 py-3"><LocationFlag row={row} /></td>
                     <td className="w-[250px] px-4 py-3">
-                      <EmployeeNoteLine row={row} />
+                      <EmployeeNoteLine row={row} date={date} canReview={canNote} onChanged={onEmployeeNoteChanged} />
                       <NoteCell row={row} date={date} canEdit={canNote} onSaved={onNoteSaved} />
                     </td>
                     <td className="px-4 py-3">
                       <StatusMenu row={row} canWrite={canWrite} onMark={setLocalStatus} />
-                    </td>
-                  </tr>
+                    </td>                  </tr>
                 ))}
                 {visibleRows.length === 0 && !isLoading && (
                   <tr><td colSpan={6} className="px-5 py-10 text-center text-muted">{rows.length ? "No employees match these filters." : "No active employees."}</td></tr>

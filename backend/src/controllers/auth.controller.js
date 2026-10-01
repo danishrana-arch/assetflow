@@ -263,8 +263,11 @@ async function inviteEmployee(req, res, next) {
 
     let assignedRole = "EMPLOYEE"
     if (role !== undefined && role !== "EMPLOYEE") {
-      if (!["ADMIN", "CEO"].includes(requesterRole)) {
-        return res.status(403).json({ error: "Only Admin or CEO can create management accounts" })
+      // HR may create any non-owner role; ADMIN/CEO accounts stay
+      // ADMIN/CEO-only (same rule as updateEmployee).
+      const hrCanAssign = requesterRole === "HR" && !["ADMIN", "CEO"].includes(role)
+      if (!["ADMIN", "CEO"].includes(requesterRole) && !hrCanAssign) {
+        return res.status(403).json({ error: requesterRole === "HR" ? "HR can't create Admin or CEO accounts" : "Only Admin, CEO or HR can create management accounts" })
       }
       if (!ASSIGNABLE_ROLES.includes(role)) {
         return res.status(400).json({ error: `role must be one of: ${ASSIGNABLE_ROLES.join(", ")}` })

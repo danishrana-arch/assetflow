@@ -266,6 +266,7 @@ export default function MyPayroll() {
                 <Line label="Tax" detail={Number(record.taxPercent) ? `${Number(record.taxPercent)}%` : null} amount={record.tax} tone="deduct" />
                 <Line label="Absent" detail={leaveDetail || null} amount={record.absentDeduction} tone="deduct" />
                 <Line label="Late" detail={record.lateDays ? plural(record.lateDays, "day") : null} amount={record.lateDeduction} tone="deduct" />
+                {Number(record.fineDeduction) > 0 && <Line label="Attendance fines" amount={record.fineDeduction} tone="deduct" />}
                 {Number(record.otherDeduction) > 0 && <Line label="Other deductions" amount={record.otherDeduction} tone="deduct" />}
                 {Number(record.terminationDeduction) > 0 && (
                   <Line label="Termination deduction" amount={record.terminationDeduction} tone="deduct" />

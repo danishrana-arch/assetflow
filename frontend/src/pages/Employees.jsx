@@ -53,6 +53,9 @@ export default function Employees() {
   const isOwner = user?.role === "ADMIN"
   const canManageEmployees = user?.role === "ADMIN" || user?.role === "CEO"
   const canDeleteEmployee = (emp) => canManageEmployees && emp.id !== user?.id && (user?.role === "CEO" || emp.role !== "CEO")
+  // HR can create employees with any non-owner role (backend: inviteEmployee).
+  const isHR = user?.role === "HR"
+  const canPickRole = canManageEmployees || isHR
   const [search, setSearch] = useState("")
   const debouncedSearch = useDebouncedValue(search)
   const [page, setPage] = useState(1)
@@ -80,7 +83,7 @@ export default function Employees() {
   const { data: managerCandidates = [] } = useQuery({
     queryKey: ["employees", "manager-candidates"],
     queryFn: () => api.get("/employees", { params: { includeCompanyManagers: true, page: 1, pageSize: 200 } }).then((r) => r.data?.data || r.data || []),
-    enabled: canManageEmployees && showForm,
+    enabled: canPickRole && showForm,
   })
   const { data: departments } = useQuery({
     queryKey: ["departments"],
@@ -107,7 +110,7 @@ export default function Employees() {
       api.post("/auth/invite", {
         ...form,
         password: form.password || undefined,
-        role: canManageEmployees ? form.role : undefined,
+        role: canPickRole ? form.role : undefined,
         departmentId: form.departmentId || undefined,
         managerId: form.managerId || undefined,
         seniorityLevel: form.seniorityLevel || undefined,
@@ -292,10 +295,11 @@ export default function Employees() {
               onChange={(e) => updateField("password", e.target.value)}
               hint="Optional: leave blank to auto-generate a temp password"
             />
-            {canManageEmployees ? (
+            {canPickRole ? (
               <SelectField label="Role" value={form.role} onChange={(e) => updateField("role", e.target.value)}>
                 {Object.entries(ROLE_LABELS)
                   .filter(([value]) => value !== "CEO" || (data?.ceoCount || 0) < 3)
+                  .filter(([value]) => !isHR || !["ADMIN", "CEO"].includes(value))
                   .map(([value, label]) => (
                     <option key={value} value={value}>{label}</option>
                   ))}

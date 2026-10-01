@@ -478,14 +478,20 @@ async function updateEmployee(req, res, next) {
       if (emailTaken) return res.status(409).json({ error: "That email is already in use" })
     }
 
-    // The Owner (ADMIN) or a CEO may change roles, and only to a known
-    // role. This stops an HR/Sales Head account from promoting itself or
-    // anyone else into a management role.
+    // ADMIN/CEO may change any role. HR may change the role of a non-ADMIN/
+    // CEO employee to a non-owner role (never to ADMIN/CEO, never their own),
+    // so HR can't escalate anyone — including themselves — into owner tier.
+    // ADMIN/CEO targets are already blocked for HR above.
     // Only enforced when the role actually changes — the profile edit form
     // always sends the current role back unchanged.
     if (req.body.role !== undefined && req.body.role !== existing.role) {
-      if (!requesterIsOwnerTier) {
-        return res.status(403).json({ error: "Only the organization owner or a CEO can change roles" })
+      const hrCanAssign = requesterRole === "HR" && !isSelf && !["ADMIN", "CEO"].includes(req.body.role)
+      if (!requesterIsOwnerTier && !hrCanAssign) {
+        return res.status(403).json({
+          error: requesterRole === "HR"
+            ? (isSelf ? "You can't change your own role" : "HR can't assign the Admin or CEO role")
+            : "Only an Admin, CEO or HR can change roles",
+        })
       }
       if (!ASSIGNABLE_ROLES.includes(req.body.role)) {
         return res.status(400).json({ error: `role must be one of: ${ASSIGNABLE_ROLES.join(", ")}` })

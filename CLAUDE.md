@@ -1797,6 +1797,153 @@ JS client was regenerated with the column, so payroll queries fail until
 - "Other" removed from the default asset categories (no asset used it).
 - Verified 20/20 against a temporary org (deleted afterwards).
 
+## Post-module addition: attendance → payroll workflow (2026-10-01)
+
+Per a live chat request ("make it user friendly, don't change the design").
+No schema change, no migration. Existing APIs unchanged except where noted.
+
+- **Payroll review before generate**: new read-only `GET /payroll/preview?month=&year=`
+  (`previewPayroll`, `requireModule("payroll")` + `noStore`). Per employee
+  Generate would touch (+ anyone already holding a payslip): present / late /
+  absent / leave counts, paid vs unpaid leave days, missing check-outs,
+  past scheduled workdays with **no** record, and the amounts — computed with
+  the same `computeAttendanceLines` + `computePayrollTotals` as Generate, so
+  the preview equals the real run (submitted/paid rows show stored values).
+  Issues list: active employees with no base salary (skipped), pending leave
+  and pending attendance corrections in the month, open check-outs, unrecorded
+  days (not deducted — only ABSENT records are). `Payroll.jsx`: "Generate" →
+  "Review & Generate" opens the `PayrollReview` panel; its button calls the
+  unchanged `POST /payroll/generate`. CEO gets a read-only "Attendance review".
+- **Attendance corrections are now a real workflow** (the table and
+  create/list endpoints existed, but nothing in the UI used them and nothing
+  could approve one): `PATCH /attendance/corrections/:id {decision, note}`
+  (`reviewAttendanceCorrection`, attendance `canUpdate`; DEPARTMENT_HEAD own
+  department only; self-review 403). Approve writes the requested times onto
+  that day's existing record (upsert on `employeeId_date` — never a second
+  record), re-applies the late rule, recomputes `workingMinutes`, notifies the
+  employee. `createAttendanceCorrection` now validates the `attendanceId` is
+  the caller's own (previously any id was accepted), requires a time, blocks a
+  second pending request for the same record, and notifies attendance-module
+  roles. `GET /attendance/corrections` takes `?status=` and is department-
+  scoped for DEPARTMENT_HEAD. New `GET /attendance/self/corrections`.
+  UI: "Correction requests" panel on `Attendance.jsx` (same style as the
+  anomalies panel, Approve/Reject); "Request time correction" per day on
+  `MyAttendance.jsx` (times entered in the org timezone, online only).
+- **Leave Requests**: Pending/Approved/Rejected counts (one list fetch,
+  filtered client-side), search, link to the employee profile, remaining
+  balance for paid types (existing `/leaves/balance?employeeId=`, flagged red
+  when the request exceeds it), plain-language impact ("marks these days as
+  Leave", "deducted from the <Month> payslip"), reviewer + note on decided
+  ones, optional reason on Reject (existing `reviewNote` field).
+- Verified read-only against the live DB: preview for Sep/Oct 2026 (e.g.
+  80,000 base × 3.3% = 2,640 per absent day; the one stored submitted payslip
+  matches exactly), bad month 400, correction list/self/DEPARTMENT_HEAD
+  scoping, review 400/404, create 400/404 for a foreign record; payroll and
+  attendance row counts unchanged. Approve/reject and Generate themselves
+  were **not** exercised (they write). Restart the backend to pick up the
+  new routes.
+
+### Follow-up (same day): fines + employee-note actions on the Attendance page
+
+- New `AttendanceFine` model (one row per employee/day: `waived`,
+  `extraAmount`, `reason`, `updatedById`), `PayrollRecord.fineDeduction`,
+  `AttendanceRecord.employeeNoteSeenAt/SeenById`. Migration
+  `20261001120000_attendance_fines_note_review` (additive) — **deployed**;
+  `prisma generate` hit the usual engine-DLL EPERM, JS client verified.
+- `computeAttendanceLines` skips waived days when counting LATE/ABSENT and
+  sums `extraAmount` into `fineDeduction` (in `computePayrollTotals`). The
+  absent-day rate moved to `utils/payroll.js` (`unpaidLeaveDailyRate`,
+  `absentDayFine`) so the Attendance page shows the same amount payroll uses.
+- `getDailyAttendance` rows gain `fine` (autoType/autoAmount/waived/
+  extraAmount/total/payslipStatus/locked) — **HR/ADMIN/CEO only** (salary-
+  derived) — and `employeeNoteSeenAt/SeenByName`.
+- `PUT /attendance/fines` and `PUT /attendance/employee-note`
+  (`action: seen|unseen|delete`), both `requireRole("ADMIN","CEO","HR")`.
+  Fines lock once that month's payslip is submitted/paid; a manual fine needs
+  a reason and notifies the employee. An employee editing their note clears
+  "seen". `refreshDraftPayslip` (payroll.controller) now runs after fine
+  changes, status Save/mark and approved corrections, so a DRAFT payslip is
+  current without re-running Generate.
+- UI: Fine column (table) / Fine row (cards) with a popover (waive, extra
+  fine, reason), "Fines this day" chip; Mark seen / Seen by X / Delete under
+  employee notes. Fines also shown on Payroll, My Payslips and the PDF.
+- Verified 18/18 against the live DB (waive a real late day → preview late
+  deduction 1500 → 1000, net +500 → reset; locked month 400; MANAGEMENT gets
+  no fine data; seen/unseen restored). Left behind: 2 `attendance.fine_set`
+  audit rows from that test; no fines/payslips/notifications.
+
+### Follow-up (same day): fines moved to one header panel
+
+Per user request the per-row Fine column/card row was removed; instead a
+**Fines** button (left of "Attendance Report", HR/ADMIN/CEO only) opens a
+panel to set the org-wide **late fine / day** (`Organization.lateDeductionAmount`)
+and **absent fine / day** (new `Organization.absentFineAmount`, null = the
+salary-banded rate; migration `20261001130000_org_absent_fine_amount` —
+**deployed**). `PUT /attendance/fine-settings` (`requireRole("ADMIN","CEO","HR")`)
+saves them and refreshes every DRAFT payslip (`refreshAllDraftPayslips`);
+`computeAttendanceLines` uses the flat absent fine for ABSENT days (unpaid
+leave keeps the salary band). The panel also shows the day's late/absent
+count and fine total. The per-day `PUT /attendance/fines` endpoint (waive /
+extra fine) and `AttendanceFine` table remain and are still read by payroll,
+but no longer have UI. Verified 12/12 live (set 700/1000 → preview and day
+view match → restored 500/salary rate).
+
+### Follow-up (same day): salary-banded absent rate removed
+
+Per user request the salary-based per-day rate (2.7% / 3.3% / 3.8% / 4.5%
+by monthly salary — `unpaidLeaveDailyRate`/`absentDayFine`) is **gone**.
+The only per-day rate is now `Organization.absentFineAmount` (Attendance
+page → Fines), used for ABSENT days **and** unpaid-leave days (half for a
+half day). Not set = no absent/unpaid deduction. Already paid/submitted
+payslips keep their issued amounts; drafts pick it up on the next refresh.
+
+## Post-module fix: My Attendance showed the previous user's / stale data (2026-10-01)
+
+- Cause: `utils/offlineAttendance.js` kept the offline snapshot and assigned
+  sites under one key **per browser** (`…_v1`), and `MyAttendance.jsx` loaded
+  them as react-query `initialData` (treated as current; sites had a 5-min
+  `staleTime`, so not even refetched). Query keys weren't user-scoped and the
+  query cache was never cleared on login/logout.
+- Fix: caches are now `…_v2` `{userId, savedAt, data}` and only read back for
+  the same logged-in user (old v1 keys are deleted); MyAttendance uses them as
+  `placeholderData` with `staleTime: 0` + `refetchOnMount: "always"`; query
+  keys include `user.id` (also EmployeeProfile's assigned-sites key);
+  `AuthContext` calls `queryClient.clear()` on login and logout, and
+  `clearAttendanceCaches()` on logout.
+- **Offline queue ownership** (found along the way): queued events had no
+  owner, so on a shared device the next user's session would have synced
+  another person's check-in under their own login. Events now carry
+  `ownerUserId` and `getOfflineAttendanceQueue()` returns only the current
+  user's (plus legacy untagged ones). Offline check-in itself is unchanged.
+
+## Post-module change: HR can assign roles; employees can't write day notes (2026-10-01)
+
+- **HR role changes**: `updateEmployee` lets HR change a non-ADMIN/CEO
+  employee's role to any non-owner role (never ADMIN/CEO, never their own);
+  `inviteEmployee` lets HR create non-owner roles. ADMIN/CEO profiles stay
+  ADMIN/CEO-only (unchanged). MANAGEMENT/DEPARTMENT_HEAD still can't change
+  roles. Frontend: `EmployeeProfile.jsx` (`canChangeRole`) and
+  `Employees.jsx` (`canPickRole`, ADMIN/CEO filtered out of HR's list; the
+  reporting-manager list now also loads for HR). Verified 8/8 refusals live
+  (no writes).
+- **Employee day notes removed**: `PUT /attendance/self/note` now returns
+  403 ("Notes are added by HR… send a correction request"); the `SelfNote`
+  editor is gone from `MyAttendance.jsx`. Employees only send correction
+  requests; notes are HR/ADMIN/CEO (`PUT /attendance/notes`). Already-saved
+  employee notes still show on the Attendance page with Mark seen / Delete.
+  `setSelfAttendanceNote` remains in the controller, unrouted.
+
+## Post-module fix: multi-day leave shown once in event lists (2026-10-01)
+
+`collectCalendarEvents` (dashboard.controller.js) still emits one
+EMPLOYEE_LEAVE event per day (calendar grids mark each day), but each now
+carries `leaveId`, `leaveStart`, `leaveEnd` (additive). New
+`frontend/src/utils/calendarEvents.js` (`groupLeaveEvents`,
+`eventDateLabel`) collapses a leave to one row with its range ("Thu, Oct 15
+– Mon, Oct 19 (5 days)") in Dashboard "Upcoming events", the dashboard
+calendar's leave lines + event popup, and the Company Calendar "Event feed".
+Verified live: October 6 rows → 2.
+
 ## Automated RBAC test run (2026-09-28)
 
 There's no automated test suite in either app (`npm test` isn't

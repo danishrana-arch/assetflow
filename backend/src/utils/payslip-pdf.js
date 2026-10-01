@@ -116,6 +116,7 @@ function streamPayslipPdf(res, { record, employee, organization, bankAccount }) 
     [taxPct ? `Tax (${taxPct}%)` : "Tax", record.tax],
     [leaveDetail ? `Absent (${leaveDetail})` : "Absent", record.absentDeduction],
     [record.lateDays ? `Late (${plural(record.lateDays, "day")})` : "Late", record.lateDeduction],
+    ...(Number(record.fineDeduction) > 0 ? [["Attendance fines", record.fineDeduction]] : []),
     ...(Number(record.otherDeduction) > 0 ? [["Other deductions", record.otherDeduction]] : []),
     ...(Number(record.terminationDeduction) > 0 ? [["Termination deduction", record.terminationDeduction]] : []),
   ]

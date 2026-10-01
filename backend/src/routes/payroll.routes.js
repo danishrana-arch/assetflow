@@ -1,6 +1,7 @@
 const express = require("express")
 const {
   generatePayroll,
+  previewPayroll,
   listPayroll,
   getPayrollSummary,
   myPayroll,
@@ -29,6 +30,8 @@ router.get("/:id/pdf", noStore, downloadPayslipPdf)
 
 router.get("/", requireModule("payroll"), noStore, listPayroll)
 router.get("/summary", requireModule("payrollReports"), noStore, getPayrollSummary)
+// Read-only review of what Generate would produce for a month.
+router.get("/preview", requireModule("payroll"), noStore, previewPayroll)
 router.post("/generate", requireRole("ADMIN"), generatePayroll)
 // Single employee's payslip regardless of status — for a termination /
 // final payslip of someone already marked "Left Company".

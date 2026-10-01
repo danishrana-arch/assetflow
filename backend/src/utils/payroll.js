@@ -16,6 +16,7 @@ function computePayrollTotals(r) {
     toNumber(r.tax) +
       toNumber(r.absentDeduction) +
       toNumber(r.lateDeduction) +
+      toNumber(r.fineDeduction) +
       toNumber(r.otherDeduction) +
       toNumber(r.terminationDeduction)
   )

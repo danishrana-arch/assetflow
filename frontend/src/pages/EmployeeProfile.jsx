@@ -195,7 +195,7 @@ export default function EmployeeProfile() {
   })
   // Same data (and cache key) My Attendance uses for the geofence check.
   const { data: assignedSites = [] } = useQuery({
-    queryKey: ["attendance-assigned-sites"],
+    queryKey: ["attendance-assigned-sites", user?.id],
     queryFn: () => api.get("/attendance-sites/assigned").then((r) => r.data),
     enabled: canQuickMark,
     staleTime: 5 * 60 * 1000,
@@ -220,6 +220,10 @@ export default function EmployeeProfile() {
   const canRemoveEmployee = user?.role === "ADMIN" && !isSelf && employee?.role !== "CEO"
   // An ADMIN editing a CEO can't demote or deactivate them (that's removal).
   const canChangeRoleAndStatus = viewerIsOwnerTier && !(employee?.role === "CEO" && user?.role !== "CEO")
+  // HR may change a (non-ADMIN/CEO) employee's role to a non-owner role, but
+  // not their own — mirrors updateEmployee.
+  const hrCanChangeRole = user?.role === "HR" && !isSelf && !isProtectedTarget
+  const canChangeRole = canChangeRoleAndStatus || hrCanChangeRole
   const canManageCertifications = (hasModuleAccess(user?.role, "certifications") || isSelf) && canTouchThisProfile
 
   useEffect(() => {
@@ -1405,9 +1409,11 @@ export default function EmployeeProfile() {
                             <option key={manager.id} value={manager.id}>{manager.name} — {ROLE_LABELS[manager.role] || manager.role}</option>
                           ))}
                         </SelectField>
-                        <SelectField label="Role" value={editForm.role} disabled={!canChangeRoleAndStatus} onChange={setField("role")}>
+                        <SelectField label="Role" value={editForm.role} disabled={!canChangeRole} onChange={setField("role")}>
                           {Object.entries(ROLE_LABELS)
                             .filter(([value]) => ["ADMIN", "CEO", "HR", "MANAGEMENT", "DEPARTMENT_HEAD", "IT_MANAGER", "EMPLOYEE"].includes(value))
+                            // HR can't hand out the owner-tier roles.
+                            .filter(([value]) => canChangeRoleAndStatus || !["ADMIN", "CEO"].includes(value) || value === editForm.role)
                             .filter(([value]) => value !== "CEO" || employee.role === "CEO" || (managerOptions || []).filter((m) => m.role === "CEO").length < 3)
                             .map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                         </SelectField>
