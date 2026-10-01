@@ -624,7 +624,7 @@ export default function Dashboard() {
               }}
             >
               {greetingFor(clock.hour24)},{" "}
-              {user?.name?.split(" ")[0] ||
+              {user?.name?.trim() ||
                 "there"}
             </h1>
 

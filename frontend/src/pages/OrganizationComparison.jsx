@@ -47,7 +47,7 @@ export default function OrganizationComparison() {
               </div>
               {o.isMain && (
                 <span className="rounded-full bg-accent/10 px-2 py-1 text-[9px] font-semibold text-accent">
-                  Main company
+                  {o.isPrimaryMain === false ? "Main company (second)" : "Main company"}
                 </span>
               )}
             </div>

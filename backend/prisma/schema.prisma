@@ -31,6 +31,9 @@ model Organization {
   workingDaysPerWeek        Int                       @default(5)
   companyId                 String?
   parentOrganizationId      String?
+  // Second main company of the group (CEO-set, at most one per companyId);
+  // the root (id = companyId) is always the first. See utils/organization.js.
+  isCoMain                  Boolean                   @default(false)
   geofenceEnabled           Boolean                   @default(false)
   officeLatitude            Decimal?                  @db.Decimal(10, 7)
   officeLongitude           Decimal?                  @db.Decimal(10, 7)

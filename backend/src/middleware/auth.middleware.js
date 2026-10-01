@@ -1,9 +1,12 @@
 const { verifyToken } = require("../utils/jwt")
 const prisma = require("../lib/prisma")
 const { MANAGEMENT_ROLES, hasModuleAccess } = require("../utils/roles")
+const { MAIN_COMPANY_SELECT, canSwitchCompanyWide } = require("../utils/organization")
 
 // Organization switching is intentionally asymmetric:
-// - MAIN COMPANY ADMIN: may switch to any active organization in the company.
+// - MAIN COMPANY ADMIN (either main company): may switch to any active
+//   organization in the company. Same for a main-company IT_MANAGER
+//   (inventory modules only).
 // - CEO: keeps the existing company-wide switching behavior.
 // - SUB-ORGANIZATION ADMIN: is locked to their own organization.
 // - All other roles: are locked to their own organization.
@@ -17,12 +20,7 @@ async function applyOrganizationScope(req) {
   const role = req.user.role
   const current = await prisma.organization.findUnique({
     where: { id: req.user.organizationId },
-    select: {
-      id: true,
-      companyId: true,
-      parentOrganizationId: true,
-      archivedAt: true,
-    },
+    select: { ...MAIN_COMPANY_SELECT, archivedAt: true },
   })
 
   if (!current) {
@@ -32,24 +30,19 @@ async function applyOrganizationScope(req) {
   }
 
   const companyId = current.companyId || current.id
-  const isMainCompany =
-    !current.parentOrganizationId &&
-    (!current.companyId || current.companyId === current.id)
 
   // Selecting the user's own organization is always safe.
   if (selectedOrganizationId === current.id) return
 
-  // Only a MAIN COMPANY ADMIN, a CEO, or a MAIN COMPANY IT_MANAGER may switch
-  // to another organization. In particular, an ADMIN/IT_MANAGER belonging to
+  // Only a CEO, or an ADMIN / IT_MANAGER whose home organization is a main
+  // company (the primary one or the CEO-chosen second one), may switch to
+  // another organization. In particular, an ADMIN/IT_MANAGER belonging to
   // a sub-organization cannot use a forged X-Organization-Id header to read
   // or mutate another organization. IT_MANAGER's role-based nav/data access
   // stays inventory-scoped regardless of which organization is selected —
   // this only controls which organization's data they're allowed to select.
-  const canSwitchCompanyWide =
-    role === "CEO" ||
-    ((role === "ADMIN" || role === "IT_MANAGER") && isMainCompany)
-
-  if (!canSwitchCompanyWide) {
+  // HR and all other roles are always locked to their own organization.
+  if (!canSwitchCompanyWide(role, current)) {
     const error = new Error(
       "You do not have access to another organization"
     )

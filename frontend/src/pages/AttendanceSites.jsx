@@ -62,10 +62,8 @@ export default function AttendanceSites() {
   const { user, organization, organizations } = useAuth()
   const queryClient = useQueryClient()
   const canManage = hasModuleAccess(user?.role, "attendance")
-  const isMainCompanyAdmin = user?.role === "ADMIN" && (
-    !organization?.parentOrganizationId &&
-    (!organization?.companyId || organization?.companyId === organization?.id)
-  )
+  // Either main company (primary or the CEO-chosen second one) — from the API.
+  const isMainCompanyAdmin = user?.role === "ADMIN" && !!organization?.isMain
   const [form, setForm] = useState(() => initialForm(organization?.id, organization?.timezone))
   const [error, setError] = useState("")
   const [editingId, setEditingId] = useState(null)

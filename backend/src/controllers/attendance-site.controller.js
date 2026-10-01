@@ -2,6 +2,7 @@ const crypto = require("crypto")
 const { Prisma } = require("@prisma/client")
 const prisma = require("../lib/prisma")
 const { distanceMeters } = require("../utils/geo")
+const { MAIN_COMPANY_SELECT, isMainOrganization } = require("../utils/organization")
 const { normalizeBoundary, siteDistance, polygonCentroid, polygonPerimeterMeters, polygonAreaSqMeters } = require("../utils/site-geofence")
 
 const MANAGEMENT = ["ADMIN", "CEO", "HR", "MANAGEMENT", "DEPARTMENT_HEAD"]
@@ -17,23 +18,17 @@ function id() {
 async function getOrganizationScope(req) {
   const current = await prisma.organization.findUnique({
     where: { id: req.user.organizationId },
-    select: {
-      id: true,
-      companyId: true,
-      parentOrganizationId: true,
-      archivedAt: true,
-    },
+    select: { ...MAIN_COMPANY_SELECT, archivedAt: true },
   })
 
   if (!current || current.archivedAt) return null
 
   const companyId = current.companyId || current.id
-  const isMainCompany =
-    !current.parentOrganizationId &&
-    (!current.companyId || current.companyId === current.id)
+  const isMainCompany = isMainOrganization(current)
 
   // ADMIN gets company-wide organization scope only when their own account
-  // belongs to the main company. A sub-company ADMIN is organization-scoped.
+  // belongs to a main company (primary or second). A sub-company ADMIN is
+  // organization-scoped.
   const companyWideAdmin = req.user.role === "ADMIN" && isMainCompany
 
   // CEO keeps existing company-wide behavior.

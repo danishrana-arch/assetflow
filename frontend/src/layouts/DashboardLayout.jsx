@@ -59,7 +59,11 @@ export default function DashboardLayout() {
       >
         <div className="mx-auto w-full max-w-[1600px] min-w-0">
           <div className="mb-5 hidden items-center justify-between gap-4 lg:flex">
-            <GlobalSearch className="w-full max-w-[430px]" />
+            {/* Search bar with the notification bell right beside it. */}
+            <div className="flex min-w-0 flex-1 items-center gap-2">
+              <GlobalSearch className="w-full max-w-[430px]" />
+              <NotificationBell className="h-10 w-10 shrink-0 border border-border bg-surface/90 shadow-card backdrop-blur-xl" />
+            </div>
             <div className="flex shrink-0 items-center gap-2">
               {showCompanySwitcher && (
                 <div className="rounded-2xl border border-border bg-surface/90 p-1.5 shadow-card backdrop-blur-xl">
@@ -67,7 +71,6 @@ export default function DashboardLayout() {
                 </div>
               )}
               <RoleBadge className="border border-border bg-surface/90 shadow-card backdrop-blur-xl" />
-              <NotificationBell className="border border-border bg-surface/90 shadow-card backdrop-blur-xl" />
             </div>
           </div>
           <Outlet />

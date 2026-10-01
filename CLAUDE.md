@@ -2010,6 +2010,41 @@ Verified live: October 6 rows → 2.
   non-inventory parts (calendar/events, Project Tracker, alerts), with Latest
   Assets and Open Support Tickets cards instead.
 
+## Post-module addition: second main company (2026-10-01)
+
+- A company group (orgs sharing `companyId`) can have **two main
+  companies**: the root (id = companyId, "primary") plus one CEO-chosen
+  `Organization.isCoMain` (e.g. one office abroad, one in-country).
+  Migration `20261001140000_organization_co_main` (additive boolean) —
+  **deployed**; JS client regenerated (engine DLL hit the usual EPERM).
+- All main-company checks now go through `backend/src/utils/organization.js`
+  (`isPrimaryMain`, `isMainOrganization`, `canSwitchCompanyWide`,
+  `canReportCompanyWide`, `MAIN_COMPANY_SELECT`) — used by
+  `applyOrganizationScope`, `canSeeCompanyOrganizations`, the organization
+  controller (list / create / archive / compare / `isMain` flags),
+  attendance sites, HR reports and the dashboard. Rule: CEO always
+  company-wide; ADMIN and IT_MANAGER of **either** main company switch
+  company-wide (IT stays inventory-only via its module list); HR and all
+  other roles locked to their own org.
+- `PATCH /organization/company/second-main` `{ organizationId | null }`,
+  CEO-only, max one per group (setting a new one clears the old; the
+  primary can't be chosen; another group's org → 404). Promoting the second
+  main via `set-main` clears its flag. The second main can't be archived
+  until it's unset. Org payloads carry `isMain`, `isPrimaryMain`, `isCoMain`.
+- UI: Settings → Company & Organizations → "Second main company" select +
+  info message (CEO edits; ADMIN read-only); labels "Main company
+  (second)" in Settings and Organization Comparison. `AttendanceSites.jsx`
+  uses `organization.isMain` instead of its own copy of the rule.
+- **Fixed along the way**: `GET /dashboard/executive` and
+  `/dashboard/attendance-anomalies` with `?scope=company` returned
+  company-wide data to *any* ADMIN, including sub-company ADMINs; now
+  `canReportCompanyWide` (CEO, or ADMIN whose home org is a main company).
+- Verified 33/35 API (2 were test-side: `/leaves` is a self-list, and the
+  only other sub-company ADMIN belongs to an archived org) + 11/11
+  Playwright on Settings; the test set/cleared the flag and left **no second
+  main company set** — the CEO picks it in Settings. Left behind: a few
+  `organization.second_main_changed` audit rows from the test.
+
 ## Automated RBAC test run (2026-09-28)
 
 There's no automated test suite in either app (`npm test` isn't

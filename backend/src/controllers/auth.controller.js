@@ -8,6 +8,7 @@ const { logAudit } = require("../utils/audit")
 const { isValidTimeZone } = require("../utils/timezone")
 const { sendEmail, appUrl, escapeHtml } = require("../utils/mailer")
 const { createNotification } = require("../utils/notifications")
+const { isPrimaryMain, isMainOrganization, canSwitchCompanyWide } = require("../utils/organization")
 
 // Failed-login alerting: after MAX_FAILED_LOGINS wrong passwords within
 // FAILED_LOGIN_WINDOW_MS, the account owner is emailed (and gets an in-app
@@ -60,7 +61,9 @@ function organizationSummary(organization) {
     slug: organization.slug,
     companyId: organization.companyId,
     parentOrganizationId: organization.parentOrganizationId,
-    isMain: organization.id === organization.companyId,
+    isMain: isMainOrganization(organization),
+    isPrimaryMain: isPrimaryMain(organization),
+    isCoMain: !!organization.isCoMain,
     primaryColor: organization.primaryColor,
     accentColor: organization.accentColor,
     theme: organization.theme,
@@ -71,7 +74,8 @@ function organizationSummary(organization) {
 
 // CEO can always see every organization in the company. A main-company
 // ADMIN or a main-company IT_MANAGER gets the same company-wide list, but
-// only when their own home organization *is* the main company — a
+// only when their own home organization *is* a main company (the primary
+// one or the CEO-chosen second one) — a
 // sub-organization's ADMIN or IT_MANAGER stays locked to their own org
 // (see applyOrganizationScope in auth.middleware.js, which is the actual
 // enforcement point — this just decides what the org-switcher shows, and
@@ -79,11 +83,7 @@ function organizationSummary(organization) {
 // who could see other orgs here but not switch into them would just hit a
 // 403 after picking one).
 function canSeeCompanyOrganizations(user) {
-  if (user.role === "CEO") return true
-  if (["ADMIN", "IT_MANAGER"].includes(user.role)) {
-    return user.organization.id === user.organization.companyId
-  }
-  return false
+  return canSwitchCompanyWide(user.role, user.organization)
 }
 
 async function getCompanyOrganizations(companyId) {
@@ -95,6 +95,7 @@ async function getCompanyOrganizations(companyId) {
       slug: true,
       companyId: true,
       parentOrganizationId: true,
+      isCoMain: true,
       primaryColor: true,
       accentColor: true,
       theme: true,

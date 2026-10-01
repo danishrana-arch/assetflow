@@ -2,6 +2,7 @@ const prisma = require("../lib/prisma")
 const { logAudit } = require("../utils/audit")
 const { encryptField, decryptField } = require("../utils/crypto")
 const { isValidTimeZone } = require("../utils/timezone")
+const { MAIN_COMPANY_SELECT, isPrimaryMain, isMainOrganization, canSwitchCompanyWide } = require("../utils/organization")
 
 function slugify(name) {
   return name
@@ -15,7 +16,8 @@ function safeOrganization(organization) {
   const { payrollAccountNumber: _payrollAccountNumber, ...safe } = organization
   return {
     ...safe,
-    isMain: organization.id === organization.companyId,
+    isMain: isMainOrganization(organization),
+    isPrimaryMain: isPrimaryMain(organization),
   }
 }
 
@@ -24,28 +26,18 @@ async function listCompanyOrganizations(req, res, next) {
     const { role, organizationId } = req.user
     const current = await prisma.organization.findUnique({
       where: { id: organizationId },
-      select: {
-        id: true,
-        companyId: true,
-        parentOrganizationId: true,
-        archivedAt: true,
-      },
+      select: { ...MAIN_COMPANY_SELECT, archivedAt: true },
     })
 
     if (!current || current.archivedAt) {
       return res.status(404).json({ error: "Organization not found" })
     }
 
-    const isMainCompany =
-      !current.parentOrganizationId &&
-      (!current.companyId || current.companyId === current.id)
-
-    // A sub-organization ADMIN must only ever see their own organization.
-    // CEO and MAIN COMPANY ADMIN may see the active organizations in their company.
-    const canViewCompanyOrganizations =
-      role === "CEO" || (role === "ADMIN" && isMainCompany)
-
-    if (!canViewCompanyOrganizations) {
+    // A sub-organization ADMIN / IT_MANAGER (and HR, everyone else) only ever
+    // sees their own organization. CEO, and ADMIN / IT_MANAGER of either main
+    // company, see every active organization in the company — the same rule
+    // applyOrganizationScope enforces.
+    if (!canSwitchCompanyWide(role, current)) {
       const organization = await prisma.organization.findUnique({
         where: { id: organizationId },
       })
@@ -82,19 +74,16 @@ async function createSubOrganization(req, res, next) {
 
     const current = await prisma.organization.findUnique({
       where: { id: organizationId },
-      select: { id: true, companyId: true, parentOrganizationId: true, timezone: true },
+      select: { ...MAIN_COMPANY_SELECT, timezone: true },
     })
     if (!current) return res.status(404).json({ error: "Organization not found" })
 
-    const isMainCompany =
-      !current.parentOrganizationId &&
-      (!current.companyId || current.companyId === current.id)
-
-    if (role === "ADMIN" && !isMainCompany) {
+    if (role === "ADMIN" && !isMainOrganization(current)) {
       return res.status(403).json({
-        error: "Only the main company ADMIN can create organizations",
+        error: "Only a main company ADMIN can create organizations",
       })
     }
+    const companyId = current.companyId || current.id
 
     const base = slugify(name) || "organization"
     let slug = base
@@ -108,19 +97,20 @@ async function createSubOrganization(req, res, next) {
       data: {
         name,
         slug,
-        companyId: current.companyId,
-        parentOrganizationId: current.companyId,
+        companyId,
+        // Created from the second main company → it sits under that one.
+        parentOrganizationId: current.isCoMain ? current.id : companyId,
         timezone: current.timezone || "Asia/Karachi",
       },
     })
 
     logAudit({
-      organizationId: current.companyId,
+      organizationId: companyId,
       actorId: userId,
       action: "organization.created",
       targetType: "Organization",
       targetId: organization.id,
-      note: `${name} created under company ${current.companyId}`,
+      note: `${name} created under company ${companyId}`,
     })
 
     res.status(201).json(safeOrganization(organization))
@@ -142,8 +132,9 @@ async function getOrganization(req, res, next) {
     if (!organization) return res.status(404).json({ error: "Organization not found" })
 
     const { payrollAccountNumber, ...rest } = organization
-    if (role !== "CEO") return res.json({ ...rest, isMain: organization.id === organization.companyId })
-    res.json({ ...rest, isMain: organization.id === organization.companyId, payrollAccountNumber: decryptField(payrollAccountNumber) })
+    const main = { isMain: isMainOrganization(organization), isPrimaryMain: isPrimaryMain(organization) }
+    if (role !== "CEO") return res.json({ ...rest, ...main })
+    res.json({ ...rest, ...main, payrollAccountNumber: decryptField(payrollAccountNumber) })
   } catch (err) {
     next(err)
   }
@@ -337,27 +328,26 @@ async function archiveSubOrganization(req, res, next) {
     const targetId = req.params.id
     const current = await prisma.organization.findFirst({
       where: { id: organizationId, archivedAt: null },
-      select: { id: true, companyId: true, parentOrganizationId: true },
+      select: MAIN_COMPANY_SELECT,
     })
     if (!current) return res.status(404).json({ error: "Current organization not found" })
 
-    const isMainCompany =
-      !current.parentOrganizationId &&
-      (!current.companyId || current.companyId === current.id)
-
-    if (role === "ADMIN" && !isMainCompany) {
+    if (role === "ADMIN" && !isMainOrganization(current)) {
       return res.status(403).json({
-        error: "Only the main company ADMIN can remove organizations",
+        error: "Only a main company ADMIN can remove organizations",
       })
     }
 
     const target = await prisma.organization.findFirst({
-      where: { id: targetId, companyId: current.companyId, archivedAt: null },
-      select: { id: true, name: true, companyId: true },
+      where: { id: targetId, companyId: current.companyId || current.id, archivedAt: null },
+      select: { ...MAIN_COMPANY_SELECT, name: true },
     })
     if (!target) return res.status(404).json({ error: "Subcompany not found" })
-    if (target.id === target.companyId) {
+    if (isPrimaryMain(target)) {
       return res.status(400).json({ error: "The main company cannot be deleted" })
+    }
+    if (target.isCoMain) {
+      return res.status(400).json({ error: "This is the second main company — a CEO must remove its main-company status first" })
     }
 
     // Keep historical payroll, attendance, projects and audit data intact.
@@ -427,7 +417,8 @@ async function setMainCompany(req, res, next) {
       }),
       prisma.organization.update({
         where: { id: target.id },
-        data: { companyId: target.id, parentOrganizationId: null },
+        // If the second main company is promoted, it is now the primary one.
+        data: { companyId: target.id, parentOrganizationId: null, isCoMain: false },
       }),
       prisma.organization.update({
         where: { id: companyId },
@@ -450,6 +441,68 @@ async function setMainCompany(req, res, next) {
   }
 }
 
+// CEO-only: choose (or clear) the SECOND main company of the group — e.g.
+// one office abroad and one in-country. Its ADMIN and IT_MANAGER then get the
+// same company-wide organization switching as the primary main company's
+// (IT stays inventory-only). At most one per company: setting a new one
+// clears the previous. Body: { organizationId } or { organizationId: null }.
+async function setSecondMainCompany(req, res, next) {
+  try {
+    const { role, userId, companyId: homeCompanyId, organizationId } = req.user
+    if (role !== "CEO") {
+      return res.status(403).json({ error: "Only a CEO can choose the second main company" })
+    }
+
+    const current = await prisma.organization.findFirst({
+      where: { id: organizationId, archivedAt: null },
+      select: { id: true, companyId: true },
+    })
+    const companyId = current?.companyId || current?.id || homeCompanyId
+    if (!companyId) return res.status(404).json({ error: "Organization not found" })
+
+    const rawTarget = req.body.organizationId
+    const targetId = rawTarget ? String(rawTarget) : null
+    const previous = await prisma.organization.findFirst({
+      where: { companyId, isCoMain: true, archivedAt: null },
+      select: { id: true, name: true },
+    })
+
+    let target = null
+    if (targetId) {
+      target = await prisma.organization.findFirst({
+        where: { id: targetId, companyId, archivedAt: null },
+        select: { ...MAIN_COMPANY_SELECT, name: true },
+      })
+      if (!target) {
+        return res.status(404).json({ error: "Pick an active organization within your company" })
+      }
+      if (isPrimaryMain(target)) {
+        return res.status(400).json({ error: `${target.name} is already the main company` })
+      }
+    }
+
+    await prisma.$transaction([
+      prisma.organization.updateMany({ where: { companyId, isCoMain: true }, data: { isCoMain: false } }),
+      ...(target ? [prisma.organization.update({ where: { id: target.id }, data: { isCoMain: true } })] : []),
+    ])
+
+    logAudit({
+      organizationId: companyId,
+      actorId: userId,
+      action: "organization.second_main_changed",
+      targetType: "Organization",
+      targetId: target?.id || previous?.id || companyId,
+      note: target
+        ? `${target.name} set as second main company${previous && previous.id !== target.id ? ` (replacing ${previous.name})` : ""}`
+        : `Second main company removed${previous ? ` (was ${previous.name})` : ""}`,
+    })
+
+    res.json({ secondMainCompanyId: target?.id || null })
+  } catch (err) {
+    next(err)
+  }
+}
+
 async function getOrganizationComparison(req, res, next) {
   try {
     if (!['ADMIN', 'CEO'].includes(req.user.role)) {
@@ -458,17 +511,13 @@ async function getOrganizationComparison(req, res, next) {
 
     const current = await prisma.organization.findUnique({
       where: { id: req.user.organizationId },
-      select: { id: true, companyId: true, parentOrganizationId: true },
+      select: MAIN_COMPANY_SELECT,
     })
 
     if (!current) return res.status(404).json({ error: 'Organization not found' })
 
-    const isMainCompany =
-      !current.parentOrganizationId &&
-      (!current.companyId || current.companyId === current.id)
-
-    if (req.user.role === 'ADMIN' && !isMainCompany) {
-      return res.status(403).json({ error: 'Only the main company ADMIN can compare organizations' })
+    if (req.user.role === 'ADMIN' && !isMainOrganization(current)) {
+      return res.status(403).json({ error: 'Only a main company ADMIN can compare organizations' })
     }
 
     const companyId = current.companyId || current.id
@@ -544,7 +593,8 @@ async function getOrganizationComparison(req, res, next) {
       return {
         id: org.id,
         name: org.name,
-        isMain: org.id === org.companyId,
+        isMain: isMainOrganization(org),
+        isPrimaryMain: isPrimaryMain(org),
         employees,
         presentToday,
         assets,
@@ -565,4 +615,4 @@ async function getOrganizationComparison(req, res, next) {
   }
 }
 
-module.exports = { getOrganization, updateOrganization, listCompanyOrganizations, createSubOrganization, archiveSubOrganization, getOrganizationComparison, setMainCompany }
+module.exports = { getOrganization, updateOrganization, listCompanyOrganizations, createSubOrganization, archiveSubOrganization, getOrganizationComparison, setMainCompany, setSecondMainCompany }

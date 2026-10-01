@@ -1,6 +1,7 @@
 const prisma = require("../lib/prisma")
 const { notifyUsers } = require("../utils/notifications")
 const { toDateOnly } = require("../utils/date")
+const { canReportCompanyWide } = require("../utils/organization")
 
 async function getStats(req, res, next) {
   try {
@@ -227,8 +228,9 @@ module.exports = { getStats, getRecentActivity, getLatestAssets, getInventoryAct
 
 async function getExecutiveOverview(req, res, next) {
   try {
-    const { organizationId, companyId, role } = req.user
-    const companyScope = ["ADMIN", "CEO"].includes(role) && String(req.query.scope || "").toLowerCase() === "company"
+    const { organizationId, companyId, role, userId } = req.user
+    // Sub-company ADMINs used to get company-wide data here too.
+    const companyScope = String(req.query.scope || "").toLowerCase() === "company" && (await canReportCompanyWide(prisma, userId, role))
     const orgWhere = companyScope ? { companyId, archivedAt: null } : { id: organizationId, archivedAt: null }
     const organizations = await prisma.organization.findMany({
       where: orgWhere,
@@ -268,9 +270,9 @@ async function getExecutiveOverview(req, res, next) {
 
 async function getAttendanceAnomalies(req, res, next) {
   try {
-    const { organizationId, companyId, role } = req.user
+    const { organizationId, companyId, role, userId } = req.user
     let organizationIds = [organizationId]
-    if (["ADMIN", "CEO"].includes(role) && String(req.query.scope || "").toLowerCase() === "company") {
+    if (String(req.query.scope || "").toLowerCase() === "company" && (await canReportCompanyWide(prisma, userId, role))) {
       organizationIds = (await prisma.organization.findMany({
         where: { companyId, archivedAt: null }, select: { id: true },
       })).map((o) => o.id)
