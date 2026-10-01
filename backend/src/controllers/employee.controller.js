@@ -3,8 +3,9 @@ const prisma = require("../lib/prisma")
 const { MANAGEMENT_ROLES, ASSIGNABLE_ROLES, MAX_CEO_COUNT, EMPLOYEE_DIRECTORY_ROLES, hasModuleAccess } = require("../utils/roles")
 const { encryptField, decryptField } = require("../utils/crypto")
 const { logAudit } = require("../utils/audit")
-const { parseCsv } = require("../utils/csv")
 const { dateKeyInTimeZone } = require("../utils/timezone")
+const { sortRows } = require("../utils/sort")
+const { readSheet, mapHeaders, SheetError, ACCEPTED_LABEL } = require("../utils/sheet")
 
 function stripSensitive(user, canSeeSensitive) {
   const { password, cnic, bankAccountNumber, phone, address, personalEmail, fatherName, ...rest } = user
@@ -70,21 +71,46 @@ async function listEmployees(req, res, next) {
             : {}),
         }
 
+    // Directory page filters/sorting (all optional; unknown values ignored).
+    if (where.status && !["ACTIVE", "ON_LEAVE", "LEFT_COMPANY"].includes(where.status)) delete where.status
+    if (req.query.role && ASSIGNABLE_ROLES.includes(req.query.role)) where.role = req.query.role
+    if (req.query.workLocationType && ["OFFICE", "FIELD"].includes(req.query.workLocationType)) {
+      where.workLocationType = req.query.workLocationType
+    }
+    // Sorted in JS (case-insensitive) — see utils/sort.js.
+    const order = req.query.order === "desc" ? "desc" : "asc"
+    const STATUS_ORDER = ["ACTIVE", "ON_LEAVE", "LEFT_COMPANY"]
+    const SORT_VALUES = {
+      name: (u) => u.name,
+      manager: (u) => u.manager?.name,
+      joiningDate: (u) => u.joiningDate?.getTime(),
+      status: (u) => STATUS_ORDER.indexOf(u.status),
+      department: (u) => u.department?.name,
+    }
+    const sortValue = SORT_VALUES[req.query.sort] || SORT_VALUES.name
+    const include = {
+      department: true,
+      assignedAssets: true,
+      manager: { select: { id: true, name: true } },
+    }
+
     if (page) {
       const pageNum = Math.max(1, parseInt(page, 10) || 1)
       const size = Math.min(100, Math.max(1, parseInt(pageSize, 10) || 25))
+      // Stat cards: counts per status for the same filters, ignoring the status filter.
+      const { status: _ignored, ...countWhere } = where
 
-      const [total, employees, ceoCount] = await Promise.all([
-        prisma.user.count({ where }),
-        prisma.user.findMany({
-          where,
-          include: { department: true, assignedAssets: true },
-          orderBy: { name: "asc" },
-          skip: (pageNum - 1) * size,
-          take: size,
-        }),
+      // One parallel round trip: org rosters are small, so load the filtered
+      // set and sort/page it in memory.
+      const [rows, ceoCount, statusGroups] = await Promise.all([
+        prisma.user.findMany({ where, include }),
         prisma.user.count({ where: { organizationId, role: "CEO" } }),
+        prisma.user.groupBy({ by: ["status"], where: countWhere, _count: { _all: true } }),
       ])
+      const total = rows.length
+      const employees = sortRows(rows, sortValue, order, (u) => u.name).slice((pageNum - 1) * size, pageNum * size)
+      const statusCounts = { ACTIVE: 0, ON_LEAVE: 0, LEFT_COMPANY: 0 }
+      for (const g of statusGroups) statusCounts[g.status] = g._count._all
 
       return res.json({
         data: requesterRole === "IT_MANAGER"
@@ -95,14 +121,11 @@ async function listEmployees(req, res, next) {
         total,
         totalPages: Math.max(1, Math.ceil(total / size)),
         ceoCount,
+        statusCounts,
       })
     }
 
-    const employees = await prisma.user.findMany({
-      where,
-      include: { department: true, assignedAssets: true },
-      orderBy: { name: "asc" },
-    })
+    const employees = sortRows(await prisma.user.findMany({ where, include }), sortValue, order, (u) => u.name)
 
     // List views never include CNIC — only the single-employee view does,
     // and even then only for the employee themselves or management.
@@ -604,6 +627,24 @@ async function deleteEmployee(req, res, next) {
 
 const IMPORT_COLUMNS = ["name", "email", "personalEmail", "phone", "fatherName", "education", "currentUniversity", "linkedinUrl", "shiftStart", "shiftEnd", "department", "cnic", "dob", "address", "skill", "seniorityLevel", "role"]
 const VALID_LEVELS = ["INTERN", "JUNIOR", "SENIOR", "LEAD"]
+const EMPLOYEE_IMPORT_ALIASES = {
+  name: ["full name", "employee name", "employee", "name of employee"],
+  email: ["email address", "e-mail", "work email", "company email", "official email", "office email"],
+  personalEmail: ["personal email address", "private email"],
+  phone: ["phone number", "mobile", "mobile number", "contact", "contact number", "cell", "whatsapp"],
+  fatherName: ["father's name", "father", "father name"],
+  currentUniversity: ["university", "institute", "college"],
+  linkedinUrl: ["linkedin", "linkedin profile"],
+  shiftStart: ["shift start time", "start time"],
+  shiftEnd: ["shift end time", "end time"],
+  department: ["dept", "team"],
+  cnic: ["cnic number", "national id", "id card", "nic"],
+  dob: ["date of birth", "birth date", "birthday"],
+  address: ["residence", "home address", "address line"],
+  skill: ["skills", "expertise"],
+  seniorityLevel: ["level", "seniority", "grade"],
+  role: ["user role", "access role"],
+}
 
 // Bulk-create employees from a CSV file. Expected header row (any order,
 // case-insensitive): name, email, phone, department, cnic, dob, address,
@@ -611,22 +652,22 @@ const VALID_LEVELS = ["INTERN", "JUNIOR", "SENIOR", "LEAD"]
 // password, same as single-add.
 async function importEmployees(req, res, next) {
   try {
-    if (!req.file) return res.status(400).json({ error: "Upload a .csv file under the 'file' field" })
+    if (!req.file) return res.status(400).json({ error: `Upload a spreadsheet (${ACCEPTED_LABEL}) under the 'file' field` })
 
     const { organizationId, companyId, role: requesterRole } = req.user
-    const text = req.file.buffer.toString("utf8").replace(/^\uFEFF/, "")
-    const rows = parseCsv(text)
-    if (!rows.length) return res.status(400).json({ error: "The uploaded CSV is empty" })
+    let rows
+    try {
+      rows = await readSheet(req.file)
+    } catch (err) {
+      if (err instanceof SheetError) return res.status(400).json({ error: err.message })
+      throw err
+    }
+    if (rows.length < 2) return res.status(400).json({ error: "The sheet needs a header row plus at least one employee row" })
 
-    const headers = rows[0].map((value) => String(value || "").trim().toLowerCase().replace(/\s+/g, ""))
-    const headerMap = {}
-    headers.forEach((header, index) => {
-      const match = IMPORT_COLUMNS.find((column) => column.toLowerCase() === header)
-      if (match) headerMap[match] = index
-    })
+    const headerMap = mapHeaders(rows[0], IMPORT_COLUMNS, EMPLOYEE_IMPORT_ALIASES)
 
     if (headerMap.name === undefined || headerMap.email === undefined) {
-      return res.status(400).json({ error: "The CSV must have at least 'name' and 'email' columns" })
+      return res.status(400).json({ error: "The sheet must have at least a 'name' and an 'email' column" })
     }
 
     const departments = await prisma.department.findMany({ where: { organizationId } })
@@ -648,7 +689,8 @@ async function importEmployees(req, res, next) {
         continue
       }
 
-      const existing = await prisma.user.findFirst({ where: { organizationId, email } })
+      // User.email is globally unique, so check across every org (case-insensitive).
+      const existing = await prisma.user.findFirst({ where: { email: { equals: email, mode: "insensitive" } } })
       if (existing) {
         skipped.push({ row: rowNumber, reason: `Email already exists (${email})` })
         continue
@@ -658,8 +700,11 @@ async function importEmployees(req, res, next) {
       if (headerMap.role !== undefined) {
         const raw = valueAt(row, "role").toUpperCase().replace(/\s+/g, "_")
         if (raw && ASSIGNABLE_ROLES.includes(raw)) {
-          if (raw !== "EMPLOYEE" && !["ADMIN", "CEO"].includes(requesterRole)) {
-            skipped.push({ row: rowNumber, reason: "Only the owner or a CEO can import management roles — imported as EMPLOYEE" })
+          // Same rule as single add (inviteEmployee): ADMIN/CEO any role,
+          // HR any non-owner role.
+          const hrCanAssign = requesterRole === "HR" && !["ADMIN", "CEO"].includes(raw)
+          if (raw !== "EMPLOYEE" && !["ADMIN", "CEO"].includes(requesterRole) && !hrCanAssign) {
+            skipped.push({ row: rowNumber, reason: "Only an Admin or CEO can import Admin/CEO accounts — imported as EMPLOYEE" })
           } else if (raw === "CEO") {
             const ceoCount = await prisma.user.count({ where: { organizationId, role: "CEO" } })
             if (ceoCount >= MAX_CEO_COUNT) {

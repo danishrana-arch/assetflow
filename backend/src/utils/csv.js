@@ -1,4 +1,6 @@
-function parseCsv(text) {
+// `delimiter` defaults to ","; utils/sheet.js passes "\t" or ";" for TSV
+// and European-locale Excel CSVs.
+function parseCsv(text, delimiter = ",") {
   const rows = []
   let row = []
   let field = ""
@@ -25,7 +27,7 @@ function parseCsv(text) {
 
     if (char === '"') {
       inQuotes = true
-    } else if (char === ",") {
+    } else if (char === delimiter) {
       row.push(field.trim())
       field = ""
     } else if (char === "\n") {

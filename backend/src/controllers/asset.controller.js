@@ -1,16 +1,91 @@
 const prisma = require("../lib/prisma")
 const { logAudit } = require("../utils/audit")
-const { parseCsv } = require("../utils/csv")
+const { sortRows } = require("../utils/sort")
+const { readSheet, mapHeaders, SheetError, ACCEPTED_LABEL } = require("../utils/sheet")
 const { createNotification } = require("../utils/notifications")
+
+const ASSET_STATUSES = ["ASSIGNED", "AVAILABLE", "REPAIR", "LOST", "DISPOSED"]
+
+// List views only need who holds the asset — never the holder's password
+// hash or encrypted PII (the old `assignedTo: true` sent the whole User row).
+const ASSET_LIST_INCLUDE = {
+  assignedTo: {
+    select: { id: true, name: true, email: true, role: true, designation: true, photoUrl: true, department: { select: { name: true } } },
+  },
+  department: true,
+}
+
+// Inventory page header: status totals, this-month growth, a 6-month total
+// trend, and the latest lifecycle activity across the org's assets.
+async function getInventorySummary(req, res, next) {
+  try {
+    const { organizationId } = req.user
+    const now = new Date()
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+    const trendStart = new Date(now.getFullYear(), now.getMonth() - 5, 1)
+    const activityLimit = Math.min(50, Math.max(1, parseInt(req.query.activity, 10) || 6))
+
+    const [byStatus, addedThisMonth, beforeTrend, created, activity] = await Promise.all([
+      prisma.asset.groupBy({ by: ["status"], where: { organizationId }, _count: { _all: true } }),
+      prisma.asset.count({ where: { organizationId, createdAt: { gte: monthStart } } }),
+      prisma.asset.count({ where: { organizationId, createdAt: { lt: trendStart } } }),
+      prisma.asset.findMany({ where: { organizationId, createdAt: { gte: trendStart } }, select: { createdAt: true } }),
+      prisma.lifecycleEvent.findMany({
+        where: { asset: { organizationId } },
+        orderBy: { occurredAt: "desc" },
+        take: activityLimit,
+        include: {
+          asset: { select: { id: true, name: true, category: true } },
+          actor: { select: { id: true, name: true } },
+        },
+      }),
+    ])
+
+    const statusCounts = Object.fromEntries(ASSET_STATUSES.map((s) => [s, 0]))
+    for (const g of byStatus) statusCounts[g.status] = g._count._all
+    const total = Object.values(statusCounts).reduce((a, b) => a + b, 0)
+
+    // Cumulative asset count at the end of each of the last 6 months
+    // (deleted assets aren't tracked, so this is "assets that still exist").
+    const trend = []
+    let running = beforeTrend
+    for (let i = 0; i < 6; i++) {
+      const start = new Date(now.getFullYear(), now.getMonth() - 5 + i, 1)
+      const end = new Date(now.getFullYear(), now.getMonth() - 4 + i, 1)
+      running += created.filter((a) => a.createdAt >= start && a.createdAt < end).length
+      trend.push({ month: `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}`, total: running })
+    }
+
+    res.json({
+      total,
+      statusCounts,
+      addedThisMonth,
+      totalLastMonth: total - addedThisMonth,
+      trend,
+      activity: activity.map((e) => ({
+        id: e.id,
+        type: e.type,
+        note: e.note,
+        occurredAt: e.occurredAt,
+        asset: e.asset,
+        actor: e.actor,
+      })),
+    })
+  } catch (err) {
+    next(err)
+  }
+}
 
 async function listAssets(req, res, next) {
   try {
     const { organizationId } = req.user
     const { q, status, departmentId, category, warranty, page, pageSize } = req.query
 
+    // status may be one value or a comma list (e.g. "LOST,DISPOSED").
+    const statuses = String(status || "").split(",").filter((s) => ASSET_STATUSES.includes(s))
     const where = {
       organizationId,
-      ...(status ? { status } : {}),
+      ...(statuses.length ? { status: { in: statuses } } : {}),
       ...(departmentId ? { departmentId } : {}),
       ...(category ? { category } : {}),
     }
@@ -20,7 +95,23 @@ async function listAssets(req, res, next) {
       const in30Days = new Date()
       in30Days.setDate(in30Days.getDate() + 30)
       where.warrantyEnd = { gte: new Date(), lte: in30Days }
+    } else if (warranty === "expired") {
+      where.warrantyEnd = { lt: new Date() }
     }
+
+    // Column sorts are case-insensitive, done in JS (utils/sort.js); the
+    // default (most recently updated first) stays a DB sort.
+    const order = req.query.order === "asc" ? "asc" : "desc"
+    const SORT_VALUES = {
+      serialNumber: (a) => a.serialNumber,
+      name: (a) => a.name,
+      category: (a) => a.category,
+      assignedTo: (a) => a.assignedTo?.name,
+      status: (a) => a.status,
+      purchaseDate: (a) => a.purchaseDate?.getTime(),
+    }
+    const sortValue = SORT_VALUES[req.query.sort]
+    const orderBy = { updatedAt: "desc" }
 
     if (q) {
       const query = q.trim().toLowerCase()
@@ -46,16 +137,23 @@ async function listAssets(req, res, next) {
       const pageNum = Math.max(1, parseInt(page, 10) || 1)
       const size = Math.min(100, Math.max(1, parseInt(pageSize, 10) || 25))
 
-      const [total, assets] = await Promise.all([
-        prisma.asset.count({ where }),
-        prisma.asset.findMany({
-          where,
-          include: { assignedTo: true, department: true },
-          orderBy: { updatedAt: "desc" },
-          skip: (pageNum - 1) * size,
-          take: size,
-        }),
-      ])
+      let total, assets
+      if (sortValue) {
+        const rows = await prisma.asset.findMany({ where, orderBy, include: ASSET_LIST_INCLUDE })
+        total = rows.length
+        assets = sortRows(rows, sortValue, order, (a) => a.name).slice((pageNum - 1) * size, pageNum * size)
+      } else {
+        ;[total, assets] = await Promise.all([
+          prisma.asset.count({ where }),
+          prisma.asset.findMany({
+            where,
+            include: ASSET_LIST_INCLUDE,
+            orderBy,
+            skip: (pageNum - 1) * size,
+            take: size,
+          }),
+        ])
+      }
 
       return res.json({
         data: assets,
@@ -66,11 +164,8 @@ async function listAssets(req, res, next) {
       })
     }
 
-    const assets = await prisma.asset.findMany({
-      where,
-      include: { assignedTo: true, department: true },
-      orderBy: { updatedAt: "desc" },
-    })
+    let assets = await prisma.asset.findMany({ where, include: ASSET_LIST_INCLUDE, orderBy })
+    if (sortValue) assets = sortRows(assets, sortValue, order, (a) => a.name)
 
     res.json(assets)
   } catch (err) {
@@ -86,10 +181,10 @@ async function getAsset(req, res, next) {
     const asset = await prisma.asset.findFirst({
       where: { id, organizationId },
       include: {
-        assignedTo: true,
+        assignedTo: ASSET_LIST_INCLUDE.assignedTo,
         department: true,
         tickets: { orderBy: { createdAt: "desc" } },
-        lifecycleEvents: { orderBy: { occurredAt: "asc" }, include: { actor: true } },
+        lifecycleEvents: { orderBy: { occurredAt: "asc" }, include: { actor: { select: { id: true, name: true } } } },
       },
     })
 
@@ -349,6 +444,17 @@ async function addLifecycleNote(req, res, next) {
 }
 
 const IMPORT_COLUMNS = ["name", "category", "serialNumber", "cpu", "ram", "storage", "purchaseDate", "warrantyEnd", "department"]
+const ASSET_IMPORT_ALIASES = {
+  name: ["asset name", "asset", "item", "item name", "product", "device"],
+  category: ["type", "asset type", "item type", "group"],
+  serialNumber: ["serial", "serial no", "serial #", "s/n", "sn", "asset id", "asset tag", "tag", "imei", "service tag"],
+  cpu: ["processor", "cpu model"],
+  ram: ["memory", "ram size"],
+  storage: ["disk", "hdd", "ssd", "storage size", "hard drive"],
+  purchaseDate: ["purchased", "purchased on", "date of purchase", "purchase", "bought on", "acquired"],
+  warrantyEnd: ["warranty", "warranty end date", "warranty expiry", "warranty expires", "warranty until"],
+  department: ["dept", "team"],
+}
 
 // Bulk-create assets from an uploaded .csv sheet (management only).
 // Expected header row (any order, case-insensitive): name, category,
@@ -356,21 +462,21 @@ const IMPORT_COLUMNS = ["name", "category", "serialNumber", "cpu", "ram", "stora
 // New assets always start life as AVAILABLE, same as adding one by hand.
 async function importAssets(req, res, next) {
   try {
-    if (!req.file) return res.status(400).json({ error: "Upload a .csv file under the 'file' field" })
+    if (!req.file) return res.status(400).json({ error: `Upload a spreadsheet (${ACCEPTED_LABEL}) under the 'file' field` })
 
     const { organizationId, userId } = req.user
-    const text = req.file.buffer.toString("utf8")
-    const rows = parseCsv(text)
+    let rows
+    try {
+      rows = await readSheet(req.file)
+    } catch (err) {
+      if (err instanceof SheetError) return res.status(400).json({ error: err.message })
+      throw err
+    }
     if (rows.length < 2) {
       return res.status(400).json({ error: "The file needs a header row plus at least one data row" })
     }
 
-    const headerMap = {} // column key -> 0-based index
-    rows[0].forEach((cell, idx) => {
-      const key = String(cell || "").trim().toLowerCase().replace(/\s+/g, "")
-      const match = IMPORT_COLUMNS.find((c) => c.toLowerCase() === key)
-      if (match) headerMap[match] = idx
-    })
+    const headerMap = mapHeaders(rows[0], IMPORT_COLUMNS, ASSET_IMPORT_ALIASES) // column key -> 0-based index
     if (headerMap.name === undefined || headerMap.serialNumber === undefined) {
       return res.status(400).json({ error: "The sheet must have at least 'name' and 'serialNumber' columns" })
     }
@@ -422,7 +528,7 @@ async function importAssets(req, res, next) {
             departmentId: deptByName.get(departmentName.toLowerCase()) || null,
             status: "AVAILABLE",
             lifecycleEvents: {
-              create: { type: "PURCHASED", actorId: userId, note: "Added via bulk CSV import" },
+              create: { type: "PURCHASED", actorId: userId, note: "Added via sheet import" },
             },
           },
         })
@@ -432,7 +538,7 @@ async function importAssets(req, res, next) {
       }
     }
 
-    logAudit({ organizationId, actorId: userId, action: "asset.bulk_imported", note: `${created.length} asset(s) via CSV` })
+    logAudit({ organizationId, actorId: userId, action: "asset.bulk_imported", note: `${created.length} asset(s) via sheet import (${req.file.originalname || "file"})` })
     res.json({ createdCount: created.length, skippedCount: skipped.length, created, skipped })
   } catch (err) {
     next(err)
@@ -533,6 +639,7 @@ async function deleteCategory(req, res, next) {
 }
 
 module.exports = {
+  getInventorySummary,
   listAssets,
   listCategories,
   getAsset,

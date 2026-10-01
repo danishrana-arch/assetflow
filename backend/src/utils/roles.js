@@ -48,7 +48,7 @@ const MAX_CEO_COUNT = 3
 const ROLE_MODULES = {
   CEO: ["*"],
   ADMIN: ["*"],
-  HR: ["employees", "employeeForms", "certifications", "attendance", "leave", "hrReports", "expenseClaims"],
+  HR: ["employees", "employeeForms", "certifications", "attendance", "leave", "hrReports", "expenseClaims", "payroll", "payrollReports"],
   MANAGEMENT: ["employees", "projects", "tasks", "attendance", "performance", "reports"],
   DEPARTMENT_HEAD: ["departments", "employees", "attendance", "projects", "tasks", "leave"],
   IT_MANAGER: ["inventory", "assets", "assetAssignments", "assetRequests", "tickets"],

@@ -15,7 +15,8 @@ async function listTickets(req, res, next) {
         ...(priority ? { priority } : {}),
         ...(category ? { category } : {}),
       },
-      include: { raisedBy: true, asset: true },
+      // Never send the raiser's password hash / encrypted PII to the client.
+      include: { raisedBy: { select: { id: true, name: true, email: true, role: true, photoUrl: true } }, asset: true },
       orderBy: { createdAt: "desc" },
     })
 

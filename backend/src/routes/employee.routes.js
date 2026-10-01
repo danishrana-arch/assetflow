@@ -13,6 +13,7 @@ const { resetPassword } = require("../controllers/auth.controller")
 const { requireAuth, requireRole, requireModule, requireModuleOrSelf } = require("../middleware/auth.middleware")
 const { EMPLOYEE_DIRECTORY_ROLES } = require("../utils/roles")
 const { noStore } = require("../middleware/cache.middleware")
+const { isAcceptedSheet, sheetTypeError } = require("../utils/sheet")
 
 const router = express.Router()
 
@@ -21,15 +22,16 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
   fileFilter: (req, file, cb) => {
-    const ok = /csv|comma-separated-values|text\/plain/i.test(file.mimetype) || /\.csv$/i.test(file.originalname)
-    cb(ok ? null : new Error("Only .csv files are supported"), ok)
+    const ok = isAcceptedSheet(file)
+    cb(ok ? null : sheetTypeError(), ok)
   },
 })
 
 router.use(requireAuth)
 
-router.get("/import/template", requireModule("employees"), importTemplate)
-router.post("/import", requireModule("employees"), upload.single("file"), importEmployees)
+// Bulk add follows the same rule as single add: ADMIN/CEO/HR only.
+router.get("/import/template", requireRole("ADMIN", "CEO", "HR"), importTemplate)
+router.post("/import", requireRole("ADMIN", "CEO", "HR"), upload.single("file"), importEmployees)
 
 // IT_MANAGER lacks the "employees" module but still needs this list as a
 // redacted asset-assignment picker — see EMPLOYEE_DIRECTORY_ROLES.

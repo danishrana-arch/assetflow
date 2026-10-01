@@ -371,7 +371,8 @@ function PayrollReview({ month, year, canGenerate, onGenerate, generating, onClo
 
 export default function Payroll() {
   const { user } = useAuth()
-  const canManagePayroll = user?.role === "ADMIN"
+  // ADMIN and HR prepare payroll; the CEO approves and pays (isCeo below).
+  const canManagePayroll = ["ADMIN", "HR"].includes(user?.role)
   const isCeo = user?.role === "CEO"
   const queryClient = useQueryClient()
   const now = new Date()

@@ -11,7 +11,6 @@ import {
   PackageSearch,
   Building2,
   Ticket,
-  BarChart3,
   Download,
   CalendarCheck,
   CalendarDays,
@@ -114,7 +113,6 @@ export default function MobileNav({ open, onClose }) {
               {hasModuleAccess(user?.role, "leave") && <Row to="/leave-requests" icon={ClipboardList} label="Leave Requests" onClick={onClose} />}
               {hasModuleAccess(user?.role, "reports") && (
                 <>
-                  <Row to="/reports" icon={BarChart3} label="Reports" onClick={onClose} />
                   <Row to="/export" icon={Download} label="Export" onClick={onClose} />
                 </>
               )}

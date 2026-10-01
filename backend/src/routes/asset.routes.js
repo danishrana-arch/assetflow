@@ -1,6 +1,7 @@
 const express = require("express");
 const multer = require("multer");
 const {
+  getInventorySummary,
   listAssets,
   listCategories,
   getAsset,
@@ -16,6 +17,7 @@ const {
   deleteCategory,
 } = require("../controllers/asset.controller");
 const { requireAuth, requireManagement, requireInventoryAccess } = require("../middleware/auth.middleware");
+const { isAcceptedSheet, sheetTypeError } = require("../utils/sheet");
 
 const router = express.Router();
 
@@ -24,8 +26,8 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
   fileFilter: (req, file, cb) => {
-    const ok = /csv/.test(file.mimetype) || /\.csv$/i.test(file.originalname)
-    cb(ok ? null : new Error("Only .csv files are supported"), ok)
+    const ok = isAcceptedSheet(file)
+    cb(ok ? null : sheetTypeError(), ok)
   },
 })
 
@@ -34,6 +36,7 @@ router.use(requireAuth);
 router.get("/import/template", requireInventoryAccess, importAssetsTemplate);
 router.post("/import", requireInventoryAccess, upload.single("file"), importAssets);
 
+router.get("/summary", requireInventoryAccess, getInventorySummary);
 router.get("/categories", listCategories);
 router.get("/", listAssets);
 router.get("/:id", getAsset);

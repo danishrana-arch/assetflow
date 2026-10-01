@@ -471,7 +471,6 @@ export default function Dashboard() {
         .then((r) => r.data),
 
     enabled:
-      !isIT &&
       !!range.start &&
       !!range.end,
   })
@@ -567,82 +566,12 @@ export default function Dashboard() {
   }, {})
 
 
-  /* ==========================================================
-     IT MANAGER DASHBOARD
-  ========================================================== */
-
-  if (isIT) {
-    const openTickets = (tickets || []).filter((ticket) =>
-      ["OPEN", "IN_PROGRESS"].includes(ticket.status)
-    ).length
-
-    return (
-      <div className="w-full space-y-4 overflow-x-hidden sm:space-y-5 lg:space-y-6">
-        <section className="card w-full overflow-hidden p-4 sm:p-5 lg:p-6">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted sm:text-xs">
-            IT operations
-          </p>
-          <h2 className="mt-1 text-2xl font-semibold leading-tight text-ink sm:text-[30px]">
-            Welcome back, {user?.name?.split(" ")[0] || "there"}
-          </h2>
-          <p className="mt-1.5 max-w-xl text-xs leading-5 text-muted sm:text-sm">
-            Asset inventory, assignments, requests and support at a glance.
-          </p>
-        </section>
-
-        <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 xl:grid-cols-4">
-          <StatCard label="Total Assets" value={stats?.totalAssets ?? "—"} sublabel="All organization assets" icon={Boxes} tone="blue" />
-          <StatCard label="Assigned" value={stats?.assignedAssets ?? "—"} sublabel="Currently assigned" icon={UserPlus} tone="green" />
-          <StatCard label="Available" value={stats?.availableAssets ?? "—"} sublabel="Ready to assign" icon={Package} tone="cyan" />
-          <StatCard label="Under Repair" value={stats?.assetsUnderRepair ?? "—"} sublabel={`${openTickets} open support tickets`} icon={Wrench} tone="orange" />
-        </section>
-
-        <section className="grid grid-cols-1 gap-4 sm:gap-5 lg:grid-cols-2">
-          <div className="card min-w-0 p-4 sm:p-5 lg:p-6">
-            <SectionHeader title="Recent Asset Activity" />
-            <ul className="mt-4 space-y-3">
-              {(activity || []).slice(0, 6).map((ev) => {
-                const cfg = ACTIVITY_ICONS[ev.type] || ACTIVITY_ICONS.NOTE
-                return (
-                  <li key={ev.id} className="flex min-w-0 items-center gap-3">
-                    <IconChip icon={cfg.icon} tone={cfg.tone} size="md" />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-semibold text-ink">{humanEvent(ev.type)}</p>
-                      <p className="truncate text-xs text-muted">{ev.asset?.name || "—"}</p>
-                    </div>
-                    <span className="shrink-0 text-[11px] text-muted">{formatTime(ev.occurredAt)}</span>
-                  </li>
-                )
-              })}
-              {(!activity || activity.length === 0) && (
-                <li className="text-sm text-muted">No recent asset activity.</li>
-              )}
-            </ul>
-          </div>
-
-          <div className="card min-w-0 p-4 sm:p-5 lg:p-6">
-            <SectionHeader title="Latest Assets" />
-            <ul className="mt-4 space-y-3">
-              {topAssets.map((asset) => {
-                const cfg = CATEGORY_ICON[asset.category] || CATEGORY_ICON.Default
-                return (
-                  <li key={asset.id} className="flex min-w-0 items-center gap-3">
-                    <IconChip icon={cfg.icon} tone={cfg.tone} size="md" />
-                    <div className="min-w-0 flex-1">
-                      <Link to={`/inventory/${asset.id}`} className="block truncate text-sm font-semibold text-ink hover:text-accent">{asset.name}</Link>
-                      <p className="truncate font-mono text-[11px] text-muted">ID:{asset.serialNumber}</p>
-                    </div>
-                    <span className="shrink-0 text-right text-xs font-medium text-muted">{asset.assignedTo?.name ? "Assigned" : "Available"}</span>
-                  </li>
-                )
-              })}
-              {topAssets.length === 0 && <li className="text-sm text-muted">No assets yet.</li>}
-            </ul>
-          </div>
-        </section>
-      </div>
-    )
-  }
+  // IT_MANAGER gets the same dashboard as everyone else, limited to its
+  // inventory modules: no calendar/events or project tracker; latest assets
+  // and support tickets take their place.
+  const openTickets = (tickets || []).filter((ticket) =>
+    ["OPEN", "IN_PROGRESS"].includes(ticket.status)
+  )
 
 
   /* ==========================================================
@@ -664,14 +593,19 @@ export default function Dashboard() {
       <section
         className="glass-panel w-full overflow-hidden"
         onMouseMove={(e) => {
-          // Moves the soft shine (.glass-glow) to the cursor.
+          // Moves the light (.glass-glow / .glass-hotspot / .glass-rim-light)
+          // to the cursor; --gxp drives the diagonal streak across the pane.
           const el = e.currentTarget
           const r = el.getBoundingClientRect()
           el.style.setProperty("--gx", `${e.clientX - r.left}px`)
           el.style.setProperty("--gy", `${e.clientY - r.top}px`)
+          el.style.setProperty("--gxp", `${((e.clientX - r.left) / r.width) * 100}%`)
         }}
       >
         <div className="glass-glow" aria-hidden="true" />
+        <div className="glass-hotspot" aria-hidden="true" />
+        <div className="glass-rim" aria-hidden="true" />
+        <div className="glass-rim-light" aria-hidden="true" />
         <div className="relative z-[2] flex flex-col gap-4 p-4 sm:gap-5 sm:p-5 lg:flex-row lg:items-center lg:justify-between lg:p-6 lg:pr-48">
 
           <div className="min-w-0 pr-12 lg:pr-0">
@@ -727,7 +661,7 @@ export default function Dashboard() {
           PRIMARY STATISTICS
       ======================================================= */}
 
-      <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 xl:grid-cols-3">
+      <section className={`grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 ${isIT ? "xl:grid-cols-4" : "xl:grid-cols-3"}`}>
 
         <StatCard
           label="Total Assets"
@@ -774,6 +708,17 @@ export default function Dashboard() {
             direction: "down",
           }}
         />
+
+        {isIT && (
+          <StatCard
+            label="Under Repair"
+            value={stats?.assetsUnderRepair ?? "—"}
+            sublabel={`${openTickets.length} open support tickets`}
+            icon={Wrench}
+            tone="orange"
+            to="/inventory"
+          />
+        )}
 
       </section>
 
@@ -1119,6 +1064,7 @@ export default function Dashboard() {
       {/* ======================================================
           CALENDAR / EVENTS
       ======================================================= */}
+      {!isIT && (
       <section className="grid grid-cols-1 gap-4 sm:gap-5 lg:grid-cols-[minmax(0,1.65fr)_minmax(280px,1fr)]">
         <div className="card min-w-0 overflow-hidden p-4 sm:p-5 lg:p-6">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -1197,6 +1143,7 @@ export default function Dashboard() {
           </div>
         </div>
       </section>
+      )}
 
       {selectedEvent && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={() => setSelectedEvent(null)}>
@@ -1280,11 +1227,60 @@ export default function Dashboard() {
         </div>
 
 
-        {/* Project Tracker (replaced "Top Assigned Assets") */}
-        <ProjectTracker />
+        {/* Project Tracker (replaced "Top Assigned Assets"); IT sees its latest assets instead */}
+        {isIT ? (
+          <div className="card min-w-0 p-4 sm:p-5 lg:p-6">
+            <SectionHeader title="Latest Assets" action={<Link to="/inventory" className="text-xs font-semibold text-accent">View all</Link>} />
+            <ul className="mt-4 space-y-3">
+              {(latestAssets || []).slice(0, 5).map((asset) => {
+                const cfg = CATEGORY_ICON[asset.category] || CATEGORY_ICON.Default
+                return (
+                  <li key={asset.id} className="flex min-w-0 items-center gap-3">
+                    <IconChip icon={cfg.icon} tone={cfg.tone} size="md" />
+                    <div className="min-w-0 flex-1">
+                      <Link to={`/inventory/${asset.id}`} className="block truncate text-sm font-semibold text-ink hover:text-accent">{asset.name}</Link>
+                      <p className="truncate font-mono text-[11px] text-muted">ID:{asset.serialNumber}</p>
+                    </div>
+                    <span className="shrink-0 text-right text-xs font-medium text-muted">{asset.assignedTo?.name ? "Assigned" : "Available"}</span>
+                  </li>
+                )
+              })}
+              {(latestAssets || []).length === 0 && <li className="text-sm text-muted">No assets yet.</li>}
+            </ul>
+          </div>
+        ) : (
+          <ProjectTracker />
+        )}
+
+
+        {/* Support tickets (IT) */}
+        {isIT && (
+          <div className="card min-w-0 p-4 sm:p-5 lg:p-6">
+            <SectionHeader title="Open Support Tickets" action={<Link to="/tickets" className="text-xs font-semibold text-accent">View all</Link>} />
+            <ul className="mt-4 space-y-2">
+              {openTickets.slice(0, 5).map((t) => (
+                <li key={t.id}>
+                  <Link to="/tickets" className="flex min-w-0 items-center gap-3 rounded-2xl bg-surface-2 px-3 py-2.5 hover:bg-surface-2/70">
+                    <IconChip icon={Wrench} tone={t.status === "OPEN" ? "orange" : "blue"} size="sm" />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold text-ink">{t.title || t.subject || "Ticket"}</p>
+                      <p className="truncate text-xs text-muted">
+                        {(t.status || "").replace("_", " ").toLowerCase()}
+                        {t.raisedBy?.name ? ` · ${t.raisedBy.name}` : ""}
+                        {t.asset?.name ? ` · ${t.asset.name}` : ""}
+                      </p>
+                    </div>
+                  </Link>
+                </li>
+              ))}
+              {openTickets.length === 0 && <li className="text-sm text-muted">No open tickets.</li>}
+            </ul>
+          </div>
+        )}
 
 
         {/* Alerts */}
+        {!isIT && (
         <div className="card min-w-0 p-4 sm:p-5 lg:p-6">
 
           <SectionHeader
@@ -1338,6 +1334,7 @@ export default function Dashboard() {
           </ul>
 
         </div>
+        )}
 
       </section>
 

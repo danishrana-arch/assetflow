@@ -37,7 +37,6 @@ const LeaveCalendar = lazy(() => import("./pages/LeaveCalendar"))
 const Holidays = lazy(() => import("./pages/Holidays"))
 const AuditLog = lazy(() => import("./pages/AuditLog"))
 const Tickets = lazy(() => import("./pages/Tickets"))
-const Reports = lazy(() => import("./pages/Reports"))
 const Export = lazy(() => import("./pages/Export"))
 const Settings = lazy(() => import("./pages/Settings"))
 const AttendanceDevices = lazy(() => import("./pages/AttendanceDevices"))
@@ -158,7 +157,7 @@ function ProtectedShell() {
           <Route path="/expense-claims" element={<RequireModule moduleKey="expenseClaims"><ExpenseClaims /></RequireModule>} />
           <Route path="/payroll/reports" element={<RequireModule moduleKey="payrollReports"><PayrollReports /></RequireModule>} />
           <Route path="/tickets" element={<Tickets />} />
-          <Route path="/reports" element={<RequireModule moduleKey="reports"><Reports /></RequireModule>} />
+          <Route path="/reports" element={<Navigate to="/inventory" replace />} />
           <Route path="/reports/hr" element={<RequireModule moduleKey="hrReports"><HrReports /></RequireModule>} />
           <Route path="/export" element={<RequireModule moduleKey="reports"><Export /></RequireModule>} />
           <Route path="/notifications" element={<Notifications />} />

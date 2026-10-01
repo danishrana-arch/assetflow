@@ -1419,10 +1419,15 @@ Per a live chat request (2026-09-29), `Dashboard.jsx` header:
   top (low-opacity tinted fill + `backdrop-filter: blur saturate
   brightness`, bevelled edge from inset highlights/shadows, `::before`
   frosted SVG-noise grain, `::after` curved top reflection + diagonal
-  streak). The only pointer reaction is `.glass-glow`, a soft shine under
-  the cursor (`--gx`/`--gy` from `onMouseMove`) that fades in while the
-  cursor is over the pane — no tilt, lift or border/shadow change (removed
-  at the user's request). Text layer is `z-[2]` (above the reflection),
+  streak, `.glass-rim` — a masked 1.5px gradient border, brightest
+  top-left). The pane stays still (no tilt/lift — removed at the user's
+  request); the only pointer reaction is light passing through it, faded
+  in while the cursor is over the pane: `.glass-glow` (soft-light hot-spot
+  + a diagonal streak that slides with the cursor's x, `--gxp`),
+  `.glass-hotspot` (normal-blend brightening, a separate element because a
+  child would inherit the soft-light group blend) and `.glass-rim-light`
+  (the edge nearest the cursor lights up). `--gx`/`--gy`/`--gxp` are set
+  in the section's `onMouseMove`. Text layer is `z-[2]` (above the reflection),
   the sun `z-[3]` (so its hover label still works). Dark-mode variant
   included; backdrop drift and the shine fade are off under
   `prefers-reduced-motion`.
@@ -1943,6 +1948,67 @@ carries `leaveId`, `leaveStart`, `leaveEnd` (additive). New
 – Mon, Oct 19 (5 days)") in Dashboard "Upcoming events", the dashboard
 calendar's leave lines + event popup, and the Company Calendar "Event feed".
 Verified live: October 6 rows → 2.
+
+## Post-module redesign: Employees + Inventory pages, Reports page removed (2026-10-01)
+
+- **Employees** (`Employees.jsx`, mockup redesign): stat tiles (Total / Active /
+  On Leave / Left Company — click to filter), search + Status / Department /
+  Role filters, sortable table (Employee, Status, Department, Manager, Start
+  Day), Type = `workLocationType`, row actions (profile, mailto, … menu with
+  Copy email / Remove), checkbox selection → export / bulk remove, CSV
+  "Export List" (current filters, no phone/CNIC). Template button removed
+  (endpoint kept). `listEmployees` gained `role`/`workLocationType` filters,
+  `sort`/`order`, `manager {id,name}`, paged `statusCounts`; invalid
+  `status` is ignored instead of 500ing.
+- **Inventory** (`Inventory.jsx`, mockup redesign): "All" is the default view
+  (no category needed); category tabs with icons; 4 tiles (Total with +N this
+  month and 6-month sparkline, In Use, Maintenance, Lost/Disposed — click to
+  filter); toolbar search, Filter by (status / department / warranty
+  expiring|expired), grid/list toggle (localStorage); sortable table; … menu
+  (View / Edit / Delete); bulk delete (same assigned-asset rule); numbered
+  pager + 10/25/50 page size; right column Inventory Summary donut + Recent
+  Activity (lifecycle events, View all → 30). New `GET /assets/summary`
+  (`requireInventoryAccess`). `listAssets`: `sort`/`order`, comma-list
+  `status`, `warranty=expired`, and **`assignedTo` is now a safe select** —
+  it used to return the holder's full `User` row incl. password hash.
+  Status labels on this page only: ASSIGNED = "In Use", REPAIR = "Maintenance".
+- **Reports page removed** (`Reports.jsx` deleted, nav entries gone,
+  `/reports` → redirects to `/inventory`). Its status distribution now lives
+  on Inventory; its repair-spend cards were dropped (`GET
+  /dashboard/repair-spend` still exists, unused). The `reports` module key
+  stays — it still gates `/export`.
+- Follow-ups (same day): Inventory category tabs are one scrolling row with
+  ‹ › buttons (`CategoryScroller`, `.no-scrollbar` in index.css); Template
+  buttons removed from both pages (template endpoints kept). List sorting
+  is case-insensitive in JS (`utils/sort.js`) — Postgres put "Zain" before
+  "abc". `GET /tickets` and `GET /assets/:id` also stopped sending full
+  `User` rows (password hash) for `raisedBy` / `assignedTo` / event `actor`.
+
+### Permissions + sheet import + IT dashboard (2026-10-01)
+
+- **Adding employees = ADMIN/CEO/HR only**: `POST /auth/invite` was
+  `requireManagement` (MANAGEMENT/DEPARTMENT_HEAD/IT could add people);
+  now `requireRole("ADMIN","CEO","HR")`. Employee import/template likewise
+  (were `requireModule("employees")`). HR may import non-owner roles (same
+  rule as single add). Employees page hides Add/Import for other roles.
+- **HR runs payroll**: `HR` gained `payroll` + `payrollReports` in both
+  `ROLE_MODULES` copies; `generate` / `employee` / `tax` / `submit` /
+  `PATCH :id` are `ADMIN,HR`. Approve / reject / mark-paid / bulk delete stay
+  CEO-only; bank accounts stay masked for non-CEO. `Payroll.jsx`
+  `canManagePayroll` = ADMIN or HR.
+- **Import from any sheet** (`backend/src/utils/sheet.js`, used by both
+  imports): `.xlsx`/`.xlsm` via exceljs (first non-empty tab; dates →
+  YYYY-MM-DD; formulas/links/rich text → text), CSV with comma, semicolon
+  or tab auto-detected, `.tsv`, BOM stripped. `.xls`/`.ods` get a "Save As
+  .xlsx" 400. Headers matched loosely (`mapHeaders` + alias lists: "Full
+  Name", "Email Address", "Serial No.", "Purchased On", …). Buttons renamed
+  "Import Sheet". Employee import's duplicate-email check is now global and
+  case-insensitive (`User.email` is globally unique).
+- **IT_MANAGER dashboard**: the separate plain IT layout is gone; IT gets the
+  same dashboard (glass header, clock, stat cards + an Under Repair card,
+  Inventory Activity chart, Utilization, Recent Activities) minus
+  non-inventory parts (calendar/events, Project Tracker, alerts), with Latest
+  Assets and Open Support Tickets cards instead.
 
 ## Automated RBAC test run (2026-09-28)
 

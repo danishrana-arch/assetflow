@@ -11,7 +11,6 @@ import {
   PackageSearch,
   Building2,
   Ticket,
-  BarChart3,
   Download,
   CalendarCheck,
   CalendarDays,
@@ -354,7 +353,6 @@ export default function Sidebar({ expanded, onMouseEnter, onMouseLeave }) {
 
             {hasModuleAccess(user?.role, "reports") && (
               <>
-                <RailItem to="/reports" label="Reports" icon={BarChart3} isDark={isDark} expanded={expanded} />
                 <RailItem to="/export" label="Export" icon={Download} isDark={isDark} expanded={expanded} />
               </>
             )}

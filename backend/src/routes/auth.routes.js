@@ -1,7 +1,7 @@
 const express = require("express")
 const rateLimit = require("express-rate-limit")
 const { registerOrganization, login, inviteEmployee, me, changePassword, forgotPassword, resetPasswordWithToken } = require("../controllers/auth.controller")
-const { requireAuth, requireManagement } = require("../middleware/auth.middleware")
+const { requireAuth, requireRole } = require("../middleware/auth.middleware")
 
 const router = express.Router()
 
@@ -19,7 +19,8 @@ router.post("/login", authLimiter, login)
 router.post("/forgot-password", authLimiter, forgotPassword)
 router.post("/reset-password", authLimiter, resetPasswordWithToken)
 router.get("/me", requireAuth, me)
-router.post("/invite", requireAuth, requireManagement, inviteEmployee)
+// Adding employees is ADMIN/CEO/HR only (HR limited to non-owner roles inside inviteEmployee).
+router.post("/invite", requireAuth, requireRole("ADMIN", "CEO", "HR"), inviteEmployee)
 // Any authenticated user can change their OWN password — the controller
 // verifies currentPassword before allowing the change, so this does not
 // need an elevated role.
