@@ -3,7 +3,7 @@ const prisma = require("../lib/prisma")
 const { toDateOnly, dateKey, addDaysUTC } = require("../utils/date")
 const { getTimeZone, localMinutes, parseHHMM } = require("../utils/timezone")
 const { calculateWorkingMinutes, isScheduledWorkday } = require("../utils/work-schedule")
-const { MAIN_COMPANY_SELECT, isMainOrganization } = require("../utils/organization")
+const { accessibleOrganizations } = require("../utils/organization")
 
 // HR report generator behind GET /api/reports/hr. Every report type runs
 // through the same pipeline — resolve the caller's authorized orgs, build
@@ -31,25 +31,16 @@ function rowTone(row) {
 const TONE_FILL = { absent: "FFFDE2E2", late: "FFFFF4CC" }
 
 // Same rule as applyOrganizationScope (auth.middleware.js) and
-// canSeeCompanyOrganizations (auth.controller.js): a CEO, or an ADMIN whose
-// HOME organization is a main company (primary or second), may report across every active
+// the company selector: a CEO, or an ADMIN of the Grand Parent / Parent
+// (downward only), may report across every active
 // organization in the company. Everyone else — including HR, main-company
 // or not — is limited to their own home organization.
 async function authorizedOrganizations(userId, role) {
-  const me = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { organization: { select: { ...MAIN_COMPANY_SELECT, name: true } } },
-  })
-  const home = me?.organization
-  if (!home) return []
-  const companyId = home.companyId || home.id
-  const companyWide = role === "CEO" || (role === "ADMIN" && isMainOrganization(home))
-  if (!companyWide) return [{ id: home.id, name: home.name }]
-  return prisma.organization.findMany({
-    where: { archivedAt: null, OR: [{ id: companyId }, { companyId }] },
-    select: { id: true, name: true },
-    orderBy: { name: "asc" },
-  })
+  // Company hierarchy (utils/organization.js): only CEO / ADMIN reach beyond
+  // their own organization here; HR is always own-organization only.
+  const effectiveRole = ["CEO", "ADMIN"].includes(role) ? role : "EMPLOYEE"
+  const orgs = await accessibleOrganizations(prisma, { userId, role: effectiveRole })
+  return orgs.map((o) => ({ id: o.id, name: o.name }))
 }
 
 function badRequest(res, error) {

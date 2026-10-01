@@ -7,7 +7,7 @@ const {
   archiveSubOrganization,
   getOrganizationComparison,
   setMainCompany,
-  setSecondMainCompany,
+  setCompanyHierarchy,
 } = require("../controllers/organization.controller")
 const {
   getMyAttendancePermission,
@@ -28,8 +28,8 @@ router.post("/suborganizations", requireRole("ADMIN", "CEO"), createSubOrganizat
 router.delete("/suborganizations/:id", requireRole("ADMIN", "CEO"), archiveSubOrganization)
 router.patch("/", requireRole("ADMIN", "CEO"), updateOrganization)
 router.patch("/company/set-main", requireRole("CEO"), setMainCompany)
-// CEO-only: choose / clear the second main company (body: { organizationId | null }).
-router.patch("/company/second-main", requireRole("CEO"), setSecondMainCompany)
+// Grand Parent CEO only (re-checked in the controller): { grandParentId, parentId | null }.
+router.patch("/company/hierarchy", requireRole("CEO"), setCompanyHierarchy)
 
 router.get("/attendance-permissions/me", getMyAttendancePermission)
 router.get("/attendance-permissions", requireRole("ADMIN", "CEO"), getAttendancePermissions)

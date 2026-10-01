@@ -8,7 +8,7 @@ const { logAudit } = require("../utils/audit")
 const { isValidTimeZone } = require("../utils/timezone")
 const { sendEmail, appUrl, escapeHtml } = require("../utils/mailer")
 const { createNotification } = require("../utils/notifications")
-const { isPrimaryMain, isMainOrganization, canSwitchCompanyWide } = require("../utils/organization")
+const { accessibleOrganizations, hierarchyFlags, canManageHierarchy } = require("../utils/organization")
 
 // Failed-login alerting: after MAX_FAILED_LOGINS wrong passwords within
 // FAILED_LOGIN_WINDOW_MS, the account owner is emailed (and gets an in-app
@@ -61,9 +61,7 @@ function organizationSummary(organization) {
     slug: organization.slug,
     companyId: organization.companyId,
     parentOrganizationId: organization.parentOrganizationId,
-    isMain: isMainOrganization(organization),
-    isPrimaryMain: isPrimaryMain(organization),
-    isCoMain: !!organization.isCoMain,
+    ...hierarchyFlags(organization),
     primaryColor: organization.primaryColor,
     accentColor: organization.accentColor,
     theme: organization.theme,
@@ -72,39 +70,16 @@ function organizationSummary(organization) {
   }
 }
 
-// CEO can always see every organization in the company. A main-company
-// ADMIN or a main-company IT_MANAGER gets the same company-wide list, but
-// only when their own home organization *is* a main company (the primary
-// one or the CEO-chosen second one) — a
-// sub-organization's ADMIN or IT_MANAGER stays locked to their own org
-// (see applyOrganizationScope in auth.middleware.js, which is the actual
-// enforcement point — this just decides what the org-switcher shows, and
-// must stay in sync with it: an ADMIN/IT_MANAGER outside the main company
-// who could see other orgs here but not switch into them would just hit a
-// 403 after picking one).
-function canSeeCompanyOrganizations(user) {
-  return canSwitchCompanyWide(user.role, user.organization)
-}
-
-async function getCompanyOrganizations(companyId) {
-  const organizations = await prisma.organization.findMany({
-    where: { companyId, archivedAt: null },
-    select: {
-      id: true,
-      name: true,
-      slug: true,
-      companyId: true,
-      parentOrganizationId: true,
-      isCoMain: true,
-      primaryColor: true,
-      accentColor: true,
-      theme: true,
-      planTier: true,
-      timezone: true,
-    },
-    orderBy: [{ parentOrganizationId: "asc" }, { name: "asc" }],
+// The organizations shown in the company selector: exactly the ones this
+// user may switch into (same rule applyOrganizationScope enforces — see
+// utils/organization.js), Grand Parent → Parent → Children.
+async function getSelectableOrganizations(user) {
+  const organizations = await accessibleOrganizations(prisma, {
+    role: user.role,
+    home: user.organization,
+    select: { slug: true, primaryColor: true, accentColor: true, theme: true, planTier: true, timezone: true },
   })
-  return organizations.map(organizationSummary)
+  return organizations.length ? organizations.map(organizationSummary) : [organizationSummary(user.organization)]
 }
 
 // Creates a brand-new organization plus its first admin user.
@@ -132,6 +107,8 @@ async function registerOrganization(req, res, next) {
         name: organizationName,
         slug: `${slug}-${Math.random().toString(36).slice(2, 6)}`,
         companyId: rootId,
+        // A new company group starts as its own Grand Parent (utils/organization.js).
+        hierarchyRole: "GRAND_PARENT",
         timezone: selectedTimeZone,
         users: {
           create: {
@@ -208,9 +185,7 @@ async function login(req, res, next) {
     }
 
     const token = signToken({ userId: user.id, organizationId: user.organizationId, companyId: user.organization.companyId, role: user.role })
-    const organizations = canSeeCompanyOrganizations(user)
-      ? await getCompanyOrganizations(user.organization.companyId)
-      : [organizationSummary(user.organization)]
+    const organizations = await getSelectableOrganizations(user)
 
     res.json({
       token,
@@ -221,6 +196,8 @@ async function login(req, res, next) {
         role: user.role,
         status: user.status,
         canManageAttendance: user.canManageAttendance,
+        homeOrganizationId: user.organizationId,
+        canManageHierarchy: canManageHierarchy(user.role, user.organization),
       },
       organization: organizationSummary(user.organization),
       organizations,
@@ -343,14 +320,15 @@ async function me(req, res, next) {
     })
     if (!user) return res.status(404).json({ error: "User not found" })
 
-    const organizations = canSeeCompanyOrganizations(user)
-      ? await getCompanyOrganizations(user.organization.companyId)
-      : [organizationSummary(user.organization)]
+    const organizations = await getSelectableOrganizations(user)
 
     const activeOrganization = organizations.find((org) => org.id === req.user.organizationId) || organizationSummary(user.organization)
     const { password, organization, calendarFeedToken, ...safeUser } = user
     res.json({
       ...safeUser,
+      homeOrganizationId: user.organizationId,
+      // Only the Grand Parent company's CEO may change Grand Parent / Parent.
+      canManageHierarchy: canManageHierarchy(user.role, user.organization),
       organization: activeOrganization,
       organizations,
     })

@@ -8,6 +8,7 @@ import { useAuth } from "../context/AuthContext"
 import GlobalSearch from "../components/GlobalSearch"
 import NotificationBell from "../components/NotificationBell"
 import RoleBadge from "../components/RoleBadge"
+import { usePageHistoryTracker } from "../utils/pageHistory"
 
 // How long the cursor must stay on the sidebar before it (and the page shift
 // below) engages — long enough that a quick pass over one icon doesn't
@@ -20,6 +21,8 @@ export default function DashboardLayout() {
   const expandTimer = useRef(null)
   const { user } = useAuth()
   const showCompanySwitcher = ["ADMIN", "CEO", "IT_MANAGER"].includes(user?.role)
+  // Feeds every page's back button (components/ui/BackButton.jsx).
+  usePageHistoryTracker()
 
   useEffect(() => () => clearTimeout(expandTimer.current), [])
 

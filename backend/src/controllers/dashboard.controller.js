@@ -1,7 +1,7 @@
 const prisma = require("../lib/prisma")
 const { notifyUsers } = require("../utils/notifications")
 const { toDateOnly } = require("../utils/date")
-const { canReportCompanyWide } = require("../utils/organization")
+const { accessibleOrganizationIds } = require("../utils/organization")
 
 async function getStats(req, res, next) {
   try {
@@ -230,8 +230,12 @@ async function getExecutiveOverview(req, res, next) {
   try {
     const { organizationId, companyId, role, userId } = req.user
     // Sub-company ADMINs used to get company-wide data here too.
-    const companyScope = String(req.query.scope || "").toLowerCase() === "company" && (await canReportCompanyWide(prisma, userId, role))
-    const orgWhere = companyScope ? { companyId, archivedAt: null } : { id: organizationId, archivedAt: null }
+    // ?scope=company = every organization the user may access by the
+    // hierarchy (CEO / ADMIN only), never the raw group.
+    const companyScope = String(req.query.scope || "").toLowerCase() === "company" && ["ADMIN", "CEO"].includes(role)
+    const orgWhere = companyScope
+      ? { id: { in: await accessibleOrganizationIds(prisma, { userId, role }) }, archivedAt: null }
+      : { id: organizationId, archivedAt: null }
     const organizations = await prisma.organization.findMany({
       where: orgWhere,
       select: { id: true, name: true, companyId: true, parentOrganizationId: true },
@@ -272,10 +276,8 @@ async function getAttendanceAnomalies(req, res, next) {
   try {
     const { organizationId, companyId, role, userId } = req.user
     let organizationIds = [organizationId]
-    if (String(req.query.scope || "").toLowerCase() === "company" && (await canReportCompanyWide(prisma, userId, role))) {
-      organizationIds = (await prisma.organization.findMany({
-        where: { companyId, archivedAt: null }, select: { id: true },
-      })).map((o) => o.id)
+    if (String(req.query.scope || "").toLowerCase() === "company" && ["ADMIN", "CEO"].includes(role)) {
+      organizationIds = await accessibleOrganizationIds(prisma, { userId, role })
     }
     const today = toDateOnly(new Date())
     const tomorrow = new Date(today)

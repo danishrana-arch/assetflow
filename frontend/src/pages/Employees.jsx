@@ -7,6 +7,7 @@ import {
   MoreHorizontal, ArrowUp, ArrowDown, ArrowUpDown, User as UserIcon,
 } from "lucide-react"
 import api from "../api/client"
+import BackButton from "../components/ui/BackButton"
 import { useAuth } from "../context/AuthContext"
 import { ROLE_LABELS } from "../utils/roles"
 import StatusBadge from "../components/StatusBadge"
@@ -383,7 +384,10 @@ export default function Employees() {
       {/* Header + stat tiles */}
       <div className="card p-5">
         <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-          <h1 className="text-2xl font-bold text-ink">Employees</h1>
+          <div className="flex items-center gap-3">
+            <BackButton />
+            <h1 className="text-2xl font-bold text-ink">Employees</h1>
+          </div>
           <div className="flex flex-wrap items-center gap-2">
             {canAddEmployees && (
               <>

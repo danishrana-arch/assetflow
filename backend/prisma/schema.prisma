@@ -31,9 +31,12 @@ model Organization {
   workingDaysPerWeek        Int                       @default(5)
   companyId                 String?
   parentOrganizationId      String?
-  // Second main company of the group (CEO-set, at most one per companyId);
-  // the root (id = companyId) is always the first. See utils/organization.js.
+  // DEPRECATED — superseded by hierarchyRole (migrated to PARENT); kept so no
+  // data is dropped. Not read by the app.
   isCoMain                  Boolean                   @default(false)
+  // GRAND_PARENT / PARENT (each at most one per companyId, partial unique
+  // index in migration 20261001150000) or CHILD. See utils/organization.js.
+  hierarchyRole             OrganizationHierarchyRole @default(CHILD)
   geofenceEnabled           Boolean                   @default(false)
   officeLatitude            Decimal?                  @db.Decimal(10, 7)
   officeLongitude           Decimal?                  @db.Decimal(10, 7)
@@ -1062,6 +1065,12 @@ enum LeaveType {
   SICK
   CASUAL
   UNPAID
+}
+
+enum OrganizationHierarchyRole {
+  GRAND_PARENT
+  PARENT
+  CHILD
 }
 
 enum EmployeeStatus {

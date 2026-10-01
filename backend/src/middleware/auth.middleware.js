@@ -1,15 +1,16 @@
 const { verifyToken } = require("../utils/jwt")
 const prisma = require("../lib/prisma")
 const { MANAGEMENT_ROLES, hasModuleAccess } = require("../utils/roles")
-const { MAIN_COMPANY_SELECT, canSwitchCompanyWide } = require("../utils/organization")
+const { HIERARCHY_SELECT, canAccessOrganization } = require("../utils/organization")
 
-// Organization switching is intentionally asymmetric:
-// - MAIN COMPANY ADMIN (either main company): may switch to any active
-//   organization in the company. Same for a main-company IT_MANAGER
-//   (inventory modules only).
-// - CEO: keeps the existing company-wide switching behavior.
-// - SUB-ORGANIZATION ADMIN: is locked to their own organization.
-// - All other roles: are locked to their own organization.
+// Organization switching (X-Organization-Id) follows the company hierarchy —
+// see utils/organization.js. Strictly downward for ADMIN / IT_MANAGER
+// (Grand Parent → Parent → Children; Parent → Children; Child → own only);
+// a CEO may enter any company of their group; HR and every other role are
+// locked to their own organization. This is THE enforcement point for every
+// organization-scoped API: controllers read req.user.organizationId, which
+// only changes here and only to an organization the user may access.
+// The requested id is never trusted — it's re-checked against the DB.
 async function applyOrganizationScope(req) {
   const selectedOrganizationId = String(
     req.headers["x-organization-id"] || ""
@@ -18,56 +19,26 @@ async function applyOrganizationScope(req) {
   if (!selectedOrganizationId) return
 
   const role = req.user.role
-  const current = await prisma.organization.findUnique({
-    where: { id: req.user.organizationId },
-    select: { ...MAIN_COMPANY_SELECT, archivedAt: true },
+  const home = await prisma.organization.findUnique({
+    where: { id: req.user.homeOrganizationId },
+    select: HIERARCHY_SELECT,
   })
 
-  if (!current) {
+  if (!home) {
     const error = new Error("Your organization could not be found")
     error.statusCode = 403
     throw error
   }
 
-  const companyId = current.companyId || current.id
-
   // Selecting the user's own organization is always safe.
-  if (selectedOrganizationId === current.id) return
+  if (selectedOrganizationId === home.id) return
 
-  // Only a CEO, or an ADMIN / IT_MANAGER whose home organization is a main
-  // company (the primary one or the CEO-chosen second one), may switch to
-  // another organization. In particular, an ADMIN/IT_MANAGER belonging to
-  // a sub-organization cannot use a forged X-Organization-Id header to read
-  // or mutate another organization. IT_MANAGER's role-based nav/data access
-  // stays inventory-scoped regardless of which organization is selected —
-  // this only controls which organization's data they're allowed to select.
-  // HR and all other roles are always locked to their own organization.
-  if (!canSwitchCompanyWide(role, current)) {
-    const error = new Error(
-      "You do not have access to another organization"
-    )
-    error.statusCode = 403
-    throw error
-  }
-
-  const selectedOrganization = await prisma.organization.findFirst({
-    where: {
-      id: selectedOrganizationId,
-      archivedAt: null,
-      OR: [
-        { id: companyId },
-        { companyId },
-      ],
-    },
-    select: {
-      id: true,
-      companyId: true,
-      parentOrganizationId: true,
-      archivedAt: true,
-    },
+  const target = await prisma.organization.findUnique({
+    where: { id: selectedOrganizationId },
+    select: HIERARCHY_SELECT,
   })
 
-  if (!selectedOrganization) {
+  if (!canAccessOrganization(role, home, target)) {
     const error = new Error(
       "You do not have access to this organization"
     )
@@ -75,7 +46,7 @@ async function applyOrganizationScope(req) {
     throw error
   }
 
-  req.user.organizationId = selectedOrganization.id
+  req.user.organizationId = target.id
 }
 
 async function requireAuth(req, res, next) {
@@ -126,6 +97,9 @@ async function requireAuth(req, res, next) {
       ...decoded,
       userId: dbUser.id,
       organizationId: dbUser.organizationId,
+      // Never changes during the request (organizationId may, via the
+      // organization switcher) — use it for "what may this user reach?".
+      homeOrganizationId: dbUser.organizationId,
       companyId:
         dbUser.organization?.companyId || decoded.companyId,
       role: dbUser.role,

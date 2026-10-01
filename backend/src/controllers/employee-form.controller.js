@@ -24,6 +24,36 @@ function clean(value, max = 500) {
   return String(value).trim().slice(0, max) || null
 }
 
+// "Company equipment in your possession" section of the public form. This
+// endpoint is unauthenticated, so everything is length-capped and the list
+// is limited; condition must be one of the known values.
+const MAX_INVENTORY_ITEMS = 20
+const INVENTORY_CONDITIONS = ["GOOD", "NEEDS_REPAIR", "DAMAGED"]
+function parseInventory(raw) {
+  if (!raw || typeof raw !== "object") return { none: false, items: [] }
+  const none = raw.none === true
+  const list = Array.isArray(raw.items) ? raw.items : []
+  if (list.length > MAX_INVENTORY_ITEMS) return { error: `You can list at most ${MAX_INVENTORY_ITEMS} items` }
+  const items = []
+  for (const item of none ? [] : list) {
+    if (!item || typeof item !== "object") continue
+    const entry = {
+      category: clean(item.category, 60),
+      name: clean(item.name, 120),
+      serialNumber: clean(item.serialNumber, 120),
+      condition: clean(item.condition, 20)?.toUpperCase() || "GOOD",
+      receivedOn: clean(item.receivedOn, 10),
+      notes: clean(item.notes, 300),
+    }
+    if (!entry.category && !entry.name && !entry.serialNumber) continue // blank row
+    if (!entry.name && !entry.category) return { error: "Each equipment item needs a type or a brand / model" }
+    if (!INVENTORY_CONDITIONS.includes(entry.condition)) return { error: "Equipment condition must be Good, Needs repair or Damaged" }
+    if (entry.receivedOn && !/^\d{4}-\d{2}-\d{2}$/.test(entry.receivedOn)) return { error: "Equipment received date must be a valid date" }
+    items.push(entry)
+  }
+  return { none, items }
+}
+
 async function createEmployeeForm(req, res, next) {
   try {
     const { organizationId, userId } = req.user
@@ -234,6 +264,7 @@ async function getEmployeeFormSubmissions(req, res, next) {
     })
     res.json(submissions.map((s) => ({
       ...s,
+      inventory: s.data?.inventory || null,
       cnic: decryptField(s.cnic),
       fatherName: decryptField(s.fatherName),
       personalEmail: decryptField(s.personalEmail),
@@ -296,6 +327,10 @@ async function submitPublicEmployeeForm(req, res, next) {
       return res.status(400).json({ error: "Employee type must be Intern or Junior" })
     }
 
+    const inventory = parseInventory(req.body.inventory)
+    if (inventory.error) return res.status(400).json({ error: inventory.error })
+    delete inventory.error
+
     const submission = await prisma.employeeFormSubmission.create({
       data: {
         formId: form.id,
@@ -313,6 +348,9 @@ async function submitPublicEmployeeForm(req, res, next) {
         companyEmail,
         linkedinUrl,
         notes: clean(req.body.notes, 1000),
+        // Company equipment the employee already holds (stored in the
+        // submission's JSON `data` column — no schema change).
+        data: { inventory },
       },
     })
 

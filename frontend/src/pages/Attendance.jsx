@@ -10,6 +10,7 @@ import {
   Trash2, Wallet,
 } from "lucide-react"
 import api from "../api/client"
+import BackButton from "../components/ui/BackButton"
 import { useAuth } from "../context/AuthContext"
 import Avatar from "../components/ui/Avatar"
 import StatusPill from "../components/ui/StatusPill"
@@ -765,6 +766,7 @@ export default function Attendance() {
       {/* ── Header: title + day navigator | report + add ── */}
       <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex min-w-0 flex-wrap items-center gap-3">
+          <BackButton />
           <h1 className="text-2xl font-semibold text-ink sm:text-[26px]" style={{ letterSpacing: "-0.02em" }}>Attendance</h1>
           <span className="hidden h-7 w-px bg-border-strong sm:block" aria-hidden="true" />
           <div className="flex items-center gap-1.5">

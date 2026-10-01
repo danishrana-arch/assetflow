@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState, useCallback, useRef } f
 import { useQueryClient } from "@tanstack/react-query"
 import api from "../api/client"
 import { clearAttendanceCaches } from "../utils/offlineAttendance"
+import { clearPageHistory } from "../utils/pageHistory"
 
 const AuthContext = createContext(null)
 const TOKEN_KEY = "assetflow_token"
@@ -44,6 +45,10 @@ function normalizeAuthPayload(data) {
     role: data.role,
     status: data.status,
     canManageAttendance: data.canManageAttendance,
+    // Company hierarchy (decided by the backend): the user's own company and
+    // whether they may change the Grand Parent / Parent designation.
+    homeOrganizationId: data.homeOrganizationId,
+    canManageHierarchy: !!data.canManageHierarchy,
     organization: data.organization,
   }
 
@@ -179,6 +184,7 @@ export function AuthProvider({ children }) {
     localStorage.removeItem(ORG_KEY)
     localStorage.removeItem(LAST_ACTIVITY_KEY)
     clearAttendanceCaches()
+    clearPageHistory()
     queryClient.clear()
     setUser(null)
     setOrganization(null)

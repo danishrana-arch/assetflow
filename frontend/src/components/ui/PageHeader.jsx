@@ -1,26 +1,17 @@
-import { useNavigate } from "react-router-dom"
-import { ArrowLeft } from "lucide-react"
+import BackButton from "./BackButton"
 
-// Renders the AssetFlow "Executive" page-header pattern: an optional
-// circular back button, a bold display-style title (pass a literal "\n"
-// in the string for the signature two-line look), an optional subtitle,
-// an optional inline stat strip, and right-aligned actions.
-export default function PageHeader({ title, subtitle, backTo, stats, actions, className = "" }) {
-  const navigate = useNavigate()
-
+// Renders the AssetFlow "Executive" page-header pattern: the circular back
+// button (always — it returns to the page the user came from; `backTo` is
+// only the fallback when there's no previous page; `back={false}` hides it),
+// a bold display-style title (pass a literal "\n" in the string for the
+// signature two-line look), an optional subtitle, an optional inline stat
+// strip, and right-aligned actions.
+export default function PageHeader({ title, subtitle, backTo, back = true, stats, actions, className = "" }) {
   return (
     <div className={`mb-6 flex flex-col gap-5 ${className}`}>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div className="flex items-center gap-4">
-          {backTo !== undefined && (
-            <button
-              onClick={() => (backTo ? navigate(backTo) : navigate(-1))}
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-border-strong bg-surface text-ink transition-colors hover:bg-surface-2"
-              aria-label="Go back"
-            >
-              <ArrowLeft size={18} />
-            </button>
-          )}
+          {back && <BackButton fallback={backTo || "/"} />}
           <div>
             <h1
               className="whitespace-pre-line text-[28px] font-extrabold leading-[1.1] text-ink sm:text-[36px]"

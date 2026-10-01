@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Building2, Clock3, MapPin, Pencil, Plus, Save, Trash2, Users, X } from "lucide-react"
+import { Link } from "react-router-dom"
+import { Building2, Clock3, FolderKanban, MapPin, Pencil, Plus, Save, Trash2, Users, X } from "lucide-react"
 import api from "../api/client"
 import { useAuth } from "../context/AuthContext"
 import { hasModuleAccess } from "../utils/roles"
@@ -62,8 +63,9 @@ export default function AttendanceSites() {
   const { user, organization, organizations } = useAuth()
   const queryClient = useQueryClient()
   const canManage = hasModuleAccess(user?.role, "attendance")
-  // Either main company (primary or the CEO-chosen second one) — from the API.
-  const isMainCompanyAdmin = user?.role === "ADMIN" && !!organization?.isMain
+  // Can pick which company a site belongs to: CEO / ADMIN with more than one
+  // accessible company (the list already follows the company hierarchy).
+  const isMainCompanyAdmin = ["ADMIN", "CEO"].includes(user?.role) && (organizations || []).length > 1
   const [form, setForm] = useState(() => initialForm(organization?.id, organization?.timezone))
   const [error, setError] = useState("")
   const [editingId, setEditingId] = useState(null)
@@ -128,7 +130,16 @@ export default function AttendanceSites() {
 
   return (
     <div>
-      <PageHeader title="Attendance Sites" subtitle="Draw real project boundaries, assign them through projects, and control site attendance." backTo="/attendance" />
+      <PageHeader
+        title="Attendance Sites"
+        subtitle="Draw real project boundaries, assign them through projects, and control site attendance."
+        backTo="/attendance"
+        actions={
+          <Link to="/projects" className="pill-secondary flex items-center gap-1.5 px-4 py-2.5 text-sm">
+            <FolderKanban size={15} /> Projects
+          </Link>
+        }
+      />
 
       <div className="space-y-5">
         <div className="card p-5">
@@ -149,7 +160,7 @@ export default function AttendanceSites() {
                 <span className="mb-1 block text-xs font-semibold text-muted">Organization</span>
                 {isMainCompanyAdmin ? (
                   <select value={form.organizationId || organization?.id || ""} onChange={(e) => setForm((f) => ({ ...f, organizationId: e.target.value, projectId: "" }))} className="field w-full">
-                    {organizations.map((org) => <option key={org.id} value={org.id}>{org.isMain ? `${org.name} (Main)` : org.name}</option>)}
+                    {organizations.map((org) => <option key={org.id} value={org.id}>{org.isGrandParent ? `${org.name} (Grand Parent)` : org.isParent ? `${org.name} (Parent)` : org.name}</option>)}
                   </select>
                 ) : (
                   <div className="field w-full bg-surface-2 text-sm font-semibold text-ink">{organization?.name || "Current organization"}</div>
@@ -160,7 +171,12 @@ export default function AttendanceSites() {
               <label className="block"><span className="mb-1 block text-xs font-semibold text-muted">Address</span><input value={form.address} onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))} className="field w-full" placeholder="Project address" /></label>
 
               <label className="block">
-                <span className="mb-1 block text-xs font-semibold text-muted">Linked project</span>
+                <span className="mb-1 flex items-center justify-between gap-2 text-xs font-semibold text-muted">
+                  Linked project
+                  <Link to="/projects" className="font-semibold text-accent hover:underline">
+                    {projects.length ? "Manage projects" : "Create a project"}
+                  </Link>
+                </span>
                 <select value={form.projectId} onChange={(e) => setForm((f) => ({ ...f, projectId: e.target.value }))} className="field w-full">
                   <option value="">No project / permanent office</option>
                   {projects.map((project) => <option key={project.id} value={project.id}>{project.name} · {project.status}</option>)}
@@ -229,7 +245,7 @@ export default function AttendanceSites() {
                 <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
                   <div className="rounded-2xl bg-surface-2 p-3"><p className="text-[10px] uppercase tracking-wide text-muted">Geofence</p><p className="mt-1 text-xs font-semibold text-ink">{site.geofenceType === "POLYGON" ? `${Math.round(Number(site.areaSqMeters || 0)).toLocaleString()} m²` : `${site.radiusMeters}m radius`}</p></div>
                   <div className="rounded-2xl bg-surface-2 p-3"><p className="text-[10px] uppercase tracking-wide text-muted">Employees</p><p className="mt-1 flex items-center gap-1 text-xs font-semibold text-ink"><Users size={12} /> {site.employeeCount || 0}</p></div>
-                  <div className="rounded-2xl bg-surface-2 p-3"><p className="text-[10px] uppercase tracking-wide text-muted">Project</p><p className="mt-1 text-xs font-semibold text-ink">{site.projectName || "Permanent site"}</p></div>
+                  <div className="rounded-2xl bg-surface-2 p-3"><p className="text-[10px] uppercase tracking-wide text-muted">Project</p><p className="mt-1 text-xs font-semibold text-ink">{site.projectName || "Permanent site"}</p>{site.projectId && <Link to="/projects" className="mt-1 inline-block text-[10px] font-semibold text-accent hover:underline">Open project →</Link>}</div>
                   <div className="rounded-2xl bg-surface-2 p-3"><p className="text-[10px] uppercase tracking-wide text-muted">Time zone</p><p className="mt-1 text-xs font-semibold text-ink">{site.timezone || DEFAULT_TZ}</p></div>
                   <div className="rounded-2xl bg-surface-2 p-3"><p className="text-[10px] uppercase tracking-wide text-muted">Outside grace</p><p className="mt-1 text-xs font-semibold text-ink">{site.outsideGraceMinutes || 60} min</p></div>
                 </div>

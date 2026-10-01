@@ -2010,6 +2010,70 @@ Verified live: October 6 rows → 2.
   non-inventory parts (calendar/events, Project Tracker, alerts), with Latest
   Assets and Open Support Tickets cards instead.
 
+## Post-module addition: equipment section on the employee form (2026-10-01)
+
+- Public employee form (`PublicEmployeeForm.jsx`) gained "Company equipment
+  you have": repeatable rows (type, brand/model, serial, condition
+  GOOD/NEEDS_REPAIR/DAMAGED, received on, notes; max 20) or "I don't have
+  any company equipment". Stored in the existing
+  `EmployeeFormSubmission.data` JSON as `{ inventory: { none, items } }` —
+  no migration. Validated in `parseInventory` (employee-form.controller.js;
+  the endpoint is public). Old clients without `inventory` still submit.
+- HR's "Form responses" panel shows the list (`EquipmentList` in
+  EmployeeForms.jsx) and "Download as inventory sheet" — a CSV whose first
+  columns are the Inventory import's (name, category, serialNumber).
+- Note: the inventory import can't assign assets to employees (every
+  imported asset is AVAILABLE).
+- Verified 12/12 against the test backend (validation, blank rows dropped,
+  "none", legacy submit, HR read-back); the temp form was deleted.
+
+## Post-module change: company hierarchy Grand Parent → Parent → Child (2026-10-01)
+
+**Supersedes the "second main company" section below** (its `isCoMain`
+column is kept but no longer read; the endpoint `PATCH
+/organization/company/second-main` is gone).
+
+- `Organization.hierarchyRole` (`OrganizationHierarchyRole`: GRAND_PARENT /
+  PARENT / CHILD, default CHILD). Migration
+  `20261001150000_organization_hierarchy` — **deployed**: each group root
+  → GRAND_PARENT, old `isCoMain` → PARENT (there were none), plus partial
+  unique indexes `Organization_one_grand_parent_per_company` /
+  `…_one_parent_per_company` on `COALESCE(companyId, id)` (not expressible
+  in schema.prisma — a future `migrate diff` will list them; leave them).
+  JS client regenerated (engine DLL hit the usual EPERM).
+- Rules, all in `backend/src/utils/organization.js` (`canAccessOrganization`,
+  `accessibleOrganizations`, `canManageHierarchy`, `hierarchyFlags`):
+  ADMIN / IT_MANAGER strictly downward (GP → GP+Parent+Children; Parent →
+  Parent+Children, never GP; Child → own). **CEO of any company → every
+  company of the group incl. the Grand Parent** (explicit user decision,
+  overriding the spec's CEO = same-as-Admin rule). HR / EMPLOYEE /
+  MANAGEMENT / DEPARTMENT_HEAD → own org only. Never crosses company
+  groups. Hierarchy is two designations on a flat group, so no cycles.
+- Enforcement: `applyOrganizationScope` checks the X-Organization-Id target
+  against the user's **home** org (`req.user.homeOrganizationId`, new) and
+  returns 403; selector list (`/auth/me` → `getSelectableOrganizations`),
+  `/organization/company`, comparison, sub-org create/archive, attendance
+  sites (`getOrganizationScope` — also guards body/query `organizationId`),
+  HR-report org picker and dashboard `?scope=company` all use
+  `accessibleOrganizations`. Several of these used to key off the
+  *currently selected* org instead of the home org.
+- `PATCH /organization/company/hierarchy {grandParentId, parentId|null}` —
+  CEO whose home org is the Grand Parent only (`canManageHierarchy`,
+  surfaced to the UI as `user.canManageHierarchy`). Validates same group,
+  GP ≠ Parent, new GP has an active CEO (no lock-out). New orgs (sub-org
+  create) are CHILD; a new registration's root is GRAND_PARENT. GP/Parent
+  can't be archived. `set-main` (re-roots companyId only) is now GP-CEO only
+  and has no UI.
+- UI: company selector is a tree (`treeLabels` in OrganizationSwitcher);
+  Settings → "Company hierarchy" (two selects + info, editable only for the
+  GP CEO; Add/Remove company hidden for Child admins); Organization
+  Comparison badges; AttendanceSites org picker.
+- Verified: 81/81 API/rule checks (incl. Parent→GP 403, Child→sibling 403,
+  forged body/query organizationId 403, DB index refuses a 2nd GP), 14/14
+  Playwright, 108/108 regression GETs across 6 roles. Hierarchy restored to
+  GP = DeltaGulfOverseas, no Parent. Left behind: `organization.hierarchy_changed`
+  audit rows from the tests.
+
 ## Post-module addition: second main company (2026-10-01)
 
 - A company group (orgs sharing `companyId`) can have **two main
@@ -2044,6 +2108,25 @@ Verified live: October 6 rows → 2.
   Playwright on Settings; the test set/cleared the flag and left **no second
   main company set** — the CEO picks it in Settings. Left behind: a few
   `organization.second_main_changed` audit rows from the test.
+
+## Post-module addition: back button on every page (2026-10-01)
+
+- `utils/pageHistory.js` keeps an in-app stack of visited **pages**
+  (sessionStorage, one entry per pathname; search/filter changes update the
+  current entry; returning to the previous pathname — via our button or the
+  browser's — pops). Tracked in `DashboardLayout` (`usePageHistoryTracker`),
+  cleared on logout (`AuthContext`).
+- `components/ui/BackButton.jsx`: goes to the previous page *with its
+  filters*; with no previous page (opened directly / fresh tab) goes to the
+  fallback (default `/`). Hidden on `/` and `/dashboard`.
+- `PageHeader` now always renders it (`backTo` = fallback only;
+  `back={false}` hides). Added to the custom headers of Attendance,
+  Employees and Inventory. Pages that had no back button (Announcements,
+  Payroll, Performance, Tasks) get it through `PageHeader`.
+- Verified 45/45 (Playwright, read-only): profile → Employees → dashboard,
+  Inventory filter kept, Attendance date changes skipped, browser back in
+  step, direct-open fallback, survives refresh, exactly one back button on
+  32 routes, employee role.
 
 ## Automated RBAC test run (2026-09-28)
 

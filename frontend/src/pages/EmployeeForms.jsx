@@ -8,6 +8,93 @@ import PageHeader from "../components/ui/PageHeader"
 import SectionHeader from "../components/ui/SectionHeader"
 import { TextField, SelectField } from "../components/ui/Field"
 
+const CONDITION_LABEL = { GOOD: "Good", NEEDS_REPAIR: "Needs repair", DAMAGED: "Damaged" }
+const CONDITION_TONE = {
+  GOOD: "bg-chip-green-bg text-chip-green-fg",
+  NEEDS_REPAIR: "bg-chip-yellow-bg text-chip-yellow-fg",
+  DAMAGED: "bg-chip-pink-bg text-chip-pink-fg",
+}
+
+function csvCell(value) {
+  const s = value == null ? "" : String(value)
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+}
+
+// Company equipment the employee listed on the form. The download uses the
+// Inventory import's column names (name, category, serialNumber) so an
+// Admin / IT Manager can load it with Inventory → Import Sheet; the extra
+// columns are ignored by the import but kept for reference.
+function EquipmentList({ submission }) {
+  const inv = submission.inventory
+  const items = inv?.items || []
+
+  function download() {
+    const header = ["name", "category", "serialNumber", "condition", "receivedOn", "heldBy", "heldByEmail", "notes"]
+    const rows = items.map((i) => [
+      i.name || i.category, i.category, i.serialNumber, CONDITION_LABEL[i.condition] || i.condition,
+      i.receivedOn, submission.name, submission.companyEmail || submission.personalEmail, i.notes,
+    ].map(csvCell).join(","))
+    const blob = new Blob([[header.join(","), ...rows].join("\n")], { type: "text/csv;charset=utf-8" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = `equipment-${String(submission.name || "employee").toLowerCase().replace(/[^a-z0-9]+/g, "-")}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  return (
+    <div className="sm:col-span-2">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <p className="text-xs font-semibold text-ink">Company equipment</p>
+        {items.length > 0 && (
+          <button type="button" onClick={download} className="text-[11px] font-semibold text-accent hover:underline">
+            Download as inventory sheet
+          </button>
+        )}
+      </div>
+      {!inv ? (
+        <p className="text-xs text-muted">Not asked on this response (submitted before the equipment section existed).</p>
+      ) : inv.none ? (
+        <p className="text-xs text-muted">Employee says they have no company equipment.</p>
+      ) : items.length === 0 ? (
+        <p className="text-xs text-muted">No equipment listed.</p>
+      ) : (
+        <div className="overflow-x-auto rounded-xl border border-border bg-surface">
+          <table className="w-full text-xs">
+            <thead className="text-left text-[10px] font-semibold uppercase tracking-wide text-muted">
+              <tr className="border-b border-border">
+                <th className="px-3 py-2">Type</th>
+                <th className="px-3 py-2">Brand / model</th>
+                <th className="px-3 py-2">Serial number</th>
+                <th className="px-3 py-2">Condition</th>
+                <th className="px-3 py-2">Received</th>
+                <th className="px-3 py-2">Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((i, idx) => (
+                <tr key={idx} className="border-b border-border last:border-0">
+                  <td className="px-3 py-2 text-ink">{i.category || "—"}</td>
+                  <td className="px-3 py-2 text-ink">{i.name || "—"}</td>
+                  <td className="px-3 py-2 font-mono text-ink">{i.serialNumber || "—"}</td>
+                  <td className="px-3 py-2">
+                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${CONDITION_TONE[i.condition] || "bg-surface-2 text-muted"}`}>
+                      {CONDITION_LABEL[i.condition] || i.condition}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2 text-muted">{i.receivedOn || "—"}</td>
+                  <td className="px-3 py-2 text-muted">{i.notes || "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function formatDate(value) {
   if (!value) return "—"
   return new Date(value).toLocaleDateString()
@@ -378,6 +465,7 @@ export default function EmployeeForms() {
                     <p className="text-xs text-muted"><strong className="text-ink">LinkedIn:</strong> {submission.linkedinUrl || "—"}</p>
                     <p className="text-xs text-muted sm:col-span-2"><strong className="text-ink">Address:</strong> {submission.address || "—"}</p>
                     <p className="text-xs text-muted sm:col-span-2"><strong className="text-ink">Notes:</strong> {submission.notes || "—"}</p>
+                    <EquipmentList submission={submission} />
                   </div>
                 </details>
               ))}

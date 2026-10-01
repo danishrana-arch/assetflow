@@ -198,22 +198,33 @@ export default function Settings() {
     onError: (err) => setOrganizationError(err.response?.data?.error || "Could not create organization"),
   })
 
-  // Second main company (CEO-only to change; see utils/organization.js on the backend).
-  const primaryMain = (organizations || []).find((org) => org.isPrimaryMain)
-  const currentSecondMainId = (organizations || []).find((org) => org.isCoMain)?.id || ""
-  const [secondMainId, setSecondMainId] = useState(currentSecondMainId)
-  const [secondMainError, setSecondMainError] = useState("")
-  useEffect(() => { setSecondMainId(currentSecondMainId) }, [currentSecondMainId])
-  const saveSecondMain = useMutation({
-    mutationFn: () => api.patch("/organization/company/second-main", { organizationId: secondMainId || null }),
+  // Company hierarchy (Grand Parent → Parent → Children). Only the Grand
+  // Parent company's CEO may change it — the backend decides and enforces
+  // that (`user.canManageHierarchy`); everyone else sees it read-only.
+  const canManageHierarchy = !!user?.canManageHierarchy
+  const currentGrandParentId = (organizations || []).find((org) => org.isGrandParent)?.id || ""
+  const currentParentId = (organizations || []).find((org) => org.isParent)?.id || ""
+  const [grandParentId, setGrandParentId] = useState(currentGrandParentId)
+  const [parentId, setParentId] = useState(currentParentId)
+  const [hierarchyError, setHierarchyError] = useState("")
+  useEffect(() => { setGrandParentId(currentGrandParentId) }, [currentGrandParentId])
+  useEffect(() => { setParentId(currentParentId) }, [currentParentId])
+  const hierarchyChanged = grandParentId !== currentGrandParentId || parentId !== currentParentId
+  const saveHierarchy = useMutation({
+    mutationFn: () => api.patch("/organization/company/hierarchy", { grandParentId, parentId: parentId || null }),
     onSuccess: async () => {
-      setSecondMainError("")
+      setHierarchyError("")
       queryClient.invalidateQueries({ queryKey: ["organization"] })
       queryClient.invalidateQueries({ queryKey: ["organization-comparison"] })
       await refreshUser()
     },
-    onError: (err) => setSecondMainError(err.response?.data?.error || "Could not save the second main company"),
+    onError: (err) => setHierarchyError(err.response?.data?.error || "Could not save the company hierarchy"),
   })
+  // Same rule the API enforces for create/remove: a CEO, or an ADMIN of the
+  // Grand Parent / Parent. Your own company can never be removed.
+  const homeOrganization = (organizations || []).find((org) => org.id === user?.homeOrganizationId)
+  const canManageCompanies = user?.role === "CEO" || (user?.role === "ADMIN" && !!homeOrganization?.isMain)
+  const hierarchyLabel = (org) => (org.isGrandParent ? "Grand Parent" : org.isParent ? "Parent company" : "Child company")
 
   const removeSubOrganization = useMutation({
     mutationFn: (id) => api.delete(`/organization/suborganizations/${id}`),
@@ -221,8 +232,8 @@ export default function Settings() {
       setOrganizationError("")
       queryClient.clear()
       if (organization?.id === id) {
-        const main = (organizations || []).find((org) => org.isMain)
-        if (main) await switchOrganization(main.id)
+        const home = (organizations || []).find((org) => org.id === user?.homeOrganizationId) || (organizations || [])[0]
+        if (home) await switchOrganization(home.id)
       }
       await refreshUser()
     },
@@ -341,7 +352,7 @@ export default function Settings() {
           <SectionHeader title="Company & Organizations" />
           <p className="mb-4 text-xs text-muted">
             {isOwnerTier
-              ? "Manage the main companies and their organizations from one account. Employees and HR stay limited to the organization they belong to."
+              ? "Companies you can manage, from the top of the hierarchy down. Employees and HR stay limited to the organization they belong to."
               : "Your account is limited to its assigned organization."}
           </p>
 
@@ -351,10 +362,8 @@ export default function Settings() {
                 {(organizations || []).map((org) => (
                   <div key={org.id} className="flex min-w-0 items-center justify-between gap-3 rounded-2xl border border-border bg-surface-2 p-3">
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-ink">{org.isMain ? org.name : `↳ ${org.name}`}</p>
-                      <p className="truncate text-[11px] text-muted">
-                        {org.isPrimaryMain ? "Main company" : org.isCoMain ? "Main company (second)" : "Sub-organization"}
-                      </p>
+                      <p className="truncate text-sm font-semibold text-ink">{org.isGrandParent ? org.name : org.isParent ? `└ ${org.name}` : `↳ ${org.name}`}</p>
+                      <p className="truncate text-[11px] text-muted">{hierarchyLabel(org)}</p>
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
                       {organization?.id !== org.id && (
@@ -369,7 +378,7 @@ export default function Settings() {
                           Open
                         </button>
                       )}
-                      {!org.isMain && (
+                      {!org.isMain && canManageCompanies && org.id !== user?.homeOrganizationId && (
                         <button
                           type="button"
                           onClick={() => {
@@ -388,8 +397,9 @@ export default function Settings() {
                 ))}
               </div>
 
+              {canManageCompanies && (
               <div className="mt-5 border-t border-border pt-5">
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Add sub-organization</p>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Add child company</p>
                 <div className="flex flex-col gap-2 sm:flex-row">
                   <input
                     value={subOrganizationName}
@@ -408,45 +418,76 @@ export default function Settings() {
                 </div>
                 {organizationError && <p className="mt-2 text-xs text-chip-pink-fg">{organizationError}</p>}
               </div>
+              )}
 
               <div className="mt-5 border-t border-border pt-5">
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Second main company</p>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Company hierarchy</p>
                 <div className="mb-3 flex items-start gap-2 rounded-2xl bg-chip-blue-bg/40 p-3 text-xs leading-5 text-ink dark:bg-chip-blue-bg/10">
                   <Info size={14} className="mt-0.5 shrink-0 text-chip-blue-fg dark:text-chip-blue-bg" />
-                  <p>
-                    A company can have <b>two main companies</b> — for example one office abroad and one in-country.
-                    The CEO and Admins of <b>either</b> main company can open and manage every sub-company, and a main
-                    company&apos;s IT Manager can switch between companies for <b>inventory only</b>. HR and all other
-                    roles always stay limited to their own organization. Only a CEO can change this.
-                  </p>
+                  <div className="space-y-1">
+                    <p>
+                      <b>Grand Parent → Parent → Child companies.</b> Admins (and IT Managers, for inventory only) can only
+                      reach <b>downward</b>: the Grand Parent reaches the Parent and every Child; the Parent reaches every
+                      Child but never the Grand Parent; a Child only reaches itself.
+                    </p>
+                    <p>
+                      A <b>CEO</b> of any company can open every company in the group. HR and all other roles stay in their
+                      own organization. Only the <b>Grand Parent&apos;s CEO</b> can change these designations.
+                    </p>
+                  </div>
                 </div>
-                <div className="flex flex-col gap-2 sm:flex-row">
-                  <select
-                    value={secondMainId}
-                    onChange={(e) => { setSecondMainId(e.target.value); setSecondMainError("") }}
-                    disabled={!isCeo || saveSecondMain.isPending}
-                    className="field min-w-0 flex-1 appearance-none pr-8 disabled:opacity-70"
-                    aria-label="Second main company"
-                  >
-                    <option value="">None — only {primaryMain?.name || "the main company"}</option>
-                    {(organizations || []).filter((org) => !org.isPrimaryMain).map((org) => (
-                      <option key={org.id} value={org.id}>{org.name}</option>
-                    ))}
-                  </select>
-                  {isCeo && (
+                <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+                  <label className="min-w-0">
+                    <span className="mb-1 block text-[11px] font-semibold text-muted">Grand Parent company</span>
+                    <select
+                      value={grandParentId}
+                      onChange={(e) => {
+                        const v = e.target.value
+                        setGrandParentId(v)
+                        if (v === parentId) setParentId("")
+                        setHierarchyError("")
+                      }}
+                      disabled={!canManageHierarchy || saveHierarchy.isPending}
+                      className="field w-full appearance-none pr-8 disabled:opacity-70"
+                      aria-label="Grand Parent company"
+                    >
+                      {(organizations || []).map((org) => <option key={org.id} value={org.id}>{org.name}</option>)}
+                    </select>
+                  </label>
+                  <label className="min-w-0">
+                    <span className="mb-1 block text-[11px] font-semibold text-muted">Parent company</span>
+                    <select
+                      value={parentId}
+                      onChange={(e) => { setParentId(e.target.value); setHierarchyError("") }}
+                      disabled={!canManageHierarchy || saveHierarchy.isPending}
+                      className="field w-full appearance-none pr-8 disabled:opacity-70"
+                      aria-label="Parent company"
+                    >
+                      <option value="">None</option>
+                      {(organizations || []).filter((org) => org.id !== grandParentId).map((org) => (
+                        <option key={org.id} value={org.id}>{org.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                  {canManageHierarchy && (
                     <button
                       type="button"
-                      onClick={() => saveSecondMain.mutate()}
-                      disabled={secondMainId === currentSecondMainId || saveSecondMain.isPending}
-                      className="pill-accent px-4 py-2.5 text-sm disabled:opacity-60"
+                      onClick={() => {
+                        if (window.confirm("Change the company hierarchy? This changes which companies each Admin can open.")) saveHierarchy.mutate()
+                      }}
+                      disabled={!hierarchyChanged || !grandParentId || saveHierarchy.isPending}
+                      className="pill-accent self-end px-4 py-2.5 text-sm disabled:opacity-60"
+                      aria-label="Save company hierarchy"
                     >
-                      {saveSecondMain.isPending ? "Saving…" : "Save"}
+                      {saveHierarchy.isPending ? "Saving…" : "Save"}
                     </button>
                   )}
                 </div>
-                {!isCeo && <p className="mt-2 text-[11px] text-muted">Only a CEO can choose the second main company.</p>}
-                {secondMainError && <p className="mt-2 text-xs text-chip-pink-fg">{secondMainError}</p>}
-                {saveSecondMain.isSuccess && !saveSecondMain.isPending && !secondMainError && secondMainId === currentSecondMainId && (
+                {!canManageHierarchy && (
+                  <p className="mt-2 text-[11px] text-muted">Only the Grand Parent company&apos;s CEO can change the hierarchy.</p>
+                )}
+                {hierarchyError && <p className="mt-2 text-xs text-chip-pink-fg">{hierarchyError}</p>}
+                {saveHierarchy.isSuccess && !saveHierarchy.isPending && !hierarchyError && !hierarchyChanged && (
                   <p className="mt-2 text-xs text-chip-green-fg">Saved.</p>
                 )}
               </div>

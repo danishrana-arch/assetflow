@@ -2,7 +2,7 @@ const crypto = require("crypto")
 const { Prisma } = require("@prisma/client")
 const prisma = require("../lib/prisma")
 const { distanceMeters } = require("../utils/geo")
-const { MAIN_COMPANY_SELECT, isMainOrganization } = require("../utils/organization")
+const { accessibleOrganizationIds, hasCrossCompanyAccess, loadHomeOrganization } = require("../utils/organization")
 const { normalizeBoundary, siteDistance, polygonCentroid, polygonPerimeterMeters, polygonAreaSqMeters } = require("../utils/site-geofence")
 
 const MANAGEMENT = ["ADMIN", "CEO", "HR", "MANAGEMENT", "DEPARTMENT_HEAD"]
@@ -15,50 +15,22 @@ function id() {
   return `site_${Date.now().toString(36)}_${crypto.randomBytes(5).toString("hex")}`
 }
 
+// Which organizations' sites this request may touch. CEO / ADMIN follow the
+// company hierarchy (utils/organization.js) from their HOME organization —
+// a Parent ADMIN never reaches the Grand Parent, a Child ADMIN only their
+// own; every other role (HR, MANAGEMENT, …) stays on the organization
+// currently selected for them (always their own — they can't switch).
 async function getOrganizationScope(req) {
-  const current = await prisma.organization.findUnique({
-    where: { id: req.user.organizationId },
-    select: { ...MAIN_COMPANY_SELECT, archivedAt: true },
-  })
+  const { role, userId, organizationId } = req.user
+  const home = await loadHomeOrganization(prisma, userId)
+  if (!home || home.archivedAt) return null
 
-  if (!current || current.archivedAt) return null
-
-  const companyId = current.companyId || current.id
-  const isMainCompany = isMainOrganization(current)
-
-  // ADMIN gets company-wide organization scope only when their own account
-  // belongs to a main company (primary or second). A sub-company ADMIN is
-  // organization-scoped.
-  const companyWideAdmin = req.user.role === "ADMIN" && isMainCompany
-
-  // CEO keeps existing company-wide behavior.
-  const companyWide = companyWideAdmin || req.user.role === "CEO"
-
+  const companyWide = ["ADMIN", "CEO"].includes(role) && hasCrossCompanyAccess(role, home)
   if (!companyWide) {
-    return {
-      current,
-      companyId,
-      isMainCompany,
-      companyWide: false,
-      organizationIds: [current.id],
-    }
+    return { companyWide: false, organizationIds: [organizationId] }
   }
-
-  const organizations = await prisma.organization.findMany({
-    where: {
-      archivedAt: null,
-      OR: [{ id: companyId }, { companyId }],
-    },
-    select: { id: true },
-  })
-
-  return {
-    current,
-    companyId,
-    isMainCompany,
-    companyWide: true,
-    organizationIds: organizations.map((org) => org.id),
-  }
+  const organizationIds = await accessibleOrganizationIds(prisma, { role, home })
+  return { companyWide: true, organizationIds }
 }
 
 function canUseOrganization(scope, organizationId) {

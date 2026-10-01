@@ -1,43 +1,35 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { useState } from "react"
+import { useQuery } from "@tanstack/react-query"
+import { Link } from "react-router-dom"
 import { Building2, Users, Boxes, FolderKanban, Activity } from "lucide-react"
 import api from "../api/client"
 import PageHeader from "../components/ui/PageHeader"
-import { useAuth } from "../context/AuthContext"
+
+// Only the companies the viewer may access are returned (company hierarchy —
+// a Parent ADMIN never sees the Grand Parent's numbers). The Grand Parent /
+// Parent designation itself is changed in Settings → Company hierarchy.
+const HIERARCHY_BADGE = {
+  GRAND_PARENT: "Grand Parent",
+  PARENT: "Parent company",
+}
 
 export default function OrganizationComparison() {
-  const { user } = useAuth()
-  const queryClient = useQueryClient()
-  const [confirmId, setConfirmId] = useState(null)
-  const [error, setError] = useState("")
-
   const q = useQuery({
     queryKey: ["organization-comparison"],
     queryFn: () => api.get("/organization/comparison").then((r) => r.data),
   })
 
-  const setMain = useMutation({
-    mutationFn: (targetOrganizationId) =>
-      api.patch("/organization/company/set-main", { targetOrganizationId }).then((r) => r.data),
-    onSuccess: () => {
-      setConfirmId(null)
-      setError("")
-      queryClient.invalidateQueries({ queryKey: ["organization-comparison"] })
-      queryClient.invalidateQueries({ queryKey: ["organization"] })
-    },
-    onError: (err) => setError(err?.response?.data?.error || "Could not change the main company"),
-  })
-
-  const canChangeMain = user?.role === "CEO"
-
   return (
     <div>
       <PageHeader
         title="Organization Comparison"
-        subtitle="Compare every active organization under the company from one view."
+        subtitle="Compare every company you can access from one view."
         backTo="/"
+        actions={
+          <Link to="/settings" className="pill-secondary px-4 py-2.5 text-sm">
+            Company hierarchy
+          </Link>
+        }
       />
-      {error && <p className="mb-4 text-xs font-medium text-red-500">{error}</p>}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {(q.data || []).map((o) => (
           <div key={o.id} className="card p-5">
@@ -45,11 +37,9 @@ export default function OrganizationComparison() {
               <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-accent/10 text-accent">
                 <Building2 size={19} />
               </div>
-              {o.isMain && (
-                <span className="rounded-full bg-accent/10 px-2 py-1 text-[9px] font-semibold text-accent">
-                  {o.isPrimaryMain === false ? "Main company (second)" : "Main company"}
-                </span>
-              )}
+              <span className="rounded-full bg-accent/10 px-2 py-1 text-[9px] font-semibold text-accent">
+                {HIERARCHY_BADGE[o.hierarchyRole] || "Child company"}
+              </span>
             </div>
             <p className="mt-4 text-base font-semibold text-ink">{o.name}</p>
             <div className="mt-4 grid grid-cols-2 gap-2">
@@ -74,29 +64,6 @@ export default function OrganizationComparison() {
               </span>
               <span>{o.departments} departments</span>
             </div>
-
-            {canChangeMain && !o.isMain && (
-              <div className="mt-4 border-t border-border pt-3">
-                {confirmId === o.id ? (
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => setMain.mutate(o.id)}
-                      disabled={setMain.isPending}
-                      className="pill-accent px-3 py-1.5 text-xs disabled:opacity-60"
-                    >
-                      {setMain.isPending ? "Applying…" : "Confirm — make main"}
-                    </button>
-                    <button onClick={() => setConfirmId(null)} className="px-3 py-1.5 text-xs text-muted">
-                      Cancel
-                    </button>
-                  </div>
-                ) : (
-                  <button onClick={() => setConfirmId(o.id)} className="text-xs font-semibold text-accent">
-                    Make this the main company
-                  </button>
-                )}
-              </div>
-            )}
           </div>
         ))}
         {!q.data?.length && !q.isLoading && (
