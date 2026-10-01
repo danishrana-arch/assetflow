@@ -1413,11 +1413,18 @@ Per a live chat request (2026-09-29), `Dashboard.jsx` header:
   the disk shows a small "Sun"/"Moon" label to its left (hover target
   covers only the disk; the glow stays click-through). Everything ticks
   once a minute.
-- The header card is a frosted-glass panel (`.glass-panel` in
-  `styles/index.css`: translucent tinted fill + `backdrop-filter` blur,
-  diagonal sheen, bright top edge; dark-mode variant). `.glass-glow` is a
-  soft light that follows the cursor (`--gx`/`--gy` set in the section's
-  `onMouseMove`) and fades in on hover, with a 1px lift; disabled under
+- The header card is a realistic glass pane (`styles/index.css`):
+  `.glass-scene` wraps `.glass-backdrop` (four blurred colour blobs —
+  accent, teal, warm sun, violet — slowly drifting) and `.glass-panel` on
+  top (low-opacity tinted fill + `backdrop-filter: blur saturate
+  brightness`, bevelled edge from inset highlights/shadows, `::before`
+  frosted SVG-noise grain, `::after` curved top reflection + diagonal
+  streak). The only pointer reaction is `.glass-glow`, a soft shine under
+  the cursor (`--gx`/`--gy` from `onMouseMove`) that fades in while the
+  cursor is over the pane — no tilt, lift or border/shadow change (removed
+  at the user's request). Text layer is `z-[2]` (above the reflection),
+  the sun `z-[3]` (so its hover label still works). Dark-mode variant
+  included; backdrop drift and the shine fade are off under
   `prefers-reduced-motion`.
 
 ## Post-module addition: clickable dashboard asset stat cards

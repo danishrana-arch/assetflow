@@ -655,17 +655,23 @@ export default function Dashboard() {
           DASHBOARD HEADER
       ======================================================= */}
 
+      <div className="glass-scene w-full">
+      {/* Coloured light behind the pane — what the glass frosts and bends. */}
+      <div className="glass-backdrop" aria-hidden="true">
+        <span className="b1" /><span className="b2" /><span className="b3" /><span className="b4" />
+      </div>
       <section
         className="glass-panel w-full overflow-hidden"
         onMouseMove={(e) => {
-          // Position the hover light under the cursor (CSS vars read by .glass-glow).
-          const r = e.currentTarget.getBoundingClientRect()
-          e.currentTarget.style.setProperty("--gx", `${e.clientX - r.left}px`)
-          e.currentTarget.style.setProperty("--gy", `${e.clientY - r.top}px`)
+          // Moves the soft shine (.glass-glow) to the cursor.
+          const el = e.currentTarget
+          const r = el.getBoundingClientRect()
+          el.style.setProperty("--gx", `${e.clientX - r.left}px`)
+          el.style.setProperty("--gy", `${e.clientY - r.top}px`)
         }}
       >
         <div className="glass-glow" aria-hidden="true" />
-        <div className="relative flex flex-col gap-4 p-4 sm:gap-5 sm:p-5 lg:flex-row lg:items-center lg:justify-between lg:p-6 lg:pr-48">
+        <div className="relative z-[2] flex flex-col gap-4 p-4 sm:gap-5 sm:p-5 lg:flex-row lg:items-center lg:justify-between lg:p-6 lg:pr-48">
 
           <div className="min-w-0 pr-12 lg:pr-0">
             <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted sm:text-xs">
@@ -710,9 +716,10 @@ export default function Dashboard() {
             with only its upper-left quarter showing. */}
         <DashboardSky
           timeZone={organization?.timezone}
-          className="pointer-events-none absolute bottom-0 right-0 h-56 w-56 translate-x-1/2 translate-y-1/2 lg:h-[460px] lg:w-[460px]"
+          className="pointer-events-none absolute bottom-0 right-0 z-[3] h-56 w-56 translate-x-1/2 translate-y-1/2 lg:h-[460px] lg:w-[460px]"
         />
       </section>
+      </div>
 
 
       {/* ======================================================
