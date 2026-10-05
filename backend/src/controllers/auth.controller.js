@@ -9,7 +9,7 @@ const { logAudit } = require("../utils/audit")
 const { isValidTimeZone } = require("../utils/timezone")
 const { sendEmail, appUrl, escapeHtml } = require("../utils/mailer")
 const { createNotification } = require("../utils/notifications")
-const { accessibleOrganizations, hierarchyFlags, canManageHierarchy } = require("../utils/organization")
+const { accessibleOrganizations, canManageCompanies } = require("../utils/organization")
 
 // Failed-login alerting: after MAX_FAILED_LOGINS wrong passwords within
 // FAILED_LOGIN_WINDOW_MS, the account owner is emailed (and gets an in-app
@@ -61,9 +61,6 @@ function organizationSummary(organization) {
     name: organization.name,
     slug: organization.slug,
     companyId: organization.companyId,
-    parentOrganizationId: organization.parentOrganizationId,
-    depth: organization.depth || 0,
-    ...hierarchyFlags(organization),
     primaryColor: organization.primaryColor,
     accentColor: organization.accentColor,
     theme: organization.theme,
@@ -74,7 +71,7 @@ function organizationSummary(organization) {
 
 // The organizations shown in the company selector: exactly the ones this
 // user may switch into (same rule applyOrganizationScope enforces — see
-// utils/organization.js), in tree order (each Grand Parent, then what's under it).
+// utils/organization.js), own company first.
 async function getSelectableOrganizations(user) {
   const organizations = await accessibleOrganizations(prisma, {
     userId: user.id,
@@ -110,8 +107,6 @@ async function registerOrganization(req, res, next) {
         name: organizationName,
         slug: `${slug}-${Math.random().toString(36).slice(2, 6)}`,
         companyId: rootId,
-        // A new company group starts as its own Grand Parent (utils/organization.js).
-        hierarchyRole: "GRAND_PARENT",
         timezone: selectedTimeZone,
         users: {
           create: {
@@ -200,7 +195,7 @@ async function login(req, res, next) {
         status: user.status,
         canManageAttendance: user.canManageAttendance,
         homeOrganizationId: user.organizationId,
-        canManageHierarchy: canManageHierarchy(user.role, user.organization),
+        canManageCompanies: canManageCompanies(user.role),
       },
       organization: organizationSummary(user.organization),
       organizations,
@@ -348,8 +343,8 @@ async function me(req, res, next) {
       // these details are shown, decrypted.
       ...omitDetailFields(safeUser),
       homeOrganizationId: user.organizationId,
-      // Only the Grand Parent company's CEO may change Grand Parent / Parent.
-      canManageHierarchy: canManageHierarchy(user.role, user.organization),
+      // Only a CEO adds companies and gives others access to them.
+      canManageCompanies: canManageCompanies(user.role),
       organization: activeOrganization,
       organizations,
     })

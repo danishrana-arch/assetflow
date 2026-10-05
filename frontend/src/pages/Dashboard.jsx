@@ -39,6 +39,8 @@ import api from "../api/client"
 import { useAuth } from "../context/AuthContext"
 import StatCard from "../components/StatCard"
 import AttendanceSnapshot from "../components/AttendanceSnapshot"
+import QuickAttendance from "../components/QuickAttendance"
+import CompaniesOverview from "../components/CompaniesOverview"
 import ProjectTracker from "../components/ProjectTracker"
 import { canManageInventory } from "../utils/roles"
 import IconChip from "../components/ui/IconChip"
@@ -642,6 +644,9 @@ export default function Dashboard() {
                     "Your organization"}
                 </p>
               )}
+
+            {/* CEO / Admin / HR only (the component checks the role). */}
+            <QuickAttendance className="mt-3" />
           </div>
 
           <DashboardClock timeZone={organization?.timezone} />
@@ -655,6 +660,9 @@ export default function Dashboard() {
         />
       </section>
       </div>
+
+      {/* CEO only: every company at once. */}
+      <CompaniesOverview />
 
 
       {/* ======================================================

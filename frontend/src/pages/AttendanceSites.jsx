@@ -160,7 +160,7 @@ export default function AttendanceSites() {
                 <span className="mb-1 block text-xs font-semibold text-muted">Organization</span>
                 {isMainCompanyAdmin ? (
                   <select value={form.organizationId || organization?.id || ""} onChange={(e) => setForm((f) => ({ ...f, organizationId: e.target.value, projectId: "" }))} className="field w-full">
-                    {organizations.map((org) => <option key={org.id} value={org.id}>{org.isGrandParent ? `${org.name} (Grand Parent)` : org.isParent ? `${org.name} (Parent)` : org.name}</option>)}
+                    {organizations.map((org) => <option key={org.id} value={org.id}>{org.name}</option>)}
                   </select>
                 ) : (
                   <div className="field w-full bg-surface-2 text-sm font-semibold text-ink">{organization?.name || "Current organization"}</div>

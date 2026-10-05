@@ -4,13 +4,8 @@ import { Building2, Users, Boxes, FolderKanban, Activity } from "lucide-react"
 import api from "../api/client"
 import PageHeader from "../components/ui/PageHeader"
 
-// Only the companies the viewer may access are returned (company hierarchy —
-// a Parent ADMIN never sees the Grand Parent's numbers). The Grand Parent /
-// Parent designation itself is changed in Settings → Company hierarchy.
-const HIERARCHY_BADGE = {
-  GRAND_PARENT: "Grand Parent",
-  PARENT: "Parent company",
-}
+// Only the companies the viewer may access are returned (CEO: all; Admin:
+// own + the ones a CEO gave them). Access is managed in Settings.
 
 export default function OrganizationComparison() {
   const q = useQuery({
@@ -26,7 +21,7 @@ export default function OrganizationComparison() {
         backTo="/"
         actions={
           <Link to="/settings" className="pill-secondary px-4 py-2.5 text-sm">
-            Company hierarchy
+            Company access
           </Link>
         }
       />
@@ -37,9 +32,9 @@ export default function OrganizationComparison() {
               <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-accent/10 text-accent">
                 <Building2 size={19} />
               </div>
-              <span className="rounded-full bg-accent/10 px-2 py-1 text-[9px] font-semibold text-accent">
-                {HIERARCHY_BADGE[o.hierarchyRole] || "Child company"}
-              </span>
+              {o.isHome && (
+                <span className="rounded-full bg-accent/10 px-2 py-1 text-[9px] font-semibold text-accent">Your company</span>
+              )}
             </div>
             <p className="mt-4 text-base font-semibold text-ink">{o.name}</p>
             <div className="mt-4 grid grid-cols-2 gap-2">

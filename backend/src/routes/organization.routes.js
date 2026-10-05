@@ -6,11 +6,7 @@ const {
   createSubOrganization,
   archiveSubOrganization,
   getOrganizationComparison,
-  setMainCompany,
-  setCompanyHierarchy,
-  setOfficeType,
-  listCallCenterAdmins,
-  setCallCenterAccess,
+  listAccessUsers,
   grantOrganizationAccess,
   revokeOrganizationAccess,
 } = require("../controllers/organization.controller")
@@ -29,17 +25,13 @@ router.get("/", getOrganization)
 router.get("/company", listCompanyOrganizations)
 // ADMIN/CEO only — matches the frontend's RequireOwner.
 router.get("/comparison", requireRole("ADMIN", "CEO"), getOrganizationComparison)
-router.post("/suborganizations", requireRole("ADMIN", "CEO"), createSubOrganization)
-router.delete("/suborganizations/:id", requireRole("ADMIN", "CEO"), archiveSubOrganization)
 router.patch("/", requireRole("ADMIN", "CEO"), updateOrganization)
-router.patch("/company/set-main", requireRole("CEO"), setMainCompany)
-// Grand Parent CEO only (re-checked in the controller): { organizations: [...] }.
-router.patch("/company/hierarchy", requireRole("CEO"), setCompanyHierarchy)
-// CEO only: IT office / call center, and which admins reach every call center.
-router.patch("/company/:id/office-type", requireRole("CEO"), setOfficeType)
-router.get("/call-center-admins", requireRole("CEO"), listCallCenterAdmins)
-router.patch("/call-center-admins/:userId", requireRole("CEO"), setCallCenterAccess)
-// CEO only: which extra Admins / IT Managers may open this company.
+
+// CEO only: add / remove companies and decide which Admins / IT Managers
+// may open which company (utils/organization.js).
+router.post("/suborganizations", requireRole("CEO"), createSubOrganization)
+router.delete("/suborganizations/:id", requireRole("CEO"), archiveSubOrganization)
+router.get("/access-users", requireRole("CEO"), listAccessUsers)
 router.post("/company/:id/access", requireRole("CEO"), grantOrganizationAccess)
 router.delete("/company/:id/access/:userId", requireRole("CEO"), revokeOrganizationAccess)
 

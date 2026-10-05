@@ -45,10 +45,10 @@ function normalizeAuthPayload(data) {
     role: data.role,
     status: data.status,
     canManageAttendance: data.canManageAttendance,
-    // Company hierarchy (decided by the backend): the user's own company and
-    // whether they may change the Grand Parent / Parent designation.
+    // Decided by the backend: the user's own company, and whether they may add
+    // companies / give others access (CEO only).
     homeOrganizationId: data.homeOrganizationId,
-    canManageHierarchy: !!data.canManageHierarchy,
+    canManageCompanies: !!data.canManageCompanies,
     organization: data.organization,
   }
 

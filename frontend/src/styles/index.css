@@ -213,11 +213,12 @@ h1, h2, h3, h4 {
   /* ── Realistic glass panel (dashboard header) ─────────────────────────
      Real glass only reads as glass when there's something behind it to
      frost, so the panel sits in .glass-scene over .glass-backdrop (soft,
-     slowly drifting colour blobs). Layers, back to front:
-       .glass-backdrop   coloured light behind the pane
+     slowly drifting light and shade — neutral only, no colour, so it reads
+     as clear frosted glass). Layers, back to front:
+       .glass-backdrop   neutral light/shade behind the pane
        .glass-panel      translucent fill + backdrop blur/saturation,
                          bevelled edge (inset highlights/shadows)
-       ::before          frosted grain + faint accent tint
+       ::before          frosted grain
        ::after           curved specular reflection across the top
        .glass-glow       soft shine under the cursor (--gx/--gy, set in
                          JS) — the only thing that reacts to the pointer
@@ -243,10 +244,10 @@ h1, h2, h3, h4 {
     filter: blur(28px);
     animation: glass-drift 22s ease-in-out infinite alternate;
   }
-  .glass-backdrop .b1 { width: 46%; height: 170%; left: -8%; top: -60%; background: color-mix(in srgb, var(--accent) 38%, transparent); }
-  .glass-backdrop .b2 { width: 34%; height: 150%; left: 36%; top: 10%; background: rgba(95, 209, 201, 0.40); animation-duration: 28s; animation-delay: -6s; }
-  .glass-backdrop .b3 { width: 30%; height: 160%; right: -6%; top: -20%; background: rgba(255, 170, 80, 0.45); animation-duration: 25s; animation-delay: -12s; }
-  .glass-backdrop .b4 { width: 22%; height: 120%; left: 18%; bottom: -70%; background: rgba(183, 148, 255, 0.30); animation-duration: 31s; animation-delay: -3s; }
+  .glass-backdrop .b1 { width: 46%; height: 170%; left: -8%; top: -60%; background: rgba(255, 255, 255, 0.85); }
+  .glass-backdrop .b2 { width: 34%; height: 150%; left: 36%; top: 10%; background: color-mix(in srgb, var(--ink) 7%, transparent); animation-duration: 28s; animation-delay: -6s; }
+  .glass-backdrop .b3 { width: 30%; height: 160%; right: -6%; top: -20%; background: rgba(255, 255, 255, 0.7); animation-duration: 25s; animation-delay: -12s; }
+  .glass-backdrop .b4 { width: 22%; height: 120%; left: 18%; bottom: -70%; background: color-mix(in srgb, var(--ink) 5%, transparent); animation-duration: 31s; animation-delay: -3s; }
   @keyframes glass-drift {
     0%   { transform: translate(0, 0) scale(1); }
     50%  { transform: translate(6%, 8%) scale(1.08); }
@@ -263,8 +264,8 @@ h1, h2, h3, h4 {
         color-mix(in srgb, var(--surface) 50%, transparent) 0%,
         color-mix(in srgb, var(--surface) 22%, transparent) 50%,
         color-mix(in srgb, var(--surface) 36%, transparent) 100%);
-    -webkit-backdrop-filter: blur(28px) saturate(210%) brightness(1.06);
-    backdrop-filter: blur(28px) saturate(210%) brightness(1.06);
+    -webkit-backdrop-filter: blur(28px) saturate(100%) brightness(1.04);
+    backdrop-filter: blur(28px) saturate(100%) brightness(1.04);
     border: 1px solid rgba(255, 255, 255, 0.35);
     box-shadow:
       0 18px 40px -12px rgba(26, 26, 26, 0.18),
@@ -283,8 +284,7 @@ h1, h2, h3, h4 {
     border-radius: inherit;
     pointer-events: none;
     background-image:
-      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.55 0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E"),
-      radial-gradient(120% 90% at 0% 0%, color-mix(in srgb, var(--accent) 6%, transparent), transparent 60%);
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.55 0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
     opacity: 0.55;
     mix-blend-mode: overlay;
   }
@@ -361,10 +361,10 @@ h1, h2, h3, h4 {
   .glass-panel:hover .glass-rim-light { opacity: 1; }
 
   .dark .glass-backdrop { background: var(--surface); }
-  .dark .glass-backdrop .b1 { background: color-mix(in srgb, var(--accent) 30%, transparent); }
-  .dark .glass-backdrop .b2 { background: rgba(60, 160, 150, 0.30); }
-  .dark .glass-backdrop .b3 { background: rgba(255, 140, 60, 0.32); }
-  .dark .glass-backdrop .b4 { background: rgba(140, 110, 230, 0.25); }
+  .dark .glass-backdrop .b1 { background: rgba(255, 255, 255, 0.10); }
+  .dark .glass-backdrop .b2 { background: rgba(0, 0, 0, 0.35); }
+  .dark .glass-backdrop .b3 { background: rgba(255, 255, 255, 0.07); }
+  .dark .glass-backdrop .b4 { background: rgba(0, 0, 0, 0.25); }
   .dark .glass-panel {
     background:
       linear-gradient(135deg,

@@ -3,25 +3,6 @@ import { Building2, ChevronDown, Loader2 } from "lucide-react"
 import { useQueryClient } from "@tanstack/react-query"
 import { useAuth } from "../context/AuthContext"
 
-// Tree-style option labels for a native <select> (leading spaces must be
-// non-breaking or the browser strips them). The API returns the list in
-// tree order with a `depth` per row (backend utils/organization.js):
-//   Grand Parent A
-//    └─ Parent
-//        └─ Child 1
-//   Grand Parent B
-//    └─ Child 2
-const NBSP = " "
-export function treeLabels(organizations) {
-  const labels = {}
-  for (const org of organizations) {
-    const depth = org.depth || 0
-    const suffix = `${org.isGrandParent ? " — Grand Parent" : org.isParent ? " — Parent" : ""}${org.isCallCenter ? " · Call center" : ""}`
-    labels[org.id] = `${depth ? `${NBSP.repeat(depth * 4 - 3)}└─ ` : ""}${org.name}${suffix}`
-  }
-  return labels
-}
-
 export default function OrganizationSwitcher({ compact = false }) {
   const { user, organization, organizations, switchOrganization } = useAuth()
   const queryClient = useQueryClient()
@@ -29,12 +10,11 @@ export default function OrganizationSwitcher({ compact = false }) {
 
   if (!user) return null
 
-  // The API only returns organizations this user may access, already in
-  // tree order (backend utils/organization.js).
+  // The API only returns organizations this user may access, own first
+  // (backend utils/organization.js).
   const canSwitch = ["ADMIN", "CEO", "IT_MANAGER"].includes(user.role) && organizations.length > 1
   const home = organizations.find((o) => o.id === user.homeOrganizationId)
   const main = home || organizations[0] || organization
-  const labels = treeLabels(organizations)
 
   async function handleChange(event) {
     const id = event.target.value
@@ -69,7 +49,7 @@ export default function OrganizationSwitcher({ compact = false }) {
     <div className={`flex min-w-0 items-center gap-2 ${compact ? "max-w-[240px]" : "max-w-[380px]"}`}>
       <div className="hidden min-w-0 sm:block">
         <p className="truncate text-[9px] font-semibold uppercase tracking-[0.14em] text-muted-2">
-          {main?.isGrandParent ? "Grand parent" : main?.isParent ? "Parent company" : "Company"}
+          Your company
         </p>
         <p className="max-w-[140px] truncate text-xs font-semibold text-ink">{main?.name || "Company"}</p>
       </div>
@@ -84,7 +64,7 @@ export default function OrganizationSwitcher({ compact = false }) {
         >
           {organizations.map((org) => (
             <option key={org.id} value={org.id}>
-              {labels[org.id]}
+              {org.id === user.homeOrganizationId ? `${org.name} (yours)` : org.name}
             </option>
           ))}
         </select>

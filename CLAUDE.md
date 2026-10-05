@@ -1414,8 +1414,10 @@ Per a live chat request (2026-09-29), `Dashboard.jsx` header:
   covers only the disk; the glow stays click-through). Everything ticks
   once a minute.
 - The header card is a realistic glass pane (`styles/index.css`):
-  `.glass-scene` wraps `.glass-backdrop` (four blurred colour blobs —
-  accent, teal, warm sun, violet — slowly drifting) and `.glass-panel` on
+  `.glass-scene` wraps `.glass-backdrop` (four blurred blobs slowly
+  drifting — **neutral white/grey only since 2026-10-05**, no colour, and
+  `saturate(100%)`, so it reads as clear frosted glass; the sun/moon is the
+  only colour) and `.glass-panel` on
   top (low-opacity tinted fill + `backdrop-filter: blur saturate
   brightness`, bevelled edge from inset highlights/shadows, `::before`
   frosted SVG-noise grain, `::after` curved top reflection + diagonal
@@ -2026,6 +2028,52 @@ Verified live: October 6 rows → 2.
   imported asset is AVAILABLE).
 - Verified 12/12 against the test backend (validation, blank rows dropped,
   "none", legacy submit, HR read-back); the temp form was deleted.
+
+## Post-module change: flat company access, CEO all-companies dashboard, quick check-in (2026-10-05)
+
+**Supersedes every hierarchy / office-type / call-center rule in the
+2026-10-05 and 2026-10-01 sections below.**
+
+- **Access** (`backend/src/utils/organization.js`, rewritten): all companies
+  in a group are equal. CEO → every company of the group; ADMIN /
+  IT_MANAGER → own company + `OrganizationAccessGrant` rows; everyone else
+  → own company only (grants ignored). `hierarchyRole`,
+  `parentOrganizationId`, `officeType`, `User.callCenterAccess` are kept in
+  the DB but no longer read anywhere. Exports: `ORG_ACCESS_SELECT`,
+  `GRANTABLE_ROLES`, `canAccessOrganization`, `hasCrossCompanyAccess`,
+  `accessibleOrganizations(Ids)`, `loadAccess`, `canManageCompanies` (CEO).
+- **CEO only**: add company (`POST /organization/suborganizations`, flat,
+  no parent), remove company (`DELETE …/:id` — not your own; also deletes
+  that company's grants), `GET /organization/access-users`,
+  `POST/DELETE /organization/company/:id/access`. Removed endpoints:
+  `company/hierarchy`, `company/set-main`, `company/:id/office-type`,
+  `call-center-admins*`. `/auth/me` sends `canManageCompanies` (was
+  `canManageHierarchy`).
+- Migration `20261005150000_flat_company_access` turns any remaining
+  `callCenterAccess` flag into per-company grants and clears it — **not yet
+  deployed** (harmless: the flag is unread, and the one flagged admin
+  already had grants for every company).
+- `GET /organization/comparison` now returns, per company (own local day):
+  `presentToday` (PRESENT+LATE), `lateToday`, `absentToday`,
+  `onLeaveToday`, `notMarkedToday`, `openTickets`, `pendingLeave`,
+  `isHome`, plus the old fields; attendance rate counts LATE as present.
+- Frontend: Settings → "Companies & Access" (flat cards; CEO gets access
+  chips + "+ Give access…" + Remove + "Add company"); selector and
+  Organization Comparison show plain names ("(yours)" / "Your company").
+  New `components/CompaniesOverview.jsx` (CEO dashboard, under the header:
+  "Company overview" with a dropdown — "All companies" = totals, or one
+  company = its own numbers + an "Open <company>" switch button; 10 compact
+  tiles — one row on xl, no table) and
+  `components/QuickAttendance.jsx` (CEO/ADMIN/HR, in the dashboard header:
+  Check in → `POST /attendance/self/mark`, Check out →
+  `/attendance/self/offline-sync`, same query key as My Attendance; online
+  only, best-effort location, errors link to My Attendance).
+- Verified 37/37 read-only API checks on a temp backend (:4099) with real
+  users (every role's company list = own + grants / all for CEO, foreign
+  switch 403, non-CEO add/grant/list 403, CEO can't remove own company,
+  old endpoints 404) + Playwright screenshots (CEO dashboard/overview/
+  Settings, HR quick check-in), no page errors. Check in/out themselves
+  were not clicked (they write).
 
 ## Post-module change: one grouped nav, compact header, Export page removed (2026-10-05)
 

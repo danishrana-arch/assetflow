@@ -25,7 +25,7 @@ async function getOrganizationScope(req) {
   const home = await loadHomeOrganization(prisma, userId)
   if (!home || home.archivedAt) return null
 
-  const access = { callCenterAccess: !!req.user.callCenterAccess, grantedOrganizationIds: req.user.grantedOrganizationIds || [] }
+  const access = { grantedOrganizationIds: req.user.grantedOrganizationIds || [] }
   const companyWide = ["ADMIN", "CEO"].includes(role) && hasCrossCompanyAccess(role, home, access)
   if (!companyWide) {
     return { companyWide: false, organizationIds: [organizationId] }

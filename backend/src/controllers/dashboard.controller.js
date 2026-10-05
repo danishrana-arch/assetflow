@@ -238,7 +238,7 @@ async function getExecutiveOverview(req, res, next) {
       : { id: organizationId, archivedAt: null }
     const organizations = await prisma.organization.findMany({
       where: orgWhere,
-      select: { id: true, name: true, companyId: true, parentOrganizationId: true },
+      select: { id: true, name: true, companyId: true },
       orderBy: { name: "asc" },
     })
     const orgIds = organizations.map((o) => o.id)

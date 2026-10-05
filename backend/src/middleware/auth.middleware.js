@@ -1,13 +1,11 @@
 const { verifyToken } = require("../utils/jwt")
 const prisma = require("../lib/prisma")
 const { MANAGEMENT_ROLES, hasModuleAccess } = require("../utils/roles")
-const { HIERARCHY_SELECT, canAccessOrganization } = require("../utils/organization")
+const { ORG_ACCESS_SELECT, canAccessOrganization } = require("../utils/organization")
 
-// Organization switching (X-Organization-Id) follows the company hierarchy —
-// see utils/organization.js. Strictly downward for ADMIN / IT_MANAGER
-// (a Grand Parent → only what's under it, never another Grand Parent;
-// Parent → its Children; Child → own only); a CEO may enter any company of
-// their group, every Grand Parent included; HR and every other role are
+// Organization switching (X-Organization-Id) follows utils/organization.js:
+// a CEO may enter any company of their group; an ADMIN / IT_MANAGER only
+// their own plus the companies a CEO gave them; HR and every other role are
 // locked to their own organization. This is THE enforcement point for every
 // organization-scoped API: controllers read req.user.organizationId, which
 // only changes here and only to an organization the user may access.
@@ -22,7 +20,7 @@ async function applyOrganizationScope(req) {
   const role = req.user.role
   const home = await prisma.organization.findUnique({
     where: { id: req.user.homeOrganizationId },
-    select: HIERARCHY_SELECT,
+    select: ORG_ACCESS_SELECT,
   })
 
   if (!home) {
@@ -36,10 +34,10 @@ async function applyOrganizationScope(req) {
 
   const target = await prisma.organization.findUnique({
     where: { id: selectedOrganizationId },
-    select: HIERARCHY_SELECT,
+    select: ORG_ACCESS_SELECT,
   })
 
-  if (!canAccessOrganization(role, home, target, { callCenterAccess: req.user.callCenterAccess, grantedOrganizationIds: req.user.grantedOrganizationIds })) {
+  if (!canAccessOrganization(role, home, target, { grantedOrganizationIds: req.user.grantedOrganizationIds })) {
     const error = new Error(
       "You do not have access to this organization"
     )
@@ -74,12 +72,10 @@ async function requireAuth(req, res, next) {
         role: true,
         status: true,
         departmentId: true,
-        callCenterAccess: true,
         accessGrants: { select: { organizationId: true } },
         organization: {
           select: {
             companyId: true,
-            parentOrganizationId: true,
             archivedAt: true,
           },
         },
@@ -107,7 +103,6 @@ async function requireAuth(req, res, next) {
         dbUser.organization?.companyId || decoded.companyId,
       role: dbUser.role,
       departmentId: dbUser.departmentId,
-      callCenterAccess: dbUser.callCenterAccess,
       grantedOrganizationIds: dbUser.accessGrants.map((g) => g.organizationId),
     }
 
