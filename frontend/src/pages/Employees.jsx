@@ -208,7 +208,11 @@ export default function Employees() {
 
   const [search, setSearch] = useState("")
   const debouncedSearch = useDebouncedValue(search)
-  const [filters, setFilters] = useState({ status: "", department: "", role: "" })
+  // ?status= preselects a status tile (e.g. the CEO dashboard Company overview).
+  const [filters, setFilters] = useState(() => {
+    const status = new URLSearchParams(window.location.search).get("status")
+    return { status: STAT_TILES.some((t) => t.key && t.key === status) ? status : "", department: "", role: "" }
+  })
   const [sort, setSort] = useState({ field: "name", order: "asc" })
   const [page, setPage] = useState(1)
   const [selected, setSelected] = useState(() => new Set())

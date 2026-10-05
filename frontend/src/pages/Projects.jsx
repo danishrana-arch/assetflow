@@ -436,7 +436,11 @@ function WorkFieldManager({ onClose }) {
 export default function Projects() {
   const { user } = useAuth()
   const queryClient = useQueryClient()
-  const [activeStatus, setActiveStatus] = useState(null)
+  // ?status= preselects a status card (e.g. the CEO dashboard Company overview).
+  const [activeStatus, setActiveStatus] = useState(() => {
+    const status = new URLSearchParams(window.location.search).get("status")
+    return ["NOT_STARTED", "IN_PROGRESS", "COMPLETED"].includes(status) ? status : null
+  })
   const [search, setSearch] = useState("")
   const [deadlineFilter, setDeadlineFilter] = useState("ALL")
   const [selected, setSelected] = useState(null)

@@ -1,9 +1,8 @@
 import { NavLink } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
 import api from "../api/client"
-import { BellRing, UserCircle, LogOut, X, Sun, Moon } from "lucide-react"
+import { BellRing, UserCircle, LogOut, X } from "lucide-react"
 import { useAuth } from "../context/AuthContext"
-import { useTheme } from "../context/ThemeContext"
 import { navGroups } from "../utils/navItems"
 import OrganizationSwitcher from "./OrganizationSwitcher"
 
@@ -33,8 +32,6 @@ function Row({ to, icon: Icon, label, end, onClick, showDot = false }) {
 // Same pages, same grouping as the desktop Sidebar (utils/navItems.js).
 export default function MobileNav({ open, onClose }) {
   const { user, logout } = useAuth()
-  const { mode, toggleMode } = useTheme()
-  const isDark = mode === "dark"
 
   const { data: unreadNotifications } = useQuery({
     queryKey: ["notifications-unread-count"],
@@ -80,13 +77,6 @@ export default function MobileNav({ open, onClose }) {
           </div>
         </nav>
         <div className="mt-3 space-y-1 border-t border-border pt-3">
-          <button
-            onClick={toggleMode}
-            className="flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-sm text-muted hover:bg-surface-2 hover:text-ink"
-            aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
-          >
-            {isDark ? <Sun size={17} /> : <Moon size={17} />} {isDark ? "Light mode" : "Dark mode"}
-          </button>
           <button
             onClick={() => { logout(); onClose() }}
             className="flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-sm text-muted hover:bg-chip-pink-bg hover:text-chip-pink-fg"

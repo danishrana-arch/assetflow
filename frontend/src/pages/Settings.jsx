@@ -363,7 +363,6 @@ export default function Settings() {
                       <div className="min-w-0">
                         <p className="truncate text-sm font-semibold text-ink">
                           {org.name}
-                          {org.id === user?.homeOrganizationId && <span className="ml-1.5 text-[10px] font-semibold text-muted">(yours)</span>}
                         </p>
                         {canManageCompanies && (
                           <div className="mt-1.5 flex flex-wrap items-center gap-1">

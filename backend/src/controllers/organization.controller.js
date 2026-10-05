@@ -453,7 +453,9 @@ async function getOrganizationComparison(req, res, next) {
 
       const [employees, todayByStatus, assets, assignedAssets, activeProjects, completedProjects, monthByStatus, departments, openTickets, pendingLeave] = await Promise.all([
         prisma.user.count({ where: { organizationId: org.id, status: "ACTIVE" } }),
-        prisma.attendanceRecord.groupBy({ by: ["status"], where: onDay, _count: { _all: true } }),
+        // Active employees only — the same roster the Attendance page lists, so
+        // the dashboard tiles match the filtered lists they link to.
+        prisma.attendanceRecord.groupBy({ by: ["status"], where: { ...onDay, employee: { status: "ACTIVE" } }, _count: { _all: true } }),
         prisma.asset.count({ where: { organizationId: org.id } }),
         prisma.asset.count({ where: { organizationId: org.id, status: "ASSIGNED" } }),
         prisma.project.count({ where: { organizationId: org.id, status: "IN_PROGRESS" } }),

@@ -9,6 +9,7 @@ import { useAuth } from "../context/AuthContext"
 import GlobalSearch from "../components/GlobalSearch"
 import NotificationBell from "../components/NotificationBell"
 import RoleBadge from "../components/RoleBadge"
+import ThemeToggle from "../components/ThemeToggle"
 import { usePageHistoryTracker } from "../utils/pageHistory"
 
 // How long the cursor must stay on the sidebar before it (and the page shift
@@ -82,6 +83,7 @@ export default function DashboardLayout() {
               )}
             </div>
             <div className="flex shrink-0 items-center gap-2">
+              <ThemeToggle />
               {showCompanySwitcher && (
                 <div className="rounded-2xl border border-border bg-surface/90 p-1.5 shadow-card backdrop-blur-xl">
                   <OrganizationSwitcher />

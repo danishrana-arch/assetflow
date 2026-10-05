@@ -6,6 +6,7 @@ import OrganizationSwitcher from "./OrganizationSwitcher"
 import NotificationBell from "./NotificationBell"
 import RoleBadge from "./RoleBadge"
 import GlobalSearch from "./GlobalSearch"
+import ThemeToggle from "./ThemeToggle"
 
 export default function Topbar({ onMenuClick }) {
   const { user } = useAuth()
@@ -20,6 +21,7 @@ export default function Topbar({ onMenuClick }) {
         >
           <Menu size={19} />
         </button>
+        <ThemeToggle />
         <div className="min-w-0">
           <OrganizationSwitcher compact />
         </div>

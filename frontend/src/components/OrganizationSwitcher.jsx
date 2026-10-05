@@ -13,8 +13,6 @@ export default function OrganizationSwitcher({ compact = false }) {
   // The API only returns organizations this user may access, own first
   // (backend utils/organization.js).
   const canSwitch = ["ADMIN", "CEO", "IT_MANAGER"].includes(user.role) && organizations.length > 1
-  const home = organizations.find((o) => o.id === user.homeOrganizationId)
-  const main = home || organizations[0] || organization
 
   async function handleChange(event) {
     const id = event.target.value
@@ -46,13 +44,7 @@ export default function OrganizationSwitcher({ compact = false }) {
   }
 
   return (
-    <div className={`flex min-w-0 items-center gap-2 ${compact ? "max-w-[240px]" : "max-w-[380px]"}`}>
-      <div className="hidden min-w-0 sm:block">
-        <p className="truncate text-[9px] font-semibold uppercase tracking-[0.14em] text-muted-2">
-          Your company
-        </p>
-        <p className="max-w-[140px] truncate text-xs font-semibold text-ink">{main?.name || "Company"}</p>
-      </div>
+    <div className={`flex min-w-0 items-center gap-2 ${compact ? "max-w-[200px]" : "max-w-[260px]"}`}>
       <div className="relative min-w-0 flex-1">
         <Building2 size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
         <select
@@ -64,7 +56,7 @@ export default function OrganizationSwitcher({ compact = false }) {
         >
           {organizations.map((org) => (
             <option key={org.id} value={org.id}>
-              {org.id === user.homeOrganizationId ? `${org.name} (yours)` : org.name}
+              {org.name}
             </option>
           ))}
         </select>

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import { NavLink } from "react-router-dom"
-import { Sun, Moon, LogOut } from "lucide-react"
+import { LogOut } from "lucide-react"
 import { useAuth } from "../context/AuthContext"
 import { useTheme } from "../context/ThemeContext"
 import { navGroups } from "../utils/navItems"
@@ -156,7 +156,7 @@ function useScrollIndicator(ref) {
 // the sidebar and the main content wrapper can read it.
 export default function Sidebar({ expanded, onMouseEnter, onMouseLeave }) {
   const { logout, user } = useAuth()
-  const { mode, toggleMode } = useTheme()
+  const { mode } = useTheme()
 
   const isDark = mode === "dark"
   const groups = navGroups(user)
@@ -289,37 +289,6 @@ export default function Sidebar({ expanded, onMouseEnter, onMouseLeave }) {
       {/* Bottom Controls — px-3 matches <nav>'s own padding so these icons
           land on the exact same vertical axis as the nav icons above. */}
       <div className="mt-2 flex shrink-0 flex-col items-center gap-1.5 px-3">
-        {/* Theme Toggle */}
-        <button
-          onClick={toggleMode}
-          className={`
-            flex h-11 w-full shrink-0
-            items-center gap-3
-            rounded-full pl-2.5 pr-3
-            transition-colors duration-200
-            ${
-              isDark
-                ? "text-black/55 hover:bg-black/10 hover:text-black"
-                : "text-white/60 hover:bg-white/10 hover:text-white"
-            }
-          `}
-          aria-label={
-            isDark
-              ? "Switch to light mode"
-              : "Switch to dark mode"
-          }
-        >
-          <HoverTooltipAnchor
-            label={isDark ? "Light mode" : "Dark mode"}
-            isDark={isDark}
-            expanded={expanded}
-            className="flex h-7 w-7 items-center justify-center"
-          >
-            {isDark ? <Sun size={16} /> : <Moon size={16} />}
-          </HoverTooltipAnchor>
-          <RailLabel expanded={expanded}>{isDark ? "Light mode" : "Dark mode"}</RailLabel>
-        </button>
-
         {/* Logout */}
         <button
           onClick={logout}

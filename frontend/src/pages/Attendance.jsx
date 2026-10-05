@@ -51,6 +51,10 @@ const FILTERS = {
   timeoff: { label: "Time off", match: (r) => r.status === "LEAVE" },
   // Not a summary tile — kept for the dashboard's "Present" deep link.
   present: { label: "Present", match: attended },
+  // Not summary tiles — the CEO dashboard Company overview deep links
+  // (explicit ABSENT record / no record at all, any day).
+  markedabsent: { label: "Marked absent", match: (r) => r.status === "ABSENT" && !!r.recordId },
+  notmarked: { label: "Not marked", match: (r) => !r.recordId },
   // Advance Filter only (attendance engine results / who marked it).
   halfday: { label: "Half day", match: (r) => attended(r) && r.dayType === "HALF_DAY" },
   earlygoing: { label: "Early going", match: (r) => attended(r) && r.dayType === "EARLY_GOING" },

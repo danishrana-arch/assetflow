@@ -115,38 +115,38 @@ export default function QuickAttendance({ className = "" }) {
   return (
     <div className={`flex flex-wrap items-center gap-2 ${className}`}>
       {isLoading ? (
-        <span className="inline-flex h-9 items-center gap-2 rounded-full border border-border bg-surface/80 px-4 text-xs text-muted">
+        <span className="glass-btn font-medium text-muted">
           <Loader2 size={14} className="animate-spin" /> Attendance…
         </span>
       ) : onLeave ? (
-        <span className="inline-flex h-9 items-center rounded-full border border-border bg-surface/80 px-4 text-xs font-semibold text-muted">On leave today</span>
+        <span className="glass-btn text-muted">On leave today</span>
       ) : !checkedIn ? (
         <button
           type="button"
           onClick={checkIn}
           disabled={!!busy}
-          className="pill-accent inline-flex h-9 items-center gap-2 px-4 text-xs font-semibold disabled:opacity-60"
+          className="glass-btn glass-btn-accent"
         >
           {busy === "in" ? <Loader2 size={14} className="animate-spin" /> : <LogIn size={14} />}
           {busy === "in" ? "Checking in…" : "Check in"}
         </button>
       ) : !checkedOut ? (
         <>
-          <span className="inline-flex h-9 items-center gap-1.5 rounded-full border border-border bg-surface/80 px-3 text-xs text-muted">
+          <span className="glass-btn gap-1.5 px-3 font-medium text-muted">
             <CheckCircle2 size={14} className="text-chip-green-fg" /> In since <b className="text-ink">{time(today.checkInAt)}</b>
           </span>
           <button
             type="button"
             onClick={checkOut}
             disabled={!!busy}
-            className="inline-flex h-9 items-center gap-2 rounded-full border border-border bg-surface px-4 text-xs font-semibold text-ink hover:bg-surface-2 disabled:opacity-60"
+            className="glass-btn"
           >
             {busy === "out" ? <Loader2 size={14} className="animate-spin" /> : <LogOut size={14} />}
             {busy === "out" ? "Checking out…" : "Check out"}
           </button>
         </>
       ) : (
-        <span className="inline-flex h-9 items-center gap-1.5 rounded-full border border-border bg-surface/80 px-3 text-xs text-muted">
+        <span className="glass-btn gap-1.5 px-3 font-medium text-muted">
           <CheckCircle2 size={14} className="text-chip-green-fg" />
           Done today · <b className="text-ink">{time(today.checkInAt)} – {time(today.checkOutAt)}</b>
         </span>

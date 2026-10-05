@@ -2469,3 +2469,42 @@ UI-only rows.
    `userId`/`organizationId`/`role` — kept intentionally because
    `auth.middleware.js` and `attendance-site.controller.js` fall back to
    it. Flagged in case that's not acceptable long-term.
+
+## Post-module change: sliding theme switch in the header, plain company names (2026-10-05)
+
+- `components/ThemeToggle.jsx` rewritten as a glass sliding switch (yellow
+  track + sun knob on the left = light, periwinkle track + moon knob on the
+  right = dark). Shown for every role, left of the company selector in the
+  desktop header (`DashboardLayout.jsx`) and in the mobile `Topbar.jsx`.
+  The dark-mode buttons were removed from `Sidebar.jsx` and `MobileNav.jsx`.
+- Company names are shown plainly: the selector no longer has the "Your
+  company: X" label or the "(yours)" suffix; "(yours)" / "Your company"
+  markers were also removed from `CompaniesOverview.jsx`, `Settings.jsx`
+  and `OrganizationComparison.jsx`. Access rules unchanged.
+- Follow-up (same day): the switch is now frosted glass (`.theme-switch` /
+  `.theme-switch-knob` in `styles/index.css` — translucent tinted track,
+  top sheen, glass knob with an iOS-style stretch while pressed). The
+  light-mode dashboard header glass got a silver-grey backdrop, stronger
+  greys behind the pane, deeper shadow and brighter reflections (dark mode
+  unchanged). New `.glass-btn` / `.glass-btn-accent` (iOS glass pill, both
+  modes) used by the dashboard's `QuickAttendance` buttons/chips.
+
+## Post-module change: CEO Company overview tiles are clickable (2026-10-05)
+
+- `CompaniesOverview.jsx`: "Open tickets" and "Pending leave" tiles removed
+  (still returned by `GET /organization/comparison` for Organization
+  Comparison). The 8 remaining tiles are buttons. One company picked →
+  switches to it (if needed) and opens the list; "All companies" → opens a
+  per-company breakdown of that number, and picking a company does the same.
+  Targets: Employees → `/employees?status=ACTIVE`; Present/Late →
+  `/attendance?status=present|late`; Absent → `?status=markedabsent`; On
+  leave → `?status=timeoff`; Not marked → `?status=notmarked`; Assets →
+  `/inventory?view=all`; Active projects → `/projects?status=IN_PROGRESS`.
+- New Attendance.jsx filters `markedabsent` (ABSENT record) and `notmarked`
+  (no record) — deep-link only, no summary tile. `Employees.jsx` and
+  `Projects.jsx` now read `?status=` on mount.
+- `getOrganizationComparison`: today's attendance counts only ACTIVE
+  employees' records (same roster as the Attendance page), so each tile =
+  its list. Verified 72/72 (8 tiles × 9 companies) on a temp backend, plus
+  a Playwright click-through as the CEO. The endpoint takes ~6 s for 9
+  companies (≈90 queries to Neon) — tiles show "—" until then.

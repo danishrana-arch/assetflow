@@ -32,9 +32,6 @@ export default function OrganizationComparison() {
               <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-accent/10 text-accent">
                 <Building2 size={19} />
               </div>
-              {o.isHome && (
-                <span className="rounded-full bg-accent/10 px-2 py-1 text-[9px] font-semibold text-accent">Your company</span>
-              )}
             </div>
             <p className="mt-4 text-base font-semibold text-ink">{o.name}</p>
             <div className="mt-4 grid grid-cols-2 gap-2">
