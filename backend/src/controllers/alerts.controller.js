@@ -39,7 +39,7 @@ async function getSmartAlerts(req, res, next) {
         ? prisma.assetRequest.count({ where: { organizationId, status: "PENDING" } })
         : 0,
       management
-        ? prisma.leaveApplication.count({ where: { organizationId, status: "PENDING" } })
+        ? prisma.leaveApplication.count({ where: { organizationId, status: { in: ["PENDING_HR", "PENDING_FINAL_APPROVAL"] } } })
         : 0,
       (management || isIT)
         ? prisma.ticket.count({ where: { organizationId, status: { in: ["OPEN", "IN_PROGRESS"] } } })
@@ -92,7 +92,7 @@ async function getSmartAlerts(req, res, next) {
         ? prisma.assetRequest.count({ where: { organizationId, employeeId: userId, status: "PENDING" } })
         : 0,
       !management && !isIT
-        ? prisma.leaveApplication.count({ where: { organizationId, employeeId: userId, status: "PENDING" } })
+        ? prisma.leaveApplication.count({ where: { organizationId, employeeId: userId, status: { in: ["PENDING_HR", "PENDING_FINAL_APPROVAL"] } } })
         : 0,
       !management && !isIT
         ? prisma.ticket.count({ where: { organizationId, raisedById: userId, status: { in: ["OPEN", "IN_PROGRESS"] } } })

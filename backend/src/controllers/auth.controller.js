@@ -4,6 +4,7 @@ const prisma = require("../lib/prisma")
 const { signToken } = require("../utils/jwt")
 const { ASSIGNABLE_ROLES, MAX_CEO_COUNT } = require("../utils/roles")
 const { encryptField } = require("../utils/crypto")
+const { EMPLOYMENT_STATUSES, parseDateInput, detailFieldData, employmentData, omitDetailFields } = require("../utils/employee-fields")
 const { logAudit } = require("../utils/audit")
 const { isValidTimeZone } = require("../utils/timezone")
 const { sendEmail, appUrl, escapeHtml } = require("../utils/mailer")
@@ -275,6 +276,18 @@ async function inviteEmployee(req, res, next) {
       if (!manager) return res.status(400).json({ error: "Reporting Manager must belong to the current organization or be the company CEO" })
     }
 
+    // Same identification / emergency-contact / date fields as the profile
+    // edit form and the sheet import (utils/employee-fields.js).
+    const joining = parseDateInput(req.body.joiningDate)
+    const start = parseDateInput(req.body.startDate)
+    const permanent = parseDateInput(req.body.permanentDate)
+    if (joining === undefined || start === undefined || permanent === undefined) {
+      return res.status(400).json({ error: "Joining, start and permanent dates must be valid dates" })
+    }
+    if (req.body.employmentStatus && !EMPLOYMENT_STATUSES.includes(req.body.employmentStatus)) {
+      return res.status(400).json({ error: `employmentStatus must be one of: ${EMPLOYMENT_STATUSES.join(", ")}` })
+    }
+
     const tempPassword = Math.random().toString(36).slice(2, 10)
     const hashed = await bcrypt.hash(tempPassword, 10)
 
@@ -300,6 +313,10 @@ async function inviteEmployee(req, res, next) {
         address: encryptField(address || null),
         skill: skill || null,
         seniorityLevel: seniorityLevel || null,
+        joiningDate: joining,
+        startDate: start,
+        ...detailFieldData(req.body),
+        ...employmentData({ employmentStatus: req.body.employmentStatus || null, permanentDate: permanent }),
       },
     })
 
@@ -327,7 +344,9 @@ async function me(req, res, next) {
     const activeOrganization = organizations.find((org) => org.id === req.user.organizationId) || organizationSummary(user.organization)
     const { password, organization, calendarFeedToken, ...safeUser } = user
     res.json({
-      ...safeUser,
+      // Session payload — the profile page (GET /employees/:id) is where
+      // these details are shown, decrypted.
+      ...omitDetailFields(safeUser),
       homeOrganizationId: user.organizationId,
       // Only the Grand Parent company's CEO may change Grand Parent / Parent.
       canManageHierarchy: canManageHierarchy(user.role, user.organization),

@@ -22,7 +22,8 @@ import {
 } from "../utils/offlineAttendance"
 
 const ATTENDANCE_TONE = { PRESENT: "green", LATE: "yellow", ABSENT: "pink", LEAVE: "yellow" }
-const LEAVE_TONE = { PENDING: "yellow", APPROVED: "green", REJECTED: "pink", CANCELLED: "slate" }
+const LEAVE_TONE = { PENDING_HR: "yellow", PENDING_FINAL_APPROVAL: "blue", APPROVED: "green", REJECTED: "pink", CANCELLED: "slate" }
+const LEAVE_STATUS_LABELS = { PENDING_HR: "Waiting for HR", PENDING_FINAL_APPROVAL: "HR approved · waiting for Admin/CEO", APPROVED: "Approved", REJECTED: "Rejected", CANCELLED: "Cancelled" }
 const LEAVE_TYPE_LABELS = { SICK: "Sick", CASUAL: "Casual / Annual", UNPAID: "Unpaid" }
 
 function fmt(dateStr) {
@@ -180,7 +181,8 @@ export default function MyAttendance() {
   })
   const { data: leaves, isLoading: loadingLeaves } = useQuery({
     queryKey: ["leaves-self", user?.id],
-    queryFn: () => api.get("/leaves").then((r) => r.data),
+    // mine=1: own applications even for roles that review leave.
+    queryFn: () => api.get("/leaves", { params: { mine: 1 } }).then((r) => r.data),
     enabled: !!user?.id,
   })
   const { data: balance } = useQuery({
@@ -575,6 +577,29 @@ export default function MyAttendance() {
 
         <div className="card p-6">
           <SectionHeader title="Request Leave" />
+          {balance?.schedule && !balance.schedule.eligible ? (
+            <div className="rounded-2xl bg-chip-yellow-bg px-4 py-3 text-sm text-chip-yellow-fg">
+              <p className="font-semibold">{balance.schedule.message}</p>
+              <p className="mt-1 text-xs">Your leave history and balance stay available below. HR updates your employment status.</p>
+            </div>
+          ) : (
+          <>
+          {balance?.schedule?.currentMonth && (
+            <div className="mb-4 grid gap-2 rounded-2xl bg-surface-2 px-4 py-3 text-xs text-muted sm:grid-cols-2">
+              <p>
+                <span className="font-semibold text-ink">Allowed up to {balance.schedule.currentMonth.name}:</span>{" "}
+                {balance.schedule.currentMonth.cap} day{balance.schedule.currentMonth.cap === 1 ? "" : "s"} in {balance.schedule.year}
+                {" "}({balance.schedule.currentMonth.used} requested or approved, {balance.schedule.currentMonth.remaining} left)
+              </p>
+              <p>
+                <span className="font-semibold text-ink">Annual balance:</span>{" "}
+                {balance.casual?.remaining} of {balance.casual?.total} annual, {balance.sick?.remaining} of {balance.sick?.total} sick days left
+              </p>
+              <p className="sm:col-span-2 text-muted-2">
+                Your allowance grows by one day each month from the month you became Permanent, and resets every January. Requests go to HR, then to an Admin or CEO.
+              </p>
+            </div>
+          )}
           <form onSubmit={handleLeaveSubmit} className="grid gap-4 sm:grid-cols-2">
             <SelectField label="Type" value={leaveForm.type} onChange={(e) => setLeaveForm((f) => ({ ...f, type: e.target.value }))} className="sm:col-span-2">
               {Object.entries(LEAVE_TYPE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
@@ -589,6 +614,8 @@ export default function MyAttendance() {
               </button>
             </div>
           </form>
+          </>
+          )}
 
           <div className="mt-6 border-t border-border pt-4">
             <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Your applications</p>
@@ -600,11 +627,11 @@ export default function MyAttendance() {
                     <p className="text-sm font-semibold text-ink">{fmt(leave.startDate)} — {fmt(leave.endDate)}</p>
                     <div className="flex items-center gap-1.5">
                       <StatusPill tone="slate">{LEAVE_TYPE_LABELS[leave.type] || leave.type}</StatusPill>
-                      <StatusPill tone={LEAVE_TONE[leave.status] || "slate"}>{leave.status}</StatusPill>
+                      <StatusPill tone={LEAVE_TONE[leave.status] || "slate"}>{LEAVE_STATUS_LABELS[leave.status] || leave.status}</StatusPill>
                     </div>
                   </div>
                   <p className="mt-1 text-xs text-muted">{leave.reason}</p>
-                  {leave.status === "PENDING" && <button onClick={() => cancelLeave.mutate(leave.id)} disabled={cancelLeave.isPending} className="mt-2 flex items-center gap-1 text-xs font-semibold text-danger hover:underline"><Ban size={12} /> Cancel request</button>}
+                  {(leave.status === "PENDING_HR" || leave.status === "PENDING_FINAL_APPROVAL") && <button onClick={() => cancelLeave.mutate(leave.id)} disabled={cancelLeave.isPending} className="mt-2 flex items-center gap-1 text-xs font-semibold text-danger hover:underline"><Ban size={12} /> Cancel request</button>}
                   {leave.reviewNote && <p className="mt-1.5 text-xs italic text-muted-2">Note: {leave.reviewNote}</p>}
                 </li>
               ))}

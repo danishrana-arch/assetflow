@@ -11,6 +11,9 @@ function errorHandler(err, req, res, next) {
   if (err.code === "P2025") {
     return res.status(404).json({ error: "Record not found" })
   }
+  if (err.code === "LIMIT_FILE_SIZE") {
+    return res.status(400).json({ error: "That file is too large — the limit is 5MB" })
+  }
   if (err.code === "P2003") {
     return res.status(409).json({ error: "This action is blocked by related records that still reference it" })
   }

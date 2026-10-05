@@ -2256,6 +2256,51 @@ column is kept but no longer read; the endpoint `PATCH
   step, direct-open fallback, survives refresh, exactly one back button on
   32 routes, employee role.
 
+## Post-module addition: employee details, documents, Permanent-only leave + HR → Admin/CEO workflow (2026-10-05)
+
+- **Schema** (migration `20261005150000_employee_details_leave_workflow` —
+  **deployed**; JS client regenerated, engine DLL hit the usual EPERM):
+  `User.startDate` (separate from `joiningDate`), `employmentStatus`
+  (`PROBATION` default / `PERMANENT`), `permanentDate`, `passportNumber`,
+  `civilNumber`, `nationality`, `agentName`, `emergencyContact{Name,
+  Relationship,Phone,AltPhone,Address,Notes}`; new `EmployeeDocument`
+  (bytes in the DB, kind PASSPORT / CIVIL_ID / OTHER); `LeaveStatus`
+  `PENDING` **renamed** to `PENDING_HR` + new `PENDING_FINAL_APPROVAL`;
+  `LeaveApplication.hrReviewedById/At/Note`. The migration set **every
+  existing user to PERMANENT** (from `joiningDate`, else `createdAt`) so no
+  one lost leave access; new employees start on Probation.
+- Passport / civil number / emergency phones+address are encrypted like
+  CNIC. All field handling is shared in `utils/employee-fields.js` (manual
+  add `inviteEmployee`, `updateEmployee`, sheet import). Lists and
+  `/auth/me` never carry these fields. Employment status: ADMIN/CEO/HR
+  only; PROBATION clears the permanent date, PERMANENT without one = today.
+- **Import / template**: every profile field (incl. dates as YYYY-MM-DD or
+  DD/MM/YYYY, "9:00 AM" shifts, reporting manager by email or name — also
+  rows earlier in the same sheet, salary/bank). Only name + email required;
+  unreadable values are left blank and returned as `warnings`. Template
+  (`GET /employees/import/template`) lists every column; a small download
+  icon next to "Import Sheet" was re-added for it.
+- **Documents**: `GET/POST /employees/:id/documents`,
+  `GET …/:docId/file`, `DELETE …/:docId`. View: self + ADMIN/CEO/HR;
+  upload/delete: ADMIN/CEO/HR (ADMIN/CEO profiles only by ADMIN/CEO).
+  Type sniffed from bytes (JPG/PNG/WEBP/GIF/PDF, 5MB). Profile →
+  Detailed Information shows them grouped (`components/EmployeeDocuments.jsx`).
+- **Leave** (`utils/leave-policy.js`, enforced in `createLeave`): Permanent
+  only; cumulative per-year cap = 1 in the first eligible month (January,
+  or the permanentDate's month that year), +1 each month, reset every
+  January; pending + approved count (no bypass by splitting); separate
+  annual sick/casual balance check; overlap/duplicate 409; dates only in
+  the current or next year, not before the permanent date. `GET
+  /leaves/balance` adds `schedule`. Workflow: PENDING_HR → HR approve →
+  PENDING_FINAL_APPROVAL → ADMIN **or** CEO → APPROVED (only then marked
+  LEAVE in attendance); either reject → REJECTED. No self-review. If the org
+  has no active HR other than the applicant, ADMIN/CEO may do the HR step.
+  DEPARTMENT_HEAD can still view but no longer approves. `GET /leaves`
+  rows carry `canReview`; `?mine=1` = own only (My Attendance used to show
+  HR the whole org's list); `?status=PENDING` = both stages.
+- Verified: 49/49 rule unit checks + 80/80 end-to-end API checks on a
+  temporary org (deleted afterwards — 0 rows left), frontend build passes.
+
 ## Automated RBAC test run (2026-09-28)
 
 There's no automated test suite in either app (`npm test` isn't

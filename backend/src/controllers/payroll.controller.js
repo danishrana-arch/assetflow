@@ -248,7 +248,7 @@ async function previewPayroll(req, res, next) {
         select: { employeeId: true, type: true, startDate: true, endDate: true, isHalfDay: true },
       }),
       prisma.leaveApplication.findMany({
-        where: { organizationId, status: "PENDING", startDate: { lt: monthEnd }, endDate: { gte: monthStart } },
+        where: { organizationId, status: { in: ["PENDING_HR", "PENDING_FINAL_APPROVAL"] }, startDate: { lt: monthEnd }, endDate: { gte: monthStart } },
         select: { id: true, employeeId: true, type: true, startDate: true, endDate: true, employee: { select: { name: true } } },
       }),
       prisma.$queryRaw`

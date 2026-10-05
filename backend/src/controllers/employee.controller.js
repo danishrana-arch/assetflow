@@ -6,12 +6,29 @@ const { logAudit } = require("../utils/audit")
 const { dateKeyInTimeZone } = require("../utils/timezone")
 const { sortRows } = require("../utils/sort")
 const { readSheet, mapHeaders, SheetError, ACCEPTED_LABEL } = require("../utils/sheet")
+const {
+  DETAIL_FIELDS,
+  EMPLOYMENT_STATUSES,
+  cleanText,
+  parseDateInput,
+  normalizeShiftTime,
+  parseEmploymentStatus,
+  detailFieldData,
+  employmentData,
+  decryptDetailFields,
+  omitDetailFields,
+} = require("../utils/employee-fields")
+
+// Who may see/upload an employee's document pictures: the employee (view
+// only), and ADMIN/CEO/HR. See employee-document.controller.js.
+const DOCUMENT_ROLES = ["ADMIN", "CEO", "HR"]
 
 function stripSensitive(user, canSeeSensitive) {
   const { password, cnic, bankAccountNumber, phone, address, personalEmail, fatherName, ...rest } = user
-  if (!canSeeSensitive) return rest
+  if (!canSeeSensitive) return omitDetailFields(rest)
   return {
     ...rest,
+    ...decryptDetailFields(rest),
     cnic: decryptField(cnic),
     bankAccountNumber: decryptField(bankAccountNumber),
     phone: decryptField(phone),
@@ -115,7 +132,7 @@ async function listEmployees(req, res, next) {
       return res.json({
         data: requesterRole === "IT_MANAGER"
           ? employees.map(stripForIT)
-          : employees.map(({ password, cnic, bankAccountNumber, ...e }) => e),
+          : employees.map(({ password, cnic, bankAccountNumber, ...e }) => omitDetailFields(e)),
         page: pageNum,
         pageSize: size,
         total,
@@ -132,7 +149,7 @@ async function listEmployees(req, res, next) {
     res.json(
       requesterRole === "IT_MANAGER"
         ? employees.map(stripForIT)
-        : employees.map(({ password, cnic, bankAccountNumber, ...e }) => e)
+        : employees.map(({ password, cnic, bankAccountNumber, ...e }) => omitDetailFields(e))
     )
   } catch (err) {
     next(err)
@@ -183,6 +200,11 @@ async function getEmployee(req, res, next) {
           orderBy: [{ year: "desc" }, { month: "desc" }],
           take: 5,
           select: { id: true, month: true, year: true, netPay: true, status: true },
+        },
+        // Metadata only — the file itself comes from /documents/:docId/file.
+        documents: {
+          orderBy: { createdAt: "asc" },
+          select: { id: true, kind: true, label: true, fileName: true, mimeType: true, size: true, createdAt: true, uploadedBy: { select: { id: true, name: true } } },
         },
       },
     })
@@ -244,6 +266,7 @@ async function getEmployee(req, res, next) {
     const safe = isSelfOrManagement
       ? {
           ...rest,
+          ...decryptDetailFields(rest),
           cnic: decryptField(cnic),
           dob,
           address: decryptField(address),
@@ -252,7 +275,9 @@ async function getEmployee(req, res, next) {
           personalEmail: decryptField(personalEmail),
           fatherName: decryptField(fatherName),
         }
-      : rest
+      : omitDetailFields(rest)
+
+    if (!(userId === id || DOCUMENT_ROLES.includes(role))) delete safe.documents
 
     // Certifications are visible to whoever has the certifications module
     // (ADMIN/CEO/HR) and to the employee themselves. They are not part of
@@ -375,8 +400,12 @@ const MANAGEMENT_EDITABLE_FIELDS = [
   "bankAccountNumber",
   "designation",
   "joiningDate",
+  "startDate",
   "workLocationType",
+  ...DETAIL_FIELDS,
 ]
+// Employment status decides leave eligibility, so only these roles set it.
+const EMPLOYMENT_STATUS_EDITORS = ["ADMIN", "CEO", "HR"]
 
 // Org policy: no salary below this. "further on" from here is just
 // whatever management sets per employee/level — this is the floor, not a
@@ -441,8 +470,14 @@ async function updateEmployee(req, res, next) {
         data[field] = value
       }
       else if (TEXT_FIELDS.includes(field)) data[field] = clean(req.body[field])
+      else if (DETAIL_FIELDS.includes(field)) Object.assign(data, detailFieldData(req.body, [field]))
       else if (field === "dob") data.dob = req.body.dob ? new Date(req.body.dob) : null
       else if (field === "joiningDate") data.joiningDate = req.body.joiningDate ? new Date(req.body.joiningDate) : null
+      else if (field === "startDate") {
+        const value = parseDateInput(req.body.startDate)
+        if (value === undefined) return res.status(400).json({ error: "Start date is not a valid date" })
+        data.startDate = value
+      }
       else if (field === "workLocationType") {
         if (!["OFFICE", "FIELD"].includes(req.body.workLocationType)) {
           return res.status(400).json({ error: "workLocationType must be OFFICE or FIELD" })
@@ -481,6 +516,28 @@ async function updateEmployee(req, res, next) {
         }
         data.baseSalary = n
       } else data[field] = req.body[field]
+    }
+
+    // Employment status / permanent date (ADMIN/CEO/HR). Only applied when
+    // something actually changes — the edit form always sends both back.
+    if (req.body.employmentStatus !== undefined || req.body.permanentDate !== undefined) {
+      const status = req.body.employmentStatus === undefined ? undefined : req.body.employmentStatus
+      if (status !== undefined && !EMPLOYMENT_STATUSES.includes(status)) {
+        return res.status(400).json({ error: `employmentStatus must be one of: ${EMPLOYMENT_STATUSES.join(", ")}` })
+      }
+      const permanentDate = req.body.permanentDate === undefined ? undefined : parseDateInput(req.body.permanentDate || null)
+      if (req.body.permanentDate !== undefined && permanentDate === undefined) {
+        return res.status(400).json({ error: "Permanent date is not a valid date" })
+      }
+      const next = employmentData({ employmentStatus: status, permanentDate }, existing)
+      const sameDate = (a, b) => (a ? new Date(a).toISOString().slice(0, 10) : null) === (b ? new Date(b).toISOString().slice(0, 10) : null)
+      const changed = next.employmentStatus !== existing.employmentStatus || !sameDate(next.permanentDate, existing.permanentDate)
+      if (changed) {
+        if (!EMPLOYMENT_STATUS_EDITORS.includes(requesterRole)) {
+          return res.status(403).json({ error: "Only an Admin, CEO or HR can change employment status" })
+        }
+        Object.assign(data, next)
+      }
     }
 
     if (data.linkedinUrl !== undefined && data.linkedinUrl) {
@@ -547,6 +604,17 @@ async function updateEmployee(req, res, next) {
     }
 
     const updated = await prisma.user.update({ where: { id }, data })
+
+    if (data.employmentStatus && data.employmentStatus !== existing.employmentStatus) {
+      logAudit({
+        organizationId,
+        actorId: userId,
+        action: "employee.employment_status_changed",
+        targetType: "User",
+        targetId: id,
+        note: `${existing.employmentStatus} -> ${data.employmentStatus}${data.permanentDate ? ` (from ${data.permanentDate.toISOString().slice(0, 10)})` : ""}`,
+      })
+    }
 
     if (data.role && data.role !== existing.role) {
       logAudit({
@@ -625,7 +693,31 @@ async function deleteEmployee(req, res, next) {
   }
 }
 
-const IMPORT_COLUMNS = ["name", "email", "personalEmail", "phone", "fatherName", "education", "currentUniversity", "linkedinUrl", "shiftStart", "shiftEnd", "department", "cnic", "dob", "address", "skill", "seniorityLevel", "role"]
+// Every employee field the import understands — the same columns manual add
+// and the profile edit form write. Order = template column order.
+const IMPORT_COLUMNS = [
+  "name", "email", "personalEmail", "phone", "fatherName", "address", "cnic", "passportNumber", "civilNumber",
+  "nationality", "agentName", "dob", "joiningDate", "startDate", "employmentStatus", "permanentDate",
+  "education", "currentUniversity", "linkedinUrl", "department", "role", "reportingManager", "designation",
+  "skill", "seniorityLevel", "workLocationType", "shiftStart", "shiftEnd",
+  "emergencyContactName", "emergencyContactRelationship", "emergencyContactPhone", "emergencyContactAltPhone",
+  "emergencyContactAddress", "emergencyContactNotes", "baseSalary", "bankName", "bankAccountNumber",
+]
+// Human-readable template headers (each also accepted on import).
+const IMPORT_HEADERS = {
+  name: "Name", email: "Company Email", personalEmail: "Personal Email", phone: "Phone Number",
+  fatherName: "Father Name", address: "Address", cnic: "CNIC", passportNumber: "Passport Number",
+  civilNumber: "Civil Number", nationality: "Nationality", agentName: "Agent Name", dob: "Date of Birth",
+  joiningDate: "Joining Date", startDate: "Start Date", employmentStatus: "Employment Status",
+  permanentDate: "Permanent Date", education: "Education", currentUniversity: "Current University",
+  linkedinUrl: "LinkedIn", department: "Department", role: "Role", reportingManager: "Reporting Manager",
+  designation: "Designation", skill: "Skill", seniorityLevel: "Level", workLocationType: "Employee Type",
+  shiftStart: "Shift Start", shiftEnd: "Shift End", emergencyContactName: "Emergency Contact Name",
+  emergencyContactRelationship: "Emergency Contact Relationship", emergencyContactPhone: "Emergency Contact Phone",
+  emergencyContactAltPhone: "Emergency Contact Alternate Phone", emergencyContactAddress: "Emergency Contact Address",
+  emergencyContactNotes: "Emergency Contact Notes", baseSalary: "Base Salary", bankName: "Bank Name",
+  bankAccountNumber: "Bank Account Number",
+}
 const VALID_LEVELS = ["INTERN", "JUNIOR", "SENIOR", "LEAD"]
 const EMPLOYEE_IMPORT_ALIASES = {
   name: ["full name", "employee name", "employee", "name of employee"],
@@ -633,23 +725,46 @@ const EMPLOYEE_IMPORT_ALIASES = {
   personalEmail: ["personal email address", "private email"],
   phone: ["phone number", "mobile", "mobile number", "contact", "contact number", "cell", "whatsapp"],
   fatherName: ["father's name", "father", "father name"],
-  currentUniversity: ["university", "institute", "college"],
-  linkedinUrl: ["linkedin", "linkedin profile"],
+  currentUniversity: ["university", "current university", "institute", "college"],
+  linkedinUrl: ["linkedin", "linkedin profile", "linkedin url"],
   shiftStart: ["shift start time", "start time"],
   shiftEnd: ["shift end time", "end time"],
   department: ["dept", "team"],
   cnic: ["cnic number", "national id", "id card", "nic"],
+  passportNumber: ["passport", "passport no", "passport #"],
+  civilNumber: ["civil id", "civil no", "civil id number", "civil id no"],
+  nationality: ["citizenship", "country"],
+  agentName: ["agent", "recruitment agent", "recruiting agent"],
   dob: ["date of birth", "birth date", "birthday"],
+  joiningDate: ["joining date", "date of joining", "joined", "joined on", "doj"],
+  startDate: ["start date", "campaign start date", "started on", "operation start date"],
+  employmentStatus: ["employment status", "employment type", "permanent / probation"],
+  permanentDate: ["permanent date", "permanent from", "confirmation date", "date of confirmation"],
   address: ["residence", "home address", "address line"],
   skill: ["skills", "expertise"],
   seniorityLevel: ["level", "seniority", "grade"],
   role: ["user role", "access role"],
+  reportingManager: ["reporting manager", "manager", "line manager", "reports to", "supervisor", "manager email"],
+  designation: ["title", "job title", "position"],
+  workLocationType: ["employee type", "work location", "work location type"],
+  emergencyContactName: ["emergency contact", "emergency contact name", "ecp", "ecp name"],
+  emergencyContactRelationship: ["emergency contact relationship", "relationship", "ecp relationship", "emergency relationship"],
+  emergencyContactPhone: ["emergency contact phone", "emergency phone", "ecp phone", "emergency contact number"],
+  emergencyContactAltPhone: ["emergency contact alternate phone", "emergency alternate phone", "ecp alternate phone", "alternate phone", "emergency contact alt phone"],
+  emergencyContactAddress: ["emergency contact address", "ecp address", "emergency address"],
+  emergencyContactNotes: ["emergency contact notes", "ecp notes", "emergency notes"],
+  baseSalary: ["salary", "base salary", "monthly salary"],
+  bankName: ["bank"],
+  bankAccountNumber: ["account number", "bank account", "iban"],
 }
 
-// Bulk-create employees from a CSV file. Expected header row (any order,
-// case-insensitive): name, email, phone, department, cnic, dob, address,
-// skill, seniorityLevel, role. Every created account gets a random temp
-// password, same as single-add.
+// Bulk-create employees from a spreadsheet (header row in any order, names
+// matched loosely — see IMPORT_HEADERS / EMPLOYEE_IMPORT_ALIASES). Only
+// name + email are required, same as single add. Each row becomes an
+// ordinary User with the same fields the profile shows; a value that can't
+// be read (bad date, unknown level…) is left blank and reported as a
+// warning instead of dropping the whole row. Every created account gets a
+// random temp password, same as single-add.
 async function importEmployees(req, res, next) {
   try {
     if (!req.file) return res.status(400).json({ error: `Upload a spreadsheet (${ACCEPTED_LABEL}) under the 'file' field` })
@@ -664,16 +779,29 @@ async function importEmployees(req, res, next) {
     }
     if (rows.length < 2) return res.status(400).json({ error: "The sheet needs a header row plus at least one employee row" })
 
-    const headerMap = mapHeaders(rows[0], IMPORT_COLUMNS, EMPLOYEE_IMPORT_ALIASES)
+    const aliases = Object.fromEntries(IMPORT_COLUMNS.map((col) => [col, [IMPORT_HEADERS[col], ...(EMPLOYEE_IMPORT_ALIASES[col] || [])]]))
+    const headerMap = mapHeaders(rows[0], IMPORT_COLUMNS, aliases)
 
     if (headerMap.name === undefined || headerMap.email === undefined) {
       return res.status(400).json({ error: "The sheet must have at least a 'name' and an 'email' column" })
     }
 
-    const departments = await prisma.department.findMany({ where: { organizationId } })
+    const [departments, managerPool] = await Promise.all([
+      prisma.department.findMany({ where: { organizationId } }),
+      // Same pool the Reporting Manager dropdown offers: this org + company CEOs.
+      headerMap.reportingManager === undefined
+        ? []
+        : prisma.user.findMany({
+            where: { OR: [{ organizationId }, { organizationId: companyId || organizationId, role: "CEO" }] },
+            select: { id: true, name: true, email: true },
+          }),
+    ])
     const deptByName = new Map(departments.map((d) => [d.name.toLowerCase(), d.id]))
     const created = []
     const skipped = []
+    const warnings = []
+    // Managers can also be rows earlier in the same sheet.
+    const managers = [...managerPool]
 
     const valueAt = (row, key) => headerMap[key] === undefined ? "" : String(row[headerMap[key]] || "").trim()
 
@@ -683,9 +811,14 @@ async function importEmployees(req, res, next) {
       const name = valueAt(row, "name")
       const email = valueAt(row, "email")
       if (!name && !email) continue
+      const warn = (reason) => warnings.push({ row: rowNumber, reason })
 
       if (!name || !email) {
         skipped.push({ row: rowNumber, reason: "Missing name or email" })
+        continue
+      }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        skipped.push({ row: rowNumber, reason: `Invalid email (${email})` })
         continue
       }
 
@@ -704,9 +837,9 @@ async function importEmployees(req, res, next) {
           // HR any non-owner role.
           const hrCanAssign = requesterRole === "HR" && !["ADMIN", "CEO"].includes(raw)
           if (raw !== "EMPLOYEE" && !["ADMIN", "CEO"].includes(requesterRole) && !hrCanAssign) {
-            skipped.push({ row: rowNumber, reason: "Only an Admin or CEO can import Admin/CEO accounts — imported as EMPLOYEE" })
+            warn("Only an Admin or CEO can import Admin/CEO accounts — imported as EMPLOYEE")
           } else if (raw === "CEO") {
-            const ceoCount = await prisma.user.count({ where: { organizationId, role: "CEO" } })
+            const ceoCount = await prisma.user.count({ where: { organization: { companyId }, role: "CEO" } })
             if (ceoCount >= MAX_CEO_COUNT) {
               skipped.push({ row: rowNumber, reason: `The organization already has ${MAX_CEO_COUNT} CEOs` })
               continue
@@ -715,17 +848,80 @@ async function importEmployees(req, res, next) {
           } else {
             assignedRole = raw
           }
+        } else if (raw) {
+          warn(`Unknown role "${valueAt(row, "role")}" — imported as EMPLOYEE`)
         }
       }
 
-      const departmentName = valueAt(row, "department")
-      const seniorityLevel = valueAt(row, "seniorityLevel").toUpperCase()
-      const dobRaw = valueAt(row, "dob")
-      const dob = dobRaw ? new Date(dobRaw) : null
-      if (dobRaw && (!dob || Number.isNaN(dob.getTime()))) {
-        skipped.push({ row: rowNumber, reason: "Invalid date of birth" })
-        continue
+      const dateField = (key, label) => {
+        const raw = valueAt(row, key)
+        const value = parseDateInput(raw)
+        if (value === undefined) {
+          warn(`${label} "${raw}" isn't a date (use YYYY-MM-DD or DD/MM/YYYY) — left blank`)
+          return null
+        }
+        return value
       }
+      const shiftField = (key, label) => {
+        const raw = valueAt(row, key)
+        const value = normalizeShiftTime(raw)
+        if (value === undefined) {
+          warn(`${label} "${raw}" isn't a time (use HH:mm, e.g. 09:00) — left blank`)
+          return null
+        }
+        return value
+      }
+
+      const departmentName = valueAt(row, "department")
+      const departmentId = departmentName ? deptByName.get(departmentName.toLowerCase()) || null : null
+      if (departmentName && !departmentId) warn(`Department "${departmentName}" not found — left blank`)
+
+      const seniorityRaw = valueAt(row, "seniorityLevel").toUpperCase()
+      if (seniorityRaw && !VALID_LEVELS.includes(seniorityRaw)) warn(`Level "${valueAt(row, "seniorityLevel")}" must be Intern, Junior, Senior or Lead — left blank`)
+
+      const workLocationRaw = valueAt(row, "workLocationType").toUpperCase()
+      const workLocationType = !workLocationRaw ? "OFFICE" : workLocationRaw.startsWith("FIELD") || workLocationRaw.includes("REMOTE") ? "FIELD" : "OFFICE"
+
+      const statusRaw = valueAt(row, "employmentStatus")
+      let employmentStatus = parseEmploymentStatus(statusRaw)
+      if (employmentStatus === undefined) {
+        warn(`Employment status "${statusRaw}" must be Permanent or Probation — imported as Probation`)
+        employmentStatus = null
+      }
+      const permanentDate = dateField("permanentDate", "Permanent date")
+
+      let managerId = null
+      const managerRaw = valueAt(row, "reportingManager")
+      if (managerRaw) {
+        const key = managerRaw.toLowerCase()
+        const matches = managers.filter((m) => m.email.toLowerCase() === key || m.name.toLowerCase() === key)
+        if (matches.length === 1) managerId = matches[0].id
+        else warn(matches.length ? `Reporting manager "${managerRaw}" matches several people — use their email; left blank` : `Reporting manager "${managerRaw}" not found — left blank`)
+      }
+
+      let baseSalary = null
+      const salaryRaw = valueAt(row, "baseSalary").replace(/[,\s]|pkr|rs\.?/gi, "")
+      if (salaryRaw) {
+        const n = Number(salaryRaw)
+        if (Number.isNaN(n) || n < MIN_BASE_SALARY) warn(`Base salary "${valueAt(row, "baseSalary")}" must be at least PKR ${MIN_BASE_SALARY.toLocaleString()} — left blank`)
+        else baseSalary = n
+      }
+
+      const linkedinRaw = valueAt(row, "linkedinUrl")
+      let linkedinUrl = linkedinRaw || null
+      if (linkedinUrl) {
+        try {
+          const url = new URL(/^https?:\/\//i.test(linkedinUrl) ? linkedinUrl : `https://${linkedinUrl}`)
+          if (!url.hostname.toLowerCase().includes("linkedin.com")) throw new Error()
+          linkedinUrl = url.toString()
+        } catch {
+          warn(`LinkedIn "${linkedinRaw}" isn't a LinkedIn URL — left blank`)
+          linkedinUrl = null
+        }
+      }
+
+      const details = {}
+      for (const field of DETAIL_FIELDS) details[field] = valueAt(row, field)
 
       const tempPassword = Math.random().toString(36).slice(2, 10)
       const hashed = await bcrypt.hash(tempPassword, 10)
@@ -741,61 +937,69 @@ async function importEmployees(req, res, next) {
             phone: encryptField(valueAt(row, "phone") || null),
             personalEmail: encryptField(valueAt(row, "personalEmail") || null),
             fatherName: encryptField(valueAt(row, "fatherName") || null),
-            education: valueAt(row, "education") || null,
-            currentUniversity: valueAt(row, "currentUniversity") || null,
-            linkedinUrl: valueAt(row, "linkedinUrl") || null,
-            shiftStart: valueAt(row, "shiftStart") || null,
-            shiftEnd: valueAt(row, "shiftEnd") || null,
+            education: cleanText(valueAt(row, "education")),
+            currentUniversity: cleanText(valueAt(row, "currentUniversity")),
+            linkedinUrl,
+            shiftStart: shiftField("shiftStart", "Shift start"),
+            shiftEnd: shiftField("shiftEnd", "Shift end"),
             cnic: encryptField(valueAt(row, "cnic") || null),
-            dob: dobRaw ? dob : null,
+            dob: dateField("dob", "Date of birth"),
+            joiningDate: dateField("joiningDate", "Joining date"),
+            startDate: dateField("startDate", "Start date"),
             address: encryptField(valueAt(row, "address") || null),
-            skill: valueAt(row, "skill") || null,
-            seniorityLevel: VALID_LEVELS.includes(seniorityLevel) ? seniorityLevel : null,
-            departmentId: deptByName.get(departmentName.toLowerCase()) || null,
+            skill: cleanText(valueAt(row, "skill")),
+            designation: cleanText(valueAt(row, "designation")),
+            seniorityLevel: VALID_LEVELS.includes(seniorityRaw) ? seniorityRaw : null,
+            workLocationType,
+            departmentId,
+            managerId,
+            baseSalary,
+            bankName: cleanText(valueAt(row, "bankName")),
+            bankAccountNumber: encryptField(valueAt(row, "bankAccountNumber") || null),
+            ...detailFieldData(details),
+            ...employmentData({ employmentStatus, permanentDate }),
           },
         })
+        managers.push({ id: user.id, name: user.name, email: user.email })
         created.push({ row: rowNumber, name: user.name, email: user.email, tempPassword })
       } catch (err) {
         skipped.push({ row: rowNumber, reason: "Could not create row (check for duplicate/invalid data)" })
       }
     }
 
-    res.json({ createdCount: created.length, skippedCount: skipped.length, created, skipped })
+    res.json({ createdCount: created.length, skippedCount: skipped.length, created, skipped, warnings })
   } catch (err) {
     next(err)
   }
 }
 
-// A blank starter CSV with the columns importEmployees understands.
+// A starter CSV with every column importEmployees understands. Only Name
+// and Company Email are required.
 async function importTemplate(req, res, next) {
   try {
-    const header = IMPORT_COLUMNS.join(",")
-    const example = [
-      "Jane Doe",
-      "jane@example.com",
-      "jane.personal@example.com",
-      "0300-1234567",
-      "John Doe",
-      "BS Computer Science",
-      "University of Punjab",
-      "https://www.linkedin.com/in/jane-doe",
-      "09:00",
-      "17:00",
-      "Engineering",
-      "35202-1234567-1",
-      "1995-01-20",
-      "Lahore, Punjab",
-      "Frontend Development",
-      "JUNIOR",
-      "EMPLOYEE",
-    ].map((value) => {
-      const text = String(value)
-      return /[,\"\n]/.test(text) ? `"${text.replace(/\"/g, '""')}"` : text
-    }).join(",")
+    const example = {
+      name: "Jane Doe", email: "jane@example.com", personalEmail: "jane.personal@example.com", phone: "0300-1234567",
+      fatherName: "John Doe", address: "Lahore, Punjab", cnic: "35202-1234567-1", passportNumber: "AB1234567",
+      civilNumber: "290010112345", nationality: "Pakistani", agentName: "Ali Recruitment", dob: "1995-01-20",
+      joiningDate: "2026-01-15", startDate: "2026-02-01", employmentStatus: "Probation", permanentDate: "",
+      education: "BS Computer Science", currentUniversity: "University of Punjab",
+      linkedinUrl: "https://www.linkedin.com/in/jane-doe", department: "Engineering", role: "EMPLOYEE",
+      reportingManager: "manager@example.com", designation: "Customer Support Agent", skill: "Customer Support",
+      seniorityLevel: "JUNIOR", workLocationType: "Office", shiftStart: "09:00", shiftEnd: "17:00",
+      emergencyContactName: "Sara Doe", emergencyContactRelationship: "Sister", emergencyContactPhone: "0301-7654321",
+      emergencyContactAltPhone: "042-1234567", emergencyContactAddress: "Lahore, Punjab", emergencyContactNotes: "",
+      baseSalary: "50000", bankName: "HBL", bankAccountNumber: "",
+    }
+    const csvCell = (value) => {
+      const text = String(value ?? "")
+      return /[,"\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text
+    }
+    const header = IMPORT_COLUMNS.map((col) => csvCell(IMPORT_HEADERS[col])).join(",")
+    const exampleRow = IMPORT_COLUMNS.map((col) => csvCell(example[col])).join(",")
 
     res.setHeader("Content-Type", "text/csv; charset=utf-8")
     res.setHeader("Content-Disposition", "attachment; filename=employee-import-template.csv")
-    res.send(`${header}\n${example}\n`)
+    res.send(`﻿${header}\n${exampleRow}\n`)
   } catch (err) {
     next(err)
   }

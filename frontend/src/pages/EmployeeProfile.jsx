@@ -23,6 +23,7 @@ import SectionHeader from "../components/ui/SectionHeader"
 import { FieldValue, TextField, SelectField } from "../components/ui/Field"
 import EmptyState from "../components/ui/EmptyState"
 import WorkingTimeProgress from "../components/ui/WorkingTimeProgress"
+import EmployeeDocuments from "../components/EmployeeDocuments"
 import { nearestAssignedSite } from "../utils/siteGeofence"
 import { getAttendanceDeviceId } from "../utils/offlineAttendance"
 
@@ -225,6 +226,11 @@ export default function EmployeeProfile() {
   const hrCanChangeRole = user?.role === "HR" && !isSelf && !isProtectedTarget
   const canChangeRole = canChangeRoleAndStatus || hrCanChangeRole
   const canManageCertifications = (hasModuleAccess(user?.role, "certifications") || isSelf) && canTouchThisProfile
+  // Employment status decides leave eligibility — ADMIN/CEO/HR only (backend: updateEmployee).
+  const canEditEmploymentStatus = ["ADMIN", "CEO", "HR"].includes(user?.role)
+  // Document pictures: the employee views their own; ADMIN/CEO/HR manage
+  // (an ADMIN/CEO's only by ADMIN/CEO) — backend: employee-document.controller.
+  const canManageDocuments = ["ADMIN", "CEO", "HR"].includes(user?.role) && canTouchThisProfile
 
   useEffect(() => {
     if (!employee) return
@@ -430,7 +436,20 @@ export default function EmployeeProfile() {
       bankAccountNumber: employee.bankAccountNumber || "",
       designation: employee.designation || "",
       joiningDate: employee.joiningDate ? employee.joiningDate.slice(0, 10) : "",
+      startDate: employee.startDate ? employee.startDate.slice(0, 10) : "",
+      employmentStatus: employee.employmentStatus || "PROBATION",
+      permanentDate: employee.permanentDate ? employee.permanentDate.slice(0, 10) : "",
       workLocationType: employee.workLocationType || "OFFICE",
+      passportNumber: employee.passportNumber || "",
+      civilNumber: employee.civilNumber || "",
+      nationality: employee.nationality || "",
+      agentName: employee.agentName || "",
+      emergencyContactName: employee.emergencyContactName || "",
+      emergencyContactRelationship: employee.emergencyContactRelationship || "",
+      emergencyContactPhone: employee.emergencyContactPhone || "",
+      emergencyContactAltPhone: employee.emergencyContactAltPhone || "",
+      emergencyContactAddress: employee.emergencyContactAddress || "",
+      emergencyContactNotes: employee.emergencyContactNotes || "",
     })
     setEditError("")
     setEditing(true)
@@ -1431,19 +1450,44 @@ export default function EmployeeProfile() {
                           {Object.entries(LEVEL_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                         </SelectField>
                         <TextField label="Skill" value={editForm.skill} onChange={setField("skill")} />
-                        <TextField label="Joining date" type="date" value={editForm.joiningDate} onChange={setField("joiningDate")} />
+                        <TextField label="Joining date" type="date" value={editForm.joiningDate} onChange={setField("joiningDate")} hint="Joined the company" />
+                        <TextField label="Start date" type="date" value={editForm.startDate} onChange={setField("startDate")} hint="Started the assigned operation / campaign / position" />
+                        <SelectField
+                          label="Employment status"
+                          value={editForm.employmentStatus}
+                          disabled={!canEditEmploymentStatus}
+                          onChange={(e) => setEditForm((f) => ({ ...f, employmentStatus: e.target.value, permanentDate: e.target.value === "PROBATION" ? "" : f.permanentDate }))}
+                        >
+                          <option value="PROBATION">Probation</option>
+                          <option value="PERMANENT">Permanent</option>
+                        </SelectField>
+                        {editForm.employmentStatus === "PERMANENT" && (
+                          <TextField label="Permanent from" type="date" value={editForm.permanentDate} disabled={!canEditEmploymentStatus} onChange={setField("permanentDate")} hint="Leave schedule starts this month (blank = today)" />
+                        )}
                         <div className="grid grid-cols-2 gap-2">
                           <TextField label="Shift Start" type="time" value={editForm.shiftStart} hint={formatClock(editForm.shiftStart)} onChange={setField("shiftStart")} />
                           <TextField label="Shift End" type="time" value={editForm.shiftEnd} hint={formatClock(editForm.shiftEnd)} onChange={setField("shiftEnd")} />
                         </div>
                       </FormGroup>
-                      <FormGroup title="Personal">
+                      <FormGroup title="Personal / Identification">
                         <TextField label="Father Name" value={editForm.fatherName} onChange={setField("fatherName")} />
                         <TextField label="CNIC" value={editForm.cnic} onChange={setField("cnic")} placeholder="XXXXX-XXXXXXX-X" hint="Stored encrypted" />
+                        <TextField label="Passport Number" value={editForm.passportNumber} onChange={setField("passportNumber")} hint="Stored encrypted" />
+                        <TextField label="Civil Number" value={editForm.civilNumber} onChange={setField("civilNumber")} hint="Stored encrypted" />
+                        <TextField label="Nationality" value={editForm.nationality} onChange={setField("nationality")} placeholder="e.g. Pakistani" />
                         <TextField label="Date of birth" type="date" value={editForm.dob} onChange={setField("dob")} />
                         <TextField label="Location / Residence" value={editForm.address} onChange={setField("address")} />
                       </FormGroup>
-                      <FormGroup title="Education">
+                      <FormGroup title="Emergency contact">
+                        <TextField label="Contact name" value={editForm.emergencyContactName} onChange={setField("emergencyContactName")} />
+                        <TextField label="Relationship" value={editForm.emergencyContactRelationship} onChange={setField("emergencyContactRelationship")} placeholder="e.g. Brother, Spouse" />
+                        <TextField label="Phone" value={editForm.emergencyContactPhone} onChange={setField("emergencyContactPhone")} />
+                        <TextField label="Alternate phone" value={editForm.emergencyContactAltPhone} onChange={setField("emergencyContactAltPhone")} />
+                        <TextField label="Address" value={editForm.emergencyContactAddress} onChange={setField("emergencyContactAddress")} />
+                        <TextField label="Other information" value={editForm.emergencyContactNotes} onChange={setField("emergencyContactNotes")} placeholder="e.g. Call after 6 PM" />
+                      </FormGroup>
+                      <FormGroup title="Recruitment & education">
+                        <TextField label="Agent Name" value={editForm.agentName} onChange={setField("agentName")} placeholder="Recruitment agent, if any" />
                         <TextField label="Education" value={editForm.education} onChange={setField("education")} placeholder="e.g. BS Computer Science" />
                         <TextField label="University" value={editForm.currentUniversity} onChange={setField("currentUniversity")} />
                         <TextField label="LinkedIn URL" value={editForm.linkedinUrl} onChange={setField("linkedinUrl")} placeholder="https://www.linkedin.com/in/..." />
@@ -1484,17 +1528,36 @@ export default function EmployeeProfile() {
                     <FieldValue label="Reporting Manager" value={employee.manager?.name} />
                     <FieldValue label="Skill" value={employee.skill} />
                     <FieldValue label="Joining date" value={fmtDate(employee.joiningDate)} />
+                    <FieldValue label="Start date" value={fmtDate(employee.startDate)} />
+                    <FieldValue
+                      label="Employment status"
+                      value={employee.employmentStatus === "PERMANENT"
+                        ? `Permanent${employee.permanentDate ? ` since ${fmtDate(employee.permanentDate)}` : ""}`
+                        : employee.employmentStatus === "PROBATION" ? "Probation" : null}
+                    />
                     <FieldValue label="Shift" value={employee.shiftStart || employee.shiftEnd ? `${formatClock(employee.shiftStart) || "—"} - ${formatClock(employee.shiftEnd) || "—"}` : null} />
                   </DetailGroup>
                   {showPersonalDetails && (
                     <>
-                      <DetailGroup title="Personal">
+                      <DetailGroup title="Personal / Identification">
                         <FieldValue label="Father Name" value={employee.fatherName} />
                         <FieldValue label="CNIC" value={employee.cnic} />
+                        <FieldValue label="Passport Number" value={employee.passportNumber} />
+                        <FieldValue label="Civil Number" value={employee.civilNumber} />
+                        <FieldValue label="Nationality" value={employee.nationality} />
                         <FieldValue label="Date of birth" value={fmtDate(employee.dob)} />
                         <FieldValue label="Location / Residence" value={employee.address} />
                       </DetailGroup>
-                      <DetailGroup title="Education">
+                      <DetailGroup title="Emergency contact">
+                        <FieldValue label="Name" value={employee.emergencyContactName} />
+                        <FieldValue label="Relationship" value={employee.emergencyContactRelationship} />
+                        <FieldValue label="Phone" value={employee.emergencyContactPhone} />
+                        <FieldValue label="Alternate phone" value={employee.emergencyContactAltPhone} />
+                        <FieldValue label="Address" value={employee.emergencyContactAddress} />
+                        {employee.emergencyContactNotes && <FieldValue label="Other information" value={employee.emergencyContactNotes} />}
+                      </DetailGroup>
+                      <DetailGroup title="Recruitment & education">
+                        <FieldValue label="Agent Name" value={employee.agentName} />
                         <FieldValue label="Education" value={employee.education} />
                         <FieldValue label="University" value={employee.currentUniversity} />
                         <FieldValue
@@ -1512,6 +1575,10 @@ export default function EmployeeProfile() {
                     </DetailGroup>
                   )}
                   </div>
+
+                  {Array.isArray(employee.documents) && (
+                    <EmployeeDocuments employeeId={employee.id} documents={employee.documents} canManage={canManageDocuments} />
+                  )}
 
                   {canManageCertifications && (
                     <div className="w-full border-t border-border pt-4 text-left">

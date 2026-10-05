@@ -29,8 +29,11 @@ async function createNotification({
 // page (e.g. "assetRequests" -> ADMIN/CEO/IT_MANAGER, not HR/MANAGEMENT).
 // Without it, a management role lacking the module got a notification whose
 // link just bounced them back to their own profile.
-async function notifyManagement({ organizationId, createdById, type, title, message, link, moduleKey }) {
-  const roles = moduleKey
+// `roles` (explicit list) takes precedence over `moduleKey`.
+async function notifyManagement({ organizationId, createdById, type, title, message, link, moduleKey, roles: onlyRoles }) {
+  const roles = onlyRoles
+    ? onlyRoles
+    : moduleKey
     ? Object.keys(ROLE_MODULES).filter((role) => hasModuleAccess(role, moduleKey))
     : MANAGEMENT_ROLES
   const users = await prisma.user.findMany({

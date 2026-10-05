@@ -3,7 +3,7 @@ import { createPortal } from "react-dom"
 import { useMutation, useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query"
 import { Link, useNavigate } from "react-router-dom"
 import {
-  Search, Plus, X, Copy, Trash2, Upload, FileOutput, Pencil, Mail,
+  Search, Plus, X, Copy, Trash2, Upload, FileOutput, Pencil, Mail, FileDown,
   MoreHorizontal, ArrowUp, ArrowDown, ArrowUpDown, User as UserIcon,
 } from "lucide-react"
 import api from "../api/client"
@@ -35,6 +35,9 @@ const emptyForm = {
   address: "",
   skill: "",
   seniorityLevel: "",
+  joiningDate: "",
+  startDate: "",
+  employmentStatus: "PROBATION",
 }
 
 const STATUS_LABELS = { ACTIVE: "Active", ON_LEAVE: "On Leave", LEFT_COMPANY: "Left Company" }
@@ -343,6 +346,20 @@ export default function Employees() {
     if (failed.length) setError(failed.join(" · "))
   }
 
+  async function handleTemplate() {
+    try {
+      const res = await api.get("/employees/import/template", { responseType: "blob" })
+      const url = URL.createObjectURL(res.data)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = "employee-import-template.csv"
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch {
+      setImportError("Could not download the template")
+    }
+  }
+
   function handleFileChosen(e) {
     const file = e.target.files?.[0]
     e.target.value = ""
@@ -400,6 +417,13 @@ export default function Employees() {
                   <Upload size={14} /> {importFile.isPending ? "Importing…" : "Import Sheet"}
                 </button>
                 <input ref={fileInputRef} type="file" accept={SHEET_ACCEPT} onChange={handleFileChosen} className="hidden" />
+                <button
+                  onClick={handleTemplate}
+                  className="pill-secondary flex items-center gap-1.5 px-3.5 py-2 text-sm"
+                  title="Download a CSV with every column the import understands"
+                >
+                  <FileDown size={14} /> Import Template
+                </button>
               </>
             )}
             <button
@@ -464,6 +488,14 @@ export default function Employees() {
                   Row {c.row}: <span className="font-medium text-ink">{c.email}</span> — temp password{" "}
                   <span className="font-mono text-ink">{c.tempPassword}</span>
                 </p>
+              ))}
+            </div>
+          )}
+          {importResult.warnings?.length > 0 && (
+            <div className="max-h-40 overflow-y-auto rounded-xl bg-surface-2 p-3 text-xs text-muted">
+              <p className="mb-1 font-semibold text-ink">Imported, but some values were left blank:</p>
+              {importResult.warnings.map((w, i) => (
+                <p key={i}>Row {w.row}: {w.reason}</p>
               ))}
             </div>
           )}
@@ -558,7 +590,22 @@ export default function Employees() {
               <option value="SENIOR">Senior</option>
               <option value="LEAD">Lead</option>
             </SelectField>
+            <TextField label="Joining date" type="date" value={form.joiningDate} onChange={(e) => updateField("joiningDate", e.target.value)} hint="Joined the company" />
+            <TextField label="Start date" type="date" value={form.startDate} onChange={(e) => updateField("startDate", e.target.value)} hint="Started the assigned operation / campaign" />
+            <SelectField label="Employment status" value={form.employmentStatus} onChange={(e) => updateField("employmentStatus", e.target.value)}>
+              <option value="PROBATION">Probation</option>
+              <option value="PERMANENT">Permanent (from today)</option>
+            </SelectField>
           </div>
+          <p className="text-xs text-muted-2">Passport, civil number, emergency contact and documents can be added from the employee's profile after saving.</p>
+          <p className="flex flex-wrap items-center gap-1.5 text-xs text-muted">
+            Adding many people at once?
+            <button type="button" onClick={handleTemplate} className="inline-flex items-center gap-1 font-semibold text-accent hover:underline">
+              <FileDown size={12} /> Download the import template
+            </button>
+            , fill it in, then use
+            <button type="button" onClick={() => fileInputRef.current?.click()} className="font-semibold text-accent hover:underline">Import Sheet</button>.
+          </p>
           {error && <p className="text-sm text-danger">{error}</p>}
           <button type="submit" disabled={addEmployee.isPending} className="pill-accent px-5 py-2.5 text-sm disabled:opacity-60">
             {addEmployee.isPending ? "Adding…" : "Add employee"}

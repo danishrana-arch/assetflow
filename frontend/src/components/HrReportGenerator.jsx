@@ -304,7 +304,9 @@ export default function HrReportGenerator() {
           {extras.includes("leaveStatus") && (
             <SelectField label="Leave status" value={filters.leaveStatus} onChange={(e) => set("leaveStatus", e.target.value)}>
               <option value="">All statuses</option>
-              <option value="PENDING">Pending</option>
+              <option value="PENDING">Pending (any stage)</option>
+              <option value="PENDING_HR">Pending HR</option>
+              <option value="PENDING_FINAL_APPROVAL">Pending final approval</option>
               <option value="APPROVED">Approved</option>
               <option value="REJECTED">Rejected</option>
               <option value="CANCELLED">Cancelled</option>

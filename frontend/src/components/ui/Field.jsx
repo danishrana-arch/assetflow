@@ -51,9 +51,11 @@ export function TextAreaField({ label, rows = 3, className = "", id, ...props })
 
 export function FieldValue({ label, value, className = "" }) {
   return (
-    <div className={className}>
+    <div className={`min-w-0 ${className}`}>
       <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">{label}</p>
-      <p className="mt-0.5 text-sm text-ink">{value || <span className="text-muted-2">—</span>}</p>
+      {/* overflow-wrap:anywhere lets long unbroken values (emails, URLs,
+          account numbers) wrap inside the card instead of running out of it. */}
+      <p className="mt-0.5 text-sm text-ink [overflow-wrap:anywhere]">{value || <span className="text-muted-2">—</span>}</p>
     </div>
   )
 }

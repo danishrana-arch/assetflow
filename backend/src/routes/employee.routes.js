@@ -10,6 +10,7 @@ const {
   importTemplate,
 } = require("../controllers/employee.controller")
 const { resetPassword } = require("../controllers/auth.controller")
+const { listDocuments, uploadDocument, downloadDocument, deleteDocument } = require("../controllers/employee-document.controller")
 const { requireAuth, requireRole, requireModule, requireModuleOrSelf } = require("../middleware/auth.middleware")
 const { EMPLOYEE_DIRECTORY_ROLES } = require("../utils/roles")
 const { noStore } = require("../middleware/cache.middleware")
@@ -27,6 +28,13 @@ const upload = multer({
   },
 })
 
+// Employee document pictures — memory only, type checked from the bytes in
+// the controller.
+const documentUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+})
+
 router.use(requireAuth)
 
 // Bulk add follows the same rule as single add: ADMIN/CEO/HR only.
@@ -40,6 +48,11 @@ router.get("/:id", noStore, getEmployee)
 // One month of attendance/leave/activity for the profile's month browser —
 // same visibility rules as GET /:id (checked in the controller).
 router.get("/:id/activity", noStore, getEmployeeMonthActivity)
+// Documents: self (view) or ADMIN/CEO/HR — checked in the controller.
+router.get("/:id/documents", noStore, listDocuments)
+router.post("/:id/documents", requireRole("ADMIN", "CEO", "HR"), documentUpload.single("file"), uploadDocument)
+router.get("/:id/documents/:docId/file", noStore, downloadDocument)
+router.delete("/:id/documents/:docId", requireRole("ADMIN", "CEO", "HR"), deleteDocument)
 // A role with the "employees" module can edit anyone; anyone else can only
 // edit their own phone/email (enforced field-by-field in the controller).
 router.patch("/:id", requireModuleOrSelf("employees"), updateEmployee)

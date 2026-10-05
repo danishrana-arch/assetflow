@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient, keepPreviousData } from "@tansta
 import { Link, useNavigate, useSearchParams } from "react-router-dom"
 import { PieChart, Pie, Cell, ResponsiveContainer } from "recharts"
 import {
-  Search, Plus, X, Upload, Trash2, Pencil, Eye, Ellipsis, ArrowUp, ArrowDown, ArrowUpDown,
+  Search, Plus, X, Upload, FileDown, FileOutput, Trash2, Pencil, Eye, Ellipsis, ArrowUp, ArrowDown, ArrowUpDown,
   LayoutGrid, List, SlidersHorizontal, Calendar, Package, Laptop, Monitor, PcCase, Headphones, FileText,
   Smartphone, Armchair, HardDrive, Webcam, Keyboard, ShieldCheck, Tablet, Projector, Printer, Mouse, Cable,
   Wrench, TriangleAlert, ArrowLeftRight, RotateCcw, CirclePlus, ArrowUpRight, ChevronLeft, ChevronRight,
@@ -35,6 +35,38 @@ const STATUS_META = {
   REPAIR: { label: "Maintenance", tone: "orange", color: "#F59E0B" },
   LOST: { label: "Lost", tone: "pink", color: "#DC2626" },
   DISPOSED: { label: "Disposed", tone: "slate", color: "#8A9393" },
+}
+
+// CSV of the given assets. The first nine columns match the import template,
+// so an exported sheet can be edited and imported again.
+function csvCell(value) {
+  const text = String(value ?? "")
+  return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text
+}
+const dayOf = (value) => (value ? String(value).slice(0, 10) : "")
+function downloadAssetsCsv(rows) {
+  const header = ["Name", "Category", "Serial Number", "CPU", "RAM", "Storage", "Purchase Date", "Warranty End", "Department", "Status", "Assigned To", "Added On"]
+  const lines = rows.map((a) => [
+    a.name,
+    a.category,
+    a.serialNumber,
+    a.cpu,
+    a.ram,
+    a.storage,
+    dayOf(a.purchaseDate),
+    dayOf(a.warrantyEnd),
+    a.department?.name,
+    STATUS_META[a.status]?.label || a.status,
+    a.assignedTo?.name,
+    dayOf(a.createdAt),
+  ].map(csvCell).join(","))
+  const blob = new Blob([`﻿${[header.join(","), ...lines].join("\n")}`], { type: "text/csv;charset=utf-8" })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement("a")
+  link.href = url
+  link.download = `inventory-${new Date().toISOString().slice(0, 10)}.csv`
+  link.click()
+  URL.revokeObjectURL(url)
 }
 
 // Keyword → icon/tone, so custom categories still get a sensible icon.
@@ -447,6 +479,37 @@ export default function Inventory() {
 
   function updateField(key, value) { setForm((f) => ({ ...f, [key]: value })) }
 
+  // Exports the selected rows, or else every asset matching the current
+  // filters (all pages — GET /assets without `page` returns the full list).
+  const [exporting, setExporting] = useState(false)
+  async function handleExport() {
+    setImportError("")
+    if (selected.size > 0) return downloadAssetsCsv(assets.filter((a) => selected.has(a.id)))
+    setExporting(true)
+    try {
+      const res = await api.get("/assets", { params: listParams })
+      downloadAssetsCsv(Array.isArray(res.data) ? res.data : res.data?.data || [])
+    } catch (err) {
+      setImportError(err.response?.data?.error || "Could not export the inventory")
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  async function handleTemplate() {
+    try {
+      const res = await api.get("/assets/import/template", { responseType: "blob" })
+      const url = URL.createObjectURL(res.data)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = "asset-import-template.csv"
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch {
+      setImportError("Could not download the template")
+    }
+  }
+
   function handleFileChosen(e) {
     const file = e.target.files?.[0]
     e.target.value = "" // allow re-selecting the same file later
@@ -559,6 +622,21 @@ export default function Inventory() {
             <Upload size={14} /> {importFile.isPending ? "Importing…" : "Import Sheet"}
           </button>
           <input ref={fileInputRef} type="file" accept={SHEET_ACCEPT} onChange={handleFileChosen} className="hidden" />
+          <button
+            onClick={handleTemplate}
+            className="pill-secondary flex items-center gap-1.5 px-3.5 py-2.5 text-sm"
+            title="Download a CSV with every column the import understands"
+          >
+            <FileDown size={14} /> Import Template
+          </button>
+          <button
+            onClick={handleExport}
+            disabled={exporting}
+            className="pill-secondary flex items-center gap-1.5 px-3.5 py-2.5 text-sm disabled:opacity-60"
+            title="Download the assets shown (current filters, or the selected rows) as a sheet"
+          >
+            <FileOutput size={14} /> {exporting ? "Exporting…" : selected.size > 0 ? `Export ${selected.size} selected` : "Export Sheet"}
+          </button>
           <button
             onClick={() => (showForm ? closeForm() : setShowForm(true))}
             className="pill-accent flex items-center gap-1.5 px-4 py-2.5 text-sm"

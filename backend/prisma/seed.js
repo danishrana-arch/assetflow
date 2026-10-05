@@ -325,7 +325,7 @@ async function main() {
       endDate: today(),
       reason: "Family event out of town.",
       type: "CASUAL",
-      status: "PENDING",
+      status: "PENDING_HR",
     },
   })
 

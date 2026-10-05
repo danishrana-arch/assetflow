@@ -3,6 +3,8 @@ const { hasModuleAccess } = require("../utils/roles")
 const { logAudit } = require("../utils/audit")
 const { toDateOnly } = require("../utils/date")
 const { notifyManagement, createNotification } = require("../utils/notifications")
+const { dateKeyInTimeZone } = require("../utils/timezone")
+const { validateLeaveRequest, leaveSchedule, NOT_PERMANENT_MESSAGE, PENDING_LEAVE_STATUSES } = require("../utils/leave-policy")
 
 function eachDate(start, end) {
   const days = []
@@ -52,10 +54,39 @@ async function findTeamLeaveConflict({ organizationId, employeeId, start, end, e
   return conflict
 }
 
+const OWNER_ROLES = ["ADMIN", "CEO"]
+
+// HR does step 1. If the organization has no active HR other than the
+// applicant (e.g. HR's own leave in a one-HR org), ADMIN/CEO may do it, so a
+// request can never get stuck.
+async function hrIdsInOrganization(organizationId) {
+  const hr = await prisma.user.findMany({ where: { organizationId, role: "HR", status: "ACTIVE" }, select: { id: true } })
+  return hr.map((u) => u.id)
+}
+
+function canReviewLeave({ leave, userId, role, hrIds }) {
+  if (leave.employeeId === userId) return false
+  if (leave.status === "PENDING_HR") {
+    if (role === "HR") return true
+    return OWNER_ROLES.includes(role) && !hrIds.some((id) => id !== leave.employeeId)
+  }
+  if (leave.status === "PENDING_FINAL_APPROVAL") return OWNER_ROLES.includes(role)
+  return false
+}
+
 async function createLeave(req, res, next) {
   try {
-    const { organizationId, userId } = req.user
+    const { userId } = req.user
     const { startDate, endDate, reason, type, isHalfDay } = req.body
+    // The applicant's own (home) organization — req.user.organizationId can
+    // be a switched-to org for ADMIN/CEO.
+    const employee = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, organizationId: true, employmentStatus: true, permanentDate: true, organization: { select: { timezone: true, sickLeaveAllowance: true, casualLeaveAllowance: true } } },
+    })
+    if (!employee) return res.status(404).json({ error: "User not found" })
+    const organizationId = employee.organizationId
+    if (employee.employmentStatus !== "PERMANENT") return res.status(403).json({ error: NOT_PERMANENT_MESSAGE })
 
     if (!startDate || !endDate || !reason || !reason.trim()) {
       return res.status(400).json({ error: "startDate, endDate and reason are required" })
@@ -84,6 +115,18 @@ async function createLeave(req, res, next) {
       return res.status(400).json({ error: `Leave requests can span at most ${MAX_LEAVE_SPAN_DAYS} days` })
     }
 
+    const policyError = await validateLeaveRequest({
+      organizationId,
+      employee,
+      start,
+      end,
+      isHalfDay: halfDay,
+      type: leaveType,
+      todayKey: dateKeyInTimeZone(new Date(), employee.organization?.timezone || "UTC"),
+      allowance: { SICK: employee.organization?.sickLeaveAllowance, CASUAL: employee.organization?.casualLeaveAllowance },
+    })
+    if (policyError) return res.status(policyError.status).json({ error: policyError.error })
+
     const conflict = await findTeamLeaveConflict({ organizationId, employeeId: userId, start, end })
     if (conflict) {
       return res.status(409).json({
@@ -103,14 +146,16 @@ async function createLeave(req, res, next) {
       },
     })
 
+    // Step 1 goes to HR (or ADMIN/CEO when there's no other HR to do it).
+    const hrIds = await hrIdsInOrganization(organizationId)
     await notifyManagement({
       organizationId,
       createdById: userId,
       type: "LEAVE_REQUEST",
       title: "New leave request",
-      message: `${leave.type} leave from ${startDate} to ${endDate}.`,
+      message: `${leave.type} leave from ${startDate} to ${endDate} — waiting for HR approval.`,
       link: "/leave-requests",
-      moduleKey: "leave",
+      roles: hrIds.some((id) => id !== userId) ? ["HR"] : OWNER_ROLES,
     })
 
     res.status(201).json(leave)
@@ -125,11 +170,16 @@ async function listLeaves(req, res, next) {
   try {
     const { organizationId, userId, role, departmentId } = req.user
     const { status, type, employeeId } = req.query
-    const isManagement = hasModuleAccess(role, "leave")
+    // ?mine=1 — the requester's own applications even when they have the
+    // leave module (My Attendance), across their home org.
+    const mine = req.query.mine === "1" || req.query.mine === "true"
+    const isManagement = hasModuleAccess(role, "leave") && !mine
+    // "PENDING" = either pending stage (older clients / filters).
+    const statusWhere = status === "PENDING" ? { status: { in: PENDING_LEAVE_STATUSES } } : status ? { status } : {}
 
     const where = {
-      organizationId,
-      ...(status ? { status } : {}),
+      ...(mine ? {} : { organizationId }),
+      ...statusWhere,
       ...(type ? { type } : {}),
       ...(isManagement
         ? role === "DEPARTMENT_HEAD"
@@ -140,16 +190,20 @@ async function listLeaves(req, res, next) {
         : { employeeId: userId }),
     }
 
-    const leaves = await prisma.leaveApplication.findMany({
-      where,
-      include: {
-        employee: { select: { id: true, name: true, email: true, department: { select: { name: true } } } },
-        reviewedBy: { select: { id: true, name: true } },
-      },
-      orderBy: { createdAt: "desc" },
-    })
+    const [leaves, hrIds] = await Promise.all([
+      prisma.leaveApplication.findMany({
+        where,
+        include: {
+          employee: { select: { id: true, name: true, email: true, department: { select: { name: true } } } },
+          reviewedBy: { select: { id: true, name: true, role: true } },
+          hrReviewedBy: { select: { id: true, name: true } },
+        },
+        orderBy: { createdAt: "desc" },
+      }),
+      isManagement ? hrIdsInOrganization(organizationId) : [],
+    ])
 
-    res.json(leaves)
+    res.json(leaves.map((leave) => ({ ...leave, canReview: isManagement && canReviewLeave({ leave, userId, role, hrIds }) })))
   } catch (err) {
     next(err)
   }
@@ -196,23 +250,33 @@ async function getLeaveBalance(req, res, next) {
       return res.status(403).json({ error: "You can only view your own leave balance" })
     }
 
-    const org = await prisma.organization.findUnique({ where: { id: organizationId } })
+    const employee = await prisma.user.findFirst({
+      where: { id: employeeId, ...(employeeId === userId ? {} : { organizationId }) },
+      select: { id: true, organizationId: true, employmentStatus: true, permanentDate: true },
+    })
+    if (!employee) return res.status(404).json({ error: "Employee not found" })
+    const org = await prisma.organization.findUnique({ where: { id: employee.organizationId } })
     const allowance = { SICK: org.sickLeaveAllowance, CASUAL: org.casualLeaveAllowance }
 
-    const year = parseInt(req.query.year, 10) || new Date().getFullYear()
+    const todayKey = dateKeyInTimeZone(new Date(), org.timezone || "UTC")
+    const year = parseInt(req.query.year, 10) || Number(todayKey.slice(0, 4))
     const yearStart = new Date(Date.UTC(year, 0, 1))
     const yearEnd = new Date(Date.UTC(year, 11, 31, 23, 59, 59))
 
     const approved = await prisma.leaveApplication.findMany({
-      where: { organizationId, employeeId, status: "APPROVED", startDate: { gte: yearStart, lte: yearEnd } },
+      where: { organizationId: employee.organizationId, employeeId, status: "APPROVED", startDate: { gte: yearStart, lte: yearEnd } },
       select: { type: true, startDate: true, endDate: true, isHalfDay: true },
     })
 
     const used = { SICK: 0, CASUAL: 0, UNPAID: 0 }
     for (const leave of approved) {
-      const days = await chargeableDays(organizationId, leave.startDate, leave.endDate, leave.isHalfDay)
+      const days = await chargeableDays(employee.organizationId, leave.startDate, leave.endDate, leave.isHalfDay)
       used[leave.type] = (used[leave.type] || 0) + days
     }
+
+    // Annual balance (above, approved only) and the monthly schedule
+    // (approved + pending, cumulative cap) are separate on purpose.
+    const schedule = await leaveSchedule({ organizationId: employee.organizationId, employee, year, todayKey })
 
     res.json({
       year,
@@ -220,6 +284,7 @@ async function getLeaveBalance(req, res, next) {
       casual: { used: used.CASUAL, total: allowance.CASUAL, remaining: Math.max(0, allowance.CASUAL - used.CASUAL) },
       unpaid: { used: used.UNPAID },
       annualTotal: allowance.SICK + allowance.CASUAL,
+      schedule,
     })
   } catch (err) {
     next(err)
@@ -255,8 +320,10 @@ async function getLeaveCalendar(req, res, next) {
   }
 }
 
-// Management approves or rejects a pending application. Approving marks
-// every day in the range as LEAVE on the attendance sheet.
+// Two steps: HR approves/rejects a PENDING_HR request (approve → it moves
+// to PENDING_FINAL_APPROVAL for ADMIN/CEO); then either an ADMIN or a CEO
+// gives the final decision. Only the final approval marks the days as LEAVE
+// on the attendance sheet. Nobody reviews their own request.
 async function reviewLeave(req, res, next) {
   try {
     const { organizationId, userId, role, departmentId } = req.user
@@ -269,16 +336,71 @@ async function reviewLeave(req, res, next) {
 
     const leave = await prisma.leaveApplication.findFirst({
       where: { id, organizationId },
-      include: { employee: { select: { departmentId: true } } },
+      include: { employee: { select: { departmentId: true, name: true } } },
     })
     if (!leave) return res.status(404).json({ error: "Leave application not found" })
     if (role === "DEPARTMENT_HEAD" && leave.employee.departmentId !== departmentId) {
       return res.status(404).json({ error: "Leave application not found" })
     }
-    if (leave.status !== "PENDING") {
+    if (!PENDING_LEAVE_STATUSES.includes(leave.status)) {
       return res.status(400).json({ error: `This application is already ${leave.status.toLowerCase()}` })
     }
+    if (leave.employeeId === userId) {
+      return res.status(403).json({ error: "You can't review your own leave request" })
+    }
+    const hrIds = leave.status === "PENDING_HR" ? await hrIdsInOrganization(organizationId) : []
+    if (!canReviewLeave({ leave, userId, role, hrIds })) {
+      return res.status(403).json({
+        error: leave.status === "PENDING_HR"
+          ? "This request is waiting for HR approval first"
+          : "Only an Admin or CEO can give the final approval",
+      })
+    }
+    const note = reviewNote ? String(reviewNote).slice(0, 1000) : null
+    const now = new Date()
 
+    // Step 1 (HR).
+    if (leave.status === "PENDING_HR") {
+      const saved = await prisma.leaveApplication.update({
+        where: { id },
+        data: decision === "APPROVED"
+          ? { status: "PENDING_FINAL_APPROVAL", hrReviewedById: userId, hrReviewedAt: now, hrReviewNote: note }
+          : { status: "REJECTED", hrReviewedById: userId, hrReviewedAt: now, hrReviewNote: note, reviewedById: userId, reviewedAt: now, reviewNote: note },
+      })
+      logAudit({
+        organizationId,
+        actorId: userId,
+        action: decision === "APPROVED" ? "leave.hr_approved" : "leave.rejected",
+        targetType: "LeaveApplication",
+        targetId: id,
+        note: `${leave.type}${leave.isHalfDay ? " (half-day)" : ""} for employee ${leave.employeeId} (HR step)`,
+      })
+      if (decision === "APPROVED") {
+        await notifyManagement({
+          organizationId,
+          createdById: userId,
+          type: "LEAVE_REQUEST",
+          title: "Leave request needs final approval",
+          message: `${leave.employee.name}: ${leave.type} leave, approved by HR — waiting for Admin/CEO approval.`,
+          link: "/leave-requests",
+          roles: OWNER_ROLES,
+        })
+      }
+      await createNotification({
+        organizationId,
+        recipientId: leave.employeeId,
+        createdById: userId,
+        type: "LEAVE_REQUEST",
+        title: decision === "APPROVED" ? "Leave request approved by HR" : "Leave request rejected",
+        message: decision === "APPROVED"
+          ? `${leave.type} leave was approved by HR and is now waiting for final approval.`
+          : `${leave.type} leave was rejected by HR.${note ? ` ${note}` : ""}`,
+        link: "/attendance/me",
+      })
+      return res.json(saved)
+    }
+
+    // Step 2 (final, ADMIN or CEO).
     if (decision === "APPROVED") {
       const conflict = await findTeamLeaveConflict({
         organizationId,
@@ -300,8 +422,8 @@ async function reviewLeave(req, res, next) {
         data: {
           status: decision,
           reviewedById: userId,
-          reviewedAt: new Date(),
-          reviewNote: reviewNote ? String(reviewNote).slice(0, 1000) : null,
+          reviewedAt: now,
+          reviewNote: note,
         },
       })
 
@@ -342,7 +464,7 @@ async function reviewLeave(req, res, next) {
       createdById: userId,
       type: "LEAVE_REQUEST",
       title: `Leave request ${decision.toLowerCase()}`,
-      message: `${leave.type} leave was ${decision.toLowerCase()}.${reviewNote ? ` ${reviewNote}` : ""}`,
+      message: `${leave.type} leave was ${decision === "APPROVED" ? "approved" : "rejected at final approval"}.${note ? ` ${note}` : ""}`,
       link: "/attendance/me",
     })
 
@@ -355,15 +477,16 @@ async function reviewLeave(req, res, next) {
 // Employee cancels their own still-pending request.
 async function cancelLeave(req, res, next) {
   try {
-    const { organizationId, userId } = req.user
+    const { userId } = req.user
     const { id } = req.params
 
-    const leave = await prisma.leaveApplication.findFirst({ where: { id, organizationId } })
+    // Own requests live in the applicant's home org (see createLeave).
+    const leave = await prisma.leaveApplication.findFirst({ where: { id, employeeId: userId } })
     if (!leave) return res.status(404).json({ error: "Leave application not found" })
     if (leave.employeeId !== userId) {
       return res.status(403).json({ error: "You can only cancel your own leave applications" })
     }
-    if (leave.status !== "PENDING") {
+    if (!PENDING_LEAVE_STATUSES.includes(leave.status)) {
       return res.status(400).json({ error: "Only pending applications can be cancelled" })
     }
 

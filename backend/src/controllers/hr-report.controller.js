@@ -245,7 +245,13 @@ async function leaveRows(orgIds, q, range) {
       employee: employeeWhere(orgIds, q),
       startDate: { lt: range.endExclusive },
       endDate: { gte: range.from },
-      ...(q.leaveStatus ? { status: String(q.leaveStatus) } : {}),
+      ...(q.leaveStatus
+        ? String(q.leaveStatus) === "PENDING"
+          ? { status: { in: ["PENDING_HR", "PENDING_FINAL_APPROVAL"] } }
+          : ["PENDING_HR", "PENDING_FINAL_APPROVAL", "APPROVED", "REJECTED", "CANCELLED"].includes(String(q.leaveStatus))
+            ? { status: String(q.leaveStatus) }
+            : {}
+        : {}),
       ...(q.leaveType ? { type: String(q.leaveType) } : {}),
     },
     include: { employee: { select: EMPLOYEE_SELECT }, reviewedBy: { select: { name: true } } },
