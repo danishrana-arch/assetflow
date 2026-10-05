@@ -34,9 +34,12 @@ model Organization {
   // DEPRECATED — superseded by hierarchyRole (migrated to PARENT); kept so no
   // data is dropped. Not read by the app.
   isCoMain                  Boolean                   @default(false)
-  // GRAND_PARENT / PARENT (each at most one per companyId, partial unique
-  // index in migration 20261001150000) or CHILD. See utils/organization.js.
+  // GRAND_PARENT / PARENT / CHILD; with parentOrganizationId (the company
+  // directly above) this forms the company tree. See utils/organization.js.
   hierarchyRole             OrganizationHierarchyRole @default(CHILD)
+  // IT office or call center; call-center admins (User.callCenterAccess)
+  // reach every CALL_CENTER of the group. Set by a CEO.
+  officeType                OrganizationOfficeType    @default(IT_OFFICE)
   geofenceEnabled           Boolean                   @default(false)
   officeLatitude            Decimal?                  @db.Decimal(10, 7)
   officeLongitude           Decimal?                  @db.Decimal(10, 7)
@@ -50,6 +53,7 @@ model Organization {
   timezone                  String                    @default("Asia/Karachi")
   remoteOfflineGraceMinutes Int                       @default(30)
   announcements             Announcement[]
+  accessGrants              OrganizationAccessGrant[]
   assets                    Asset[]
   AttendanceAnomaly         AttendanceAnomaly[]
   AttendanceCorrection      AttendanceCorrection[]
@@ -184,10 +188,15 @@ model User {
   linkedinUrl                                                  String?
   shiftStart                                                   String?
   shiftEnd                                                     String?
+  // ADMIN only, set by a CEO: may open every call center of the company
+  // group (and no IT office). See utils/organization.js.
+  callCenterAccess                                             Boolean                   @default(false)
   failedLoginAttempts                                          Int                       @default(0)
   lastFailedLoginAt                                            DateTime?
   securityAlertSentAt                                          DateTime?
   passwordResetTokens                                          PasswordResetToken[]
+  accessGrants                                                 OrganizationAccessGrant[] @relation("AccessGrantUser")
+  accessGrantsGiven                                            OrganizationAccessGrant[] @relation("AccessGrantGrantedBy")
   announcementsCreated                                         Announcement[]            @relation("AnnouncementCreator")
   assignedAssets                                               Asset[]                   @relation("AssignedAssets")
   assetRequests                                                AssetRequest[]            @relation("AssetRequestedBy")
@@ -241,6 +250,22 @@ model User {
 
 // One-time "forgot password" link. Only a SHA-256 hash of the token is
 // stored; the raw token only ever exists in the emailed link.
+// A CEO's explicit "this ADMIN / IT_MANAGER may open this company" (on top
+// of the hierarchy rules — see utils/organization.js).
+model OrganizationAccessGrant {
+  id             String       @id @default(cuid())
+  userId         String
+  organizationId String
+  grantedById    String?
+  createdAt      DateTime     @default(now())
+  user           User         @relation("AccessGrantUser", fields: [userId], references: [id], onDelete: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  grantedBy      User?        @relation("AccessGrantGrantedBy", fields: [grantedById], references: [id], onDelete: SetNull)
+
+  @@unique([userId, organizationId])
+  @@index([organizationId])
+}
+
 model PasswordResetToken {
   id        String    @id @default(cuid())
   userId    String
@@ -1071,6 +1096,11 @@ enum OrganizationHierarchyRole {
   GRAND_PARENT
   PARENT
   CHILD
+}
+
+enum OrganizationOfficeType {
+  IT_OFFICE
+  CALL_CENTER
 }
 
 enum EmployeeStatus {

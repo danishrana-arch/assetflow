@@ -20,7 +20,7 @@ const TYPE_CONFIG = {
   announcement: { label: "Announcements", icon: Megaphone },
 }
 
-export default function GlobalSearch({ className = "" }) {
+export default function GlobalSearch({ className = "", compact = false }) {
   const [query, setQuery] = useState("")
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
@@ -58,8 +58,8 @@ export default function GlobalSearch({ className = "" }) {
 
   return (
     <div ref={ref} className={`relative min-w-0 ${className}`}>
-      <div className="flex h-10 items-center gap-2 rounded-full border border-border bg-surface px-3 shadow-sm focus-within:border-accent/50 focus-within:ring-2 focus-within:ring-accent/10">
-        <Search size={16} className="shrink-0 text-muted" />
+      <div className={`flex items-center gap-2 rounded-full border border-border bg-surface shadow-sm focus-within:border-accent/50 focus-within:ring-2 focus-within:ring-accent/10 ${compact ? "h-8 px-2.5" : "h-10 px-3"}`}>
+        <Search size={compact ? 14 : 16} className="shrink-0 text-muted" />
         <input
           value={query}
           onChange={(event) => {
@@ -67,8 +67,8 @@ export default function GlobalSearch({ className = "" }) {
             setOpen(true)
           }}
           onFocus={() => setOpen(true)}
-          placeholder="Search ManagementDock..."
-          className="min-w-0 flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-muted-2"
+          placeholder={compact ? "Search…" : "Search ManagementDock..."}
+          className={`min-w-0 flex-1 bg-transparent text-ink outline-none placeholder:text-muted-2 ${compact ? "text-xs" : "text-sm"}`}
           aria-label="Search ManagementDock"
         />
         {query && (

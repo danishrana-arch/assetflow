@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react"
-import { Outlet } from "react-router-dom"
+import { Link, Outlet } from "react-router-dom"
+import { Settings as SettingsIcon } from "lucide-react"
 import Sidebar from "../components/Sidebar"
 import Topbar from "../components/Topbar"
 import MobileNav from "../components/MobileNav"
@@ -21,6 +22,8 @@ export default function DashboardLayout() {
   const expandTimer = useRef(null)
   const { user } = useAuth()
   const showCompanySwitcher = ["ADMIN", "CEO", "IT_MANAGER"].includes(user?.role)
+  // Same rule as App.jsx's RequireOwner on /settings.
+  const canOpenSettings = ["ADMIN", "CEO"].includes(user?.role)
   // Feeds every page's back button (components/ui/BackButton.jsx).
   usePageHistoryTracker()
 
@@ -61,11 +64,22 @@ export default function DashboardLayout() {
         }`}
       >
         <div className="mx-auto w-full max-w-[1600px] min-w-0">
-          <div className="mb-5 hidden items-center justify-between gap-4 lg:flex">
-            {/* Search bar with the notification bell right beside it. */}
-            <div className="flex min-w-0 flex-1 items-center gap-2">
-              <GlobalSearch className="w-full max-w-[430px]" />
-              <NotificationBell className="h-10 w-10 shrink-0 border border-border bg-surface/90 shadow-card backdrop-blur-xl" />
+          <div className="mb-4 hidden items-center justify-between gap-4 lg:flex">
+            {/* Compact search, then the notification bell and (for those who
+                can open it) a shortcut straight to Settings. */}
+            <div className="flex min-w-0 flex-1 items-center gap-1.5">
+              <GlobalSearch compact className="w-full max-w-[280px]" />
+              <NotificationBell className="h-8 w-8 shrink-0 border border-border bg-surface/90 shadow-card backdrop-blur-xl" />
+              {canOpenSettings && (
+                <Link
+                  to="/settings"
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border bg-surface/90 text-muted shadow-card backdrop-blur-xl hover:bg-surface-2 hover:text-ink"
+                  aria-label="Settings"
+                  title="Settings"
+                >
+                  <SettingsIcon size={15} />
+                </Link>
+              )}
             </div>
             <div className="flex shrink-0 items-center gap-2">
               {showCompanySwitcher && (

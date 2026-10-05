@@ -4,6 +4,7 @@ const { encryptField, decryptField } = require("../utils/crypto")
 const { isValidTimeZone } = require("../utils/timezone")
 const {
   HIERARCHY,
+  OFFICE_TYPE,
   HIERARCHY_SELECT,
   canAccessOrganization,
   hasCrossCompanyAccess,
@@ -36,14 +37,18 @@ async function listCompanyOrganizations(req, res, next) {
     if (!organizations.length) return res.status(404).json({ error: "Organization not found" })
     const full = await prisma.organization.findMany({ where: { id: { in: organizations.map((o) => o.id) } } })
     const byId = new Map(full.map((o) => [o.id, o]))
-    res.json(organizations.map((o) => safeOrganization(byId.get(o.id))))
+    res.json(organizations.map((o) => ({ ...safeOrganization(byId.get(o.id)), depth: o.depth })))
   } catch (err) {
     next(err)
   }
 }
 
-// New organizations are always CHILD companies. Allowed for a CEO, or an
-// ADMIN of the Grand Parent / Parent (the roles with downward reach).
+// New organizations are always CHILD companies, placed under a Grand Parent
+// or Parent the requester can access (`parentOrganizationId` in the body;
+// defaults to their home company if it's a Grand Parent / Parent, else the
+// first accessible one). Allowed for a CEO, or an ADMIN of a Grand Parent /
+// Parent (the roles with downward reach). The Grand Parent CEO can then
+// promote it in the hierarchy editor.
 async function createSubOrganization(req, res, next) {
   try {
     const { role, userId } = req.user
@@ -60,6 +65,28 @@ async function createSubOrganization(req, res, next) {
       return res.status(403).json({ error: "Only a Grand Parent or Parent company ADMIN (or a CEO) can create organizations" })
     }
     const companyId = home.companyId || home.id
+
+    // "NONE" (CEO only) = a new Grand Parent with nothing above it.
+    const requestedParentId = req.body.parentOrganizationId ? String(req.body.parentOrganizationId) : ""
+    const newGrandParent = requestedParentId === "NONE"
+    if (newGrandParent && role !== "CEO") {
+      return res.status(403).json({ error: "Only a CEO can add a new Grand Parent company" })
+    }
+
+    // Hierarchy reach only — CEO grants / call-center access never let an admin create companies.
+    const reachable = (await accessibleOrganizations(prisma, { role, home, access: { callCenterAccess: false, grantedOrganizationIds: [] } })).filter((o) => o.hierarchyRole !== HIERARCHY.CHILD)
+    const parent = newGrandParent
+      ? null
+      : requestedParentId
+        ? reachable.find((o) => o.id === requestedParentId)
+        : reachable.find((o) => o.id === home.id) || reachable[0]
+    if (!newGrandParent && !parent) {
+      return res.status(requestedParentId ? 403 : 400).json({ error: "Pick a Grand Parent or Parent company you can access to place the new company under" })
+    }
+    // Level follows position: under a Grand Parent = Parent, under a Parent = Child.
+    const hierarchyRole = newGrandParent
+      ? HIERARCHY.GRAND_PARENT
+      : parent.hierarchyRole === HIERARCHY.GRAND_PARENT ? HIERARCHY.PARENT : HIERARCHY.CHILD
     const { timezone } = (await prisma.organization.findUnique({ where: { id: home.id }, select: { timezone: true } })) || {}
 
     const base = slugify(name) || "organization"
@@ -75,8 +102,8 @@ async function createSubOrganization(req, res, next) {
         name,
         slug,
         companyId,
-        parentOrganizationId: companyId,
-        hierarchyRole: HIERARCHY.CHILD,
+        parentOrganizationId: parent ? parent.id : null,
+        hierarchyRole,
         timezone: timezone || "Asia/Karachi",
       },
     })
@@ -87,7 +114,7 @@ async function createSubOrganization(req, res, next) {
       action: "organization.created",
       targetType: "Organization",
       targetId: organization.id,
-      note: `${name} created as a child company`,
+      note: parent ? `${name} created under ${parent.name}` : `${name} created as a Grand Parent company`,
     })
 
     res.status(201).json(safeOrganization(organization))
@@ -313,10 +340,11 @@ async function archiveSubOrganization(req, res, next) {
       return res.status(403).json({ error: "You do not have access to this organization" })
     }
     if (target.hierarchyRole === HIERARCHY.GRAND_PARENT) {
-      return res.status(400).json({ error: "The Grand Parent company cannot be removed" })
+      return res.status(400).json({ error: "A Grand Parent company cannot be removed — a CEO must place it under another company first" })
     }
-    if (target.hierarchyRole === HIERARCHY.PARENT) {
-      return res.status(400).json({ error: "This is the Parent company — the Grand Parent CEO must change the hierarchy first" })
+    const below = await prisma.organization.count({ where: { parentOrganizationId: target.id, archivedAt: null } })
+    if (below) {
+      return res.status(400).json({ error: "Move the companies under it somewhere else first" })
     }
 
     // Keep historical payroll, attendance, projects and audit data intact.
@@ -372,20 +400,12 @@ async function setMainCompany(req, res, next) {
       return res.status(400).json({ error: "That organization is already the main company" })
     }
 
-    await prisma.$transaction([
-      prisma.organization.updateMany({
-        where: { companyId },
-        data: { companyId: target.id },
-      }),
-      prisma.organization.update({
-        where: { id: target.id },
-        data: { companyId: target.id, parentOrganizationId: null },
-      }),
-      prisma.organization.update({
-        where: { id: companyId },
-        data: { parentOrganizationId: target.id },
-      }),
-    ])
+    // Only the group id moves; parentOrganizationId is the hierarchy tree
+    // and is left alone.
+    await prisma.organization.updateMany({
+      where: { OR: [{ id: companyId }, { companyId }] },
+      data: { companyId: target.id },
+    })
 
     logAudit({
       organizationId: target.id,
@@ -402,73 +422,246 @@ async function setMainCompany(req, res, next) {
   }
 }
 
-// Grand Parent CEO only: designate which company is the Grand Parent and
-// which is the Parent. Body: { grandParentId, parentId } (parentId may be
-// null = no Parent). Everything else in the group becomes a Child.
-// Rules: both must be active organizations of the requester's own company
-// group; they must differ; the new Grand Parent must have an active CEO (so
-// the hierarchy can never be left with nobody able to manage it). Each
-// designation is unique per group (also a DB partial unique index).
+// CEO only: set the whole company tree in one go.
+// Body: { organizations: [{ id, hierarchyRole, parentOrganizationId }] } —
+// one entry for EVERY active organization of the requester's company group.
+// Rules: a Grand Parent has no parent; a Parent sits under a Grand Parent;
+// a Child sits under a Grand Parent or a Parent (so max three levels, no
+// cycles); at least one Grand Parent.
 async function setCompanyHierarchy(req, res, next) {
   try {
     const { role, userId } = req.user
     const home = await loadHomeOrganization(prisma, userId)
     if (!canManageHierarchy(role, home)) {
-      return res.status(403).json({ error: "Only the Grand Parent company's CEO can change the company hierarchy" })
+      return res.status(403).json({ error: "Only a CEO can change the company hierarchy" })
     }
     const companyId = home.companyId || home.id
-
-    const grandParentId = String(req.body.grandParentId || "").trim()
-    const parentId = req.body.parentId ? String(req.body.parentId).trim() : null
-    if (!grandParentId) return res.status(400).json({ error: "grandParentId is required" })
-    if (parentId && parentId === grandParentId) {
-      return res.status(400).json({ error: "A company cannot be both the Grand Parent and the Parent" })
-    }
-
-    const ids = [grandParentId, ...(parentId ? [parentId] : [])]
-    const targets = await prisma.organization.findMany({
-      where: { id: { in: ids }, archivedAt: null, OR: [{ id: companyId }, { companyId }] },
-      select: { id: true, name: true },
-    })
-    if (targets.length !== ids.length) {
-      return res.status(404).json({ error: "Pick active organizations from your own company group" })
-    }
-
-    const gpCeo = await prisma.user.count({ where: { organizationId: grandParentId, role: "CEO", status: { not: "LEFT_COMPANY" } } })
-    if (!gpCeo) {
-      return res.status(400).json({ error: "The Grand Parent company must have an active CEO (only they can manage the hierarchy)" })
-    }
-
-    const before = await prisma.organization.findMany({
-      where: { OR: [{ id: companyId }, { companyId }], hierarchyRole: { in: [HIERARCHY.GRAND_PARENT, HIERARCHY.PARENT] } },
-      select: { id: true, name: true, hierarchyRole: true },
-    })
-
     const group = { OR: [{ id: companyId }, { companyId }] }
-    await prisma.$transaction([
-      // Demote first so the one-per-group unique indexes never collide.
-      prisma.organization.updateMany({ where: { ...group, hierarchyRole: { not: HIERARCHY.CHILD } }, data: { hierarchyRole: HIERARCHY.CHILD } }),
-      prisma.organization.update({ where: { id: grandParentId }, data: { hierarchyRole: HIERARCHY.GRAND_PARENT } }),
-      ...(parentId ? [prisma.organization.update({ where: { id: parentId }, data: { hierarchyRole: HIERARCHY.PARENT } })] : []),
-    ])
 
-    const name = (id) => targets.find((t) => t.id === id)?.name
-    const was = (r) => before.find((b) => b.hierarchyRole === r)?.name || "none"
-    logAudit({
-      organizationId: companyId,
-      actorId: userId,
-      action: "organization.hierarchy_changed",
-      targetType: "Organization",
-      targetId: grandParentId,
-      note: `Grand Parent: ${name(grandParentId)} (was ${was(HIERARCHY.GRAND_PARENT)}); Parent: ${parentId ? name(parentId) : "none"} (was ${was(HIERARCHY.PARENT)})`,
+    const entries = Array.isArray(req.body.organizations) ? req.body.organizations : null
+    if (!entries) return res.status(400).json({ error: "organizations must be a list" })
+
+    const active = await prisma.organization.findMany({
+      where: { ...group, archivedAt: null },
+      select: { id: true, name: true, hierarchyRole: true, parentOrganizationId: true },
     })
+    const activeById = new Map(active.map((o) => [o.id, o]))
 
-    res.json({ grandParentId, parentId })
+    const plan = new Map()
+    for (const entry of entries) {
+      const id = String(entry?.id || "")
+      const hierarchyRole = String(entry?.hierarchyRole || "")
+      const parentOrganizationId = entry?.parentOrganizationId ? String(entry.parentOrganizationId) : null
+      if (!activeById.has(id)) return res.status(404).json({ error: "Pick active organizations from your own company group" })
+      if (plan.has(id)) return res.status(400).json({ error: "Each company can appear only once" })
+      if (!HIERARCHY[hierarchyRole]) return res.status(400).json({ error: "Level must be Grand Parent, Parent or Child" })
+      plan.set(id, { id, hierarchyRole, parentOrganizationId })
+    }
+    if (plan.size !== active.length) {
+      return res.status(400).json({ error: "Every company in the group must be included — refresh and try again" })
+    }
+
+    const nameOf = (id) => activeById.get(id)?.name || "?"
+    for (const org of plan.values()) {
+      const parent = org.parentOrganizationId ? plan.get(org.parentOrganizationId) : null
+      if (org.hierarchyRole === HIERARCHY.GRAND_PARENT) {
+        if (org.parentOrganizationId) return res.status(400).json({ error: `${nameOf(org.id)} is a Grand Parent, so it can't sit under another company` })
+      } else if (org.hierarchyRole === HIERARCHY.PARENT) {
+        if (!parent || parent.hierarchyRole !== HIERARCHY.GRAND_PARENT) {
+          return res.status(400).json({ error: `${nameOf(org.id)} is a Parent, so it must sit under a Grand Parent` })
+        }
+      } else if (!parent || parent.hierarchyRole === HIERARCHY.CHILD) {
+        return res.status(400).json({ error: `${nameOf(org.id)} is a Child, so it must sit under a Grand Parent or a Parent` })
+      }
+    }
+
+    const grandParentIds = [...plan.values()].filter((o) => o.hierarchyRole === HIERARCHY.GRAND_PARENT).map((o) => o.id)
+    if (!grandParentIds.length) return res.status(400).json({ error: "At least one company must be a Grand Parent" })
+
+    const changed = [...plan.values()].filter((o) => {
+      const was = activeById.get(o.id)
+      return was.hierarchyRole !== o.hierarchyRole || (was.parentOrganizationId || null) !== o.parentOrganizationId
+    })
+    if (changed.length) {
+      await prisma.$transaction(changed.map((o) => prisma.organization.update({
+        where: { id: o.id },
+        data: { hierarchyRole: o.hierarchyRole, parentOrganizationId: o.parentOrganizationId },
+      })))
+    }
+
+    const LABEL = { GRAND_PARENT: "Grand Parent", PARENT: "Parent", CHILD: "Child" }
+    if (changed.length) {
+      logAudit({
+        organizationId: companyId,
+        actorId: userId,
+        action: "organization.hierarchy_changed",
+        targetType: "Organization",
+        targetId: companyId,
+        note: changed
+          .map((o) => {
+            const was = activeById.get(o.id)
+            const under = o.parentOrganizationId ? ` under ${nameOf(o.parentOrganizationId)}` : ""
+            const wasUnder = was.parentOrganizationId && activeById.has(was.parentOrganizationId) ? ` under ${nameOf(was.parentOrganizationId)}` : ""
+            return `${nameOf(o.id)}: ${LABEL[o.hierarchyRole]}${under} (was ${LABEL[was.hierarchyRole] || "Child"}${wasUnder})`
+          })
+          .join("; ")
+          .slice(0, 1900),
+      })
+    }
+
+    res.json({ updated: changed.length })
   } catch (err) {
-    if (err.code === "P2002") return res.status(409).json({ error: "The hierarchy was changed at the same time — refresh and try again" })
     next(err)
   }
 }
+// CEO only (route): mark a company of the CEO's group as an IT office or a
+// call center. Body: { officeType: "IT_OFFICE" | "CALL_CENTER" }.
+async function setOfficeType(req, res, next) {
+  try {
+    const { role, userId } = req.user
+    const officeType = String(req.body.officeType || "")
+    if (!OFFICE_TYPE[officeType]) return res.status(400).json({ error: "officeType must be IT_OFFICE or CALL_CENTER" })
+
+    const reachable = await accessibleOrganizations(prisma, { userId, role })
+    const target = reachable.find((o) => o.id === req.params.id)
+    if (!target) return res.status(404).json({ error: "Organization not found" })
+
+    if (target.officeType !== officeType) {
+      await prisma.organization.update({ where: { id: target.id }, data: { officeType } })
+      logAudit({
+        organizationId: target.companyId || target.id,
+        actorId: userId,
+        action: "organization.office_type_changed",
+        targetType: "Organization",
+        targetId: target.id,
+        note: `${target.name}: ${officeType === "CALL_CENTER" ? "Call center" : "IT office"}`,
+      })
+    }
+    res.json({ id: target.id, officeType })
+  } catch (err) {
+    next(err)
+  }
+}
+
+// CEO only (route): every ADMIN and IT_MANAGER in the CEO's company group,
+// with their call-center flag and the companies a CEO granted them.
+async function listCallCenterAdmins(req, res, next) {
+  try {
+    const { role, userId } = req.user
+    const orgIds = (await accessibleOrganizations(prisma, { userId, role })).map((o) => o.id)
+    const users = await prisma.user.findMany({
+      where: { organizationId: { in: orgIds }, role: { in: ["ADMIN", "IT_MANAGER"] }, status: { not: "LEFT_COMPANY" } },
+      select: {
+        id: true, name: true, email: true, role: true, callCenterAccess: true,
+        organization: { select: { id: true, name: true } },
+        accessGrants: { select: { organizationId: true } },
+      },
+      orderBy: { name: "asc" },
+    })
+    res.json(users.map(({ accessGrants, ...u }) => ({ ...u, grantedOrganizationIds: accessGrants.map((g) => g.organizationId) })))
+  } catch (err) {
+    next(err)
+  }
+}
+
+// CEO only (route): give an ADMIN / IT_MANAGER of the CEO's group access to
+// one company. Body: { userId }.
+async function grantOrganizationAccess(req, res, next) {
+  try {
+    const { role, userId } = req.user
+    const orgs = await accessibleOrganizations(prisma, { userId, role })
+    const target = orgs.find((o) => o.id === req.params.id)
+    if (!target) return res.status(404).json({ error: "Organization not found" })
+
+    const grantee = await prisma.user.findFirst({
+      where: { id: String(req.body.userId || ""), organizationId: { in: orgs.map((o) => o.id) }, status: { not: "LEFT_COMPANY" } },
+      select: { id: true, name: true, role: true, organizationId: true },
+    })
+    if (!grantee) return res.status(404).json({ error: "User not found" })
+    if (!["ADMIN", "IT_MANAGER"].includes(grantee.role)) {
+      return res.status(400).json({ error: "Only an Admin or IT Manager can be given company access" })
+    }
+    if (grantee.organizationId === target.id) {
+      return res.status(400).json({ error: `${grantee.name} already belongs to ${target.name}` })
+    }
+
+    await prisma.organizationAccessGrant.upsert({
+      where: { userId_organizationId: { userId: grantee.id, organizationId: target.id } },
+      update: {},
+      create: { userId: grantee.id, organizationId: target.id, grantedById: userId },
+    })
+    logAudit({
+      organizationId: target.companyId || target.id,
+      actorId: userId,
+      action: "organization.access_granted",
+      targetType: "User",
+      targetId: grantee.id,
+      note: `${grantee.name} given access to ${target.name}`,
+    })
+    res.status(201).json({ userId: grantee.id, organizationId: target.id })
+  } catch (err) {
+    next(err)
+  }
+}
+
+// CEO only (route): take that access away again.
+async function revokeOrganizationAccess(req, res, next) {
+  try {
+    const { role, userId } = req.user
+    const orgs = await accessibleOrganizations(prisma, { userId, role })
+    const target = orgs.find((o) => o.id === req.params.id)
+    if (!target) return res.status(404).json({ error: "Organization not found" })
+
+    const { count } = await prisma.organizationAccessGrant.deleteMany({ where: { organizationId: target.id, userId: req.params.userId } })
+    if (count) {
+      logAudit({
+        organizationId: target.companyId || target.id,
+        actorId: userId,
+        action: "organization.access_revoked",
+        targetType: "User",
+        targetId: req.params.userId,
+        note: `Access to ${target.name} removed`,
+      })
+    }
+    res.status(204).end()
+  } catch (err) {
+    next(err)
+  }
+}
+
+// CEO only (route): give / take an ADMIN's access to every call center.
+// Body: { enabled: boolean }.
+async function setCallCenterAccess(req, res, next) {
+  try {
+    const { role, userId } = req.user
+    if (typeof req.body.enabled !== "boolean") return res.status(400).json({ error: "enabled must be true or false" })
+    const enabled = req.body.enabled
+
+    const orgIds = (await accessibleOrganizations(prisma, { userId, role })).map((o) => o.id)
+    const target = await prisma.user.findFirst({
+      where: { id: req.params.userId, organizationId: { in: orgIds } },
+      select: { id: true, name: true, role: true, organizationId: true, callCenterAccess: true },
+    })
+    if (!target) return res.status(404).json({ error: "User not found" })
+    if (target.role !== "ADMIN") return res.status(400).json({ error: "Only an Admin can be given call-center access" })
+
+    if (target.callCenterAccess !== enabled) {
+      await prisma.user.update({ where: { id: target.id }, data: { callCenterAccess: enabled } })
+      logAudit({
+        organizationId: target.organizationId,
+        actorId: userId,
+        action: "user.call_center_access_changed",
+        targetType: "User",
+        targetId: target.id,
+        note: `${target.name}: call-center access ${enabled ? "granted" : "removed"}`,
+      })
+    }
+    res.json({ id: target.id, callCenterAccess: enabled })
+  } catch (err) {
+    next(err)
+  }
+}
+
 async function getOrganizationComparison(req, res, next) {
   try {
     if (!['ADMIN', 'CEO'].includes(req.user.role)) {
@@ -565,4 +758,4 @@ async function getOrganizationComparison(req, res, next) {
   }
 }
 
-module.exports = { getOrganization, updateOrganization, listCompanyOrganizations, createSubOrganization, archiveSubOrganization, getOrganizationComparison, setMainCompany, setCompanyHierarchy }
+module.exports = { getOrganization, updateOrganization, listCompanyOrganizations, createSubOrganization, archiveSubOrganization, getOrganizationComparison, setMainCompany, setCompanyHierarchy, setOfficeType, listCallCenterAdmins, setCallCenterAccess, grantOrganizationAccess, revokeOrganizationAccess }

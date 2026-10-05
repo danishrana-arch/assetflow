@@ -2027,6 +2027,134 @@ Verified live: October 6 rows → 2.
 - Verified 12/12 against the test backend (validation, blank rows dropped,
   "none", legacy submit, HR read-back); the temp form was deleted.
 
+## Post-module change: one grouped nav, compact header, Export page removed (2026-10-05)
+
+- New `frontend/src/utils/navItems.js` (`navGroups(user)`) is the single
+  nav list, grouped (Overview / People / Attendance & Leave / Work /
+  Assets / Payroll / Reports & Admin for management; shorter sets for IT
+  and employees). Each item's gate mirrors its App.jsx route guard.
+  `Sidebar.jsx` (dividers when collapsed, group titles when expanded) and
+  `MobileNav.jsx` (group headings) both render it, so mobile now has every
+  desktop page plus Holidays, Notifications, My Account, **Dark mode**
+  and Logout. Add new pages there, not in either component.
+- Desktop header (`DashboardLayout.jsx`): `GlobalSearch compact` (h-8,
+  max 280px), smaller bell, and a Settings gear → `/settings` for
+  ADMIN/CEO (same rule as `RequireOwner`).
+- **Export page removed** (`pages/Export.jsx` deleted, nav entries gone;
+  `/export` redirects to `/`). Backend `/api/export/*` is untouched and
+  now has no frontend caller; the `reports` module key no longer gates
+  any page.
+- Verified with Playwright as the real CEO (read-only): desktop collapsed/
+  expanded, mobile menu top/bottom, gear → /settings, /export → dashboard,
+  no page errors. (A fresh browser profile's first load reloads once for
+  the service worker — seed the session after that in scripted tests.)
+
+## Post-module change: multiple Grand Parents, hierarchy as a real tree (2026-10-05)
+
+**Supersedes the access rules in the 2026-10-01 hierarchy section below.**
+- A company group may hold any number of GRAND_PARENTs (and Parents). The
+  tree is `parentOrganizationId` = the company directly above: GP → null;
+  Parent → a GP; Child → a GP or a Parent (max 3 levels, validated on save).
+- Access (`utils/organization.js`): CEO of any company → every company of
+  the group, all Grand Parents (the only role crossing GPs). ADMIN /
+  IT_MANAGER of a GP → that GP + what's under it (parent or grandparent
+  check via `HIERARCHY_SELECT.parentOrganization`); of a Parent → its own
+  Children; of a Child → own. HR and all other roles → own org only.
+- `PATCH /organization/company/hierarchy` now takes `{ organizations: [{id,
+  hierarchyRole, parentOrganizationId}] }` for **every** active org of the
+  group; still GP-CEO only; at least one GP must have an active CEO.
+  `POST /organization/suborganizations` takes optional `parentOrganizationId`
+  (an accessible GP/Parent; defaults to home). `set-main` no longer touches
+  `parentOrganizationId`. Org lists come back in tree order with `depth`.
+- Settings: per-company Level + "Under" editor; "Add child company" has an
+  "Under" picker. Selector labels indent by `depth`.
+- Migration `20261005120000_multiple_grand_parents` drops the two
+  one-per-group unique indexes and backfills the tree so access is
+  unchanged (Children → the group's Parent if any, else the GP; Parent →
+  GP). **Not yet deployed** — `migrate deploy` was blocked by the auto-mode
+  classifier. Until it runs, the new code reads the old pointers: the
+  GlobalSead (Parent) ADMIN would lose the Children that point straight at
+  DeltaGulfOverseas. Deploy it before restarting the backend. No
+  `prisma generate` needed (schema change is a comment only).
+- Verified read-only by simulating the migration in memory on live data:
+  every user's accessible-org set unchanged; with CloudNext360 made a 2nd
+  GP, the DeltaGulf ADMIN no longer reaches it, the CloudNext360 ADMIN/IT
+  reach only it + CostBidding, and CEO reaches all.
+
+### Follow-up (same day): office types + call-center admins
+
+- `Organization.officeType` (`OrganizationOfficeType`: IT_OFFICE default /
+  CALL_CENTER) and `User.callCenterAccess` (default false). Migration
+  `20261005130000_office_type_call_center_access` (additive) — **not yet
+  deployed** (same classifier block). JS client regenerated (engine DLL
+  EPERM as usual) — so the backend **will fail to start correctly until
+  both migrations are deployed** (it now selects these columns).
+- Rule: an ADMIN with `callCenterAccess` opens their home org + every
+  CALL_CENTER of the group, no IT office — replaces their hierarchy reach
+  (switcher, attendance sites, reports, comparison). The flag is ignored
+  for every other role. Never lets them create/archive companies
+  (`createSubOrganization` passes `callCenterAccess: false`; archive uses
+  the plain hierarchy check). CEO unchanged (everything).
+- CEO-only endpoints: `PATCH /organization/company/:id/office-type`,
+  `GET /organization/call-center-admins`,
+  `PATCH /organization/call-center-admins/:userId {enabled}` (target must
+  be an ADMIN in the CEO's group). Audit rows logged.
+- UI: Settings company cards get an office-type select (CEO) / badge;
+  "Call center admins" list with checkboxes (CEO); selector shows
+  "· Call center".
+- Verified: 7/7 rule unit checks; frontend build passes.
+- Both 2026-10-05 migrations were then deployed by the user.
+
+### Follow-up (same day): simpler editor, any CEO manages the hierarchy
+
+- `canManageHierarchy` = **any CEO** (was: CEO whose home is a Grand
+  Parent — CEOs of Child companies were locked out). The "a Grand Parent
+  must have an active CEO" check was dropped with it.
+- Settings: the big Level/Under editor is gone. Each company card has two
+  small selects — **Under** (none = Grand Parent) and office type — that
+  save immediately (confirm first). The level is derived from the
+  position (top = GP, under a GP = PARENT, below that = CHILD; options are
+  filtered so a branch never exceeds 3 levels or loops). Call-center admins
+  are chips + an "+ Add admin…" dropdown.
+- "Add company": a CEO can pick "Under: none" (`parentOrganizationId:
+  "NONE"`) to create a new Grand Parent; otherwise level follows the
+  chosen parent.
+- Remove: allowed for any non-GP company with nothing under it (was: never
+  for a Parent).
+- `capslock` and `abc` are separate company groups (own `companyId`, 0
+  users, from self-registration), so they never appear in the
+  DeltaGulfOverseas group's lists. Not changed — asked the user.
+- Verified 22/22 read-only API checks on a temp backend (port 4099) with
+  real users: every role loads, HR own-company only, Child-company CEO can
+  manage, bad hierarchy payload 400, HR 403 on call-center admins.
+
+### Follow-up (same day): CEO company grants; call centers no longer automatic
+
+- New `OrganizationAccessGrant` (userId+organizationId unique, grantedById
+  SET NULL, both other FKs CASCADE). Migration
+  `20261005140000_organization_access_grants` (additive) — **not yet
+  deployed**; JS client regenerated (EPERM on engine DLL as usual), so the
+  backend fails on every request (auth middleware selects `accessGrants`)
+  until it's deployed.
+- Rule change in `canAccessOrganization`: ADMIN/IT_MANAGER downward reach
+  now covers **IT offices only**; a call center needs a CEO grant (or the
+  ADMIN "all call centers" flag). Grants work for any company of the group,
+  across Grand Parents; ignored for every other role. `access` =
+  `{ callCenterAccess, grantedOrganizationIds }` (`loadAccess`); req.user
+  carries `grantedOrganizationIds`.
+- CEO-only: `POST /organization/company/:id/access {userId}`,
+  `DELETE /organization/company/:id/access/:userId` (grantee must be an
+  ADMIN/IT_MANAGER of the group, not already in that company);
+  `GET /organization/call-center-admins` now returns ADMINs **and**
+  IT_MANAGERs with `role` + `grantedOrganizationIds`.
+- Settings: each company card (CEO) shows granted people as chips (×) and
+  a "+ Give access…" dropdown.
+- Live impact (preview, no grants yet): every GlobalSead-branch company is
+  a call center, so Bilal Kashif (DeltaGulf ADMIN) and Zain kashif
+  (GlobalSead ADMIN) drop to their own company until a CEO grants them;
+  Hassan Hafeez (all call centers) unchanged.
+- Verified 9/9 rule unit checks; frontend build passes.
+
 ## Post-module change: company hierarchy Grand Parent → Parent → Child (2026-10-01)
 
 **Supersedes the "second main company" section below** (its `isCoMain`

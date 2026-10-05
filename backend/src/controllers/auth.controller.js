@@ -61,6 +61,7 @@ function organizationSummary(organization) {
     slug: organization.slug,
     companyId: organization.companyId,
     parentOrganizationId: organization.parentOrganizationId,
+    depth: organization.depth || 0,
     ...hierarchyFlags(organization),
     primaryColor: organization.primaryColor,
     accentColor: organization.accentColor,
@@ -72,9 +73,10 @@ function organizationSummary(organization) {
 
 // The organizations shown in the company selector: exactly the ones this
 // user may switch into (same rule applyOrganizationScope enforces — see
-// utils/organization.js), Grand Parent → Parent → Children.
+// utils/organization.js), in tree order (each Grand Parent, then what's under it).
 async function getSelectableOrganizations(user) {
   const organizations = await accessibleOrganizations(prisma, {
+    userId: user.id,
     role: user.role,
     home: user.organization,
     select: { slug: true, primaryColor: true, accentColor: true, theme: true, planTier: true, timezone: true },

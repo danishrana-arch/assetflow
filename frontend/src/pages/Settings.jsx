@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "react-router-dom"
-import { MapPin, Info } from "lucide-react"
+import { MapPin } from "lucide-react"
 import api from "../api/client"
 import { useAuth } from "../context/AuthContext"
 import { useTheme } from "../context/ThemeContext"
@@ -189,7 +189,7 @@ export default function Settings() {
   })
 
   const createSubOrganization = useMutation({
-    mutationFn: () => api.post("/organization/suborganizations", { name: subOrganizationName.trim() }),
+    mutationFn: () => api.post("/organization/suborganizations", { name: subOrganizationName.trim(), parentOrganizationId: newCompanyParentId || undefined }),
     onSuccess: async () => {
       setSubOrganizationName("")
       setOrganizationError("")
@@ -198,20 +198,37 @@ export default function Settings() {
     onError: (err) => setOrganizationError(err.response?.data?.error || "Could not create organization"),
   })
 
-  // Company hierarchy (Grand Parent → Parent → Children). Only the Grand
-  // Parent company's CEO may change it — the backend decides and enforces
-  // that (`user.canManageHierarchy`); everyone else sees it read-only.
+  // Company hierarchy: each company has one "Under" choice (None = a Grand
+  // Parent). The level follows the position — top = Grand Parent, under a
+  // Grand Parent = Parent, one more level = Child (max three levels) — so a
+  // CEO only ever picks where a company sits. Saved immediately as the whole
+  // tree; the API re-validates. CEO only (`user.canManageHierarchy`).
   const canManageHierarchy = !!user?.canManageHierarchy
-  const currentGrandParentId = (organizations || []).find((org) => org.isGrandParent)?.id || ""
-  const currentParentId = (organizations || []).find((org) => org.isParent)?.id || ""
-  const [grandParentId, setGrandParentId] = useState(currentGrandParentId)
-  const [parentId, setParentId] = useState(currentParentId)
+  const orgList = organizations || []
+  const hierarchyKey = orgList.map((o) => `${o.id}:${o.parentOrganizationId || ""}`).join("|")
   const [hierarchyError, setHierarchyError] = useState("")
-  useEffect(() => { setGrandParentId(currentGrandParentId) }, [currentGrandParentId])
-  useEffect(() => { setParentId(currentParentId) }, [currentParentId])
-  const hierarchyChanged = grandParentId !== currentGrandParentId || parentId !== currentParentId
+  const currentParents = Object.fromEntries(orgList.map((o) => [o.id, orgList.some((p) => p.id === o.parentOrganizationId) ? o.parentOrganizationId : ""]))
+  const depthIn = (parents, id) => { let d = 0; let cur = parents[id]; while (cur && d < 5) { d += 1; cur = parents[cur] } return d }
+  const heightIn = (parents, id, seen = 0) => {
+    const kids = orgList.filter((o) => parents[o.id] === id)
+    return kids.length && seen < 5 ? 1 + Math.max(...kids.map((k) => heightIn(parents, k.id, seen + 1))) : 0
+  }
+  const isBelow = (parents, id, ancestorId) => { let cur = parents[id]; let n = 0; while (cur && n < 5) { if (cur === ancestorId) return true; cur = parents[cur]; n += 1 } return false }
+  // Companies `org` may be placed under: not itself or anything below it, and
+  // the whole branch must still fit in three levels.
+  const underChoices = (org) => {
+    const h = heightIn(currentParents, org.id)
+    return orgList.filter((o) => o.id !== org.id && !isBelow(currentParents, o.id, org.id) && depthIn(currentParents, o.id) + 1 + h <= 2)
+  }
+  const LEVEL_BY_DEPTH = ["GRAND_PARENT", "PARENT", "CHILD"]
   const saveHierarchy = useMutation({
-    mutationFn: () => api.patch("/organization/company/hierarchy", { grandParentId, parentId: parentId || null }),
+    mutationFn: (parents) => api.patch("/organization/company/hierarchy", {
+      organizations: orgList.map((o) => ({
+        id: o.id,
+        hierarchyRole: LEVEL_BY_DEPTH[Math.min(depthIn(parents, o.id), 2)],
+        parentOrganizationId: parents[o.id] || null,
+      })),
+    }),
     onSuccess: async () => {
       setHierarchyError("")
       queryClient.invalidateQueries({ queryKey: ["organization"] })
@@ -220,11 +237,71 @@ export default function Settings() {
     },
     onError: (err) => setHierarchyError(err.response?.data?.error || "Could not save the company hierarchy"),
   })
+  const moveCompany = (org, parentId) => {
+    if (parentId === (currentParents[org.id] || "")) return
+    const where = parentId ? `under ${orgList.find((o) => o.id === parentId)?.name}` : "as a Grand Parent (nothing above it)"
+    if (!window.confirm(`Place ${org.name} ${where}? This changes which companies its Admins can open.`)) return
+    saveHierarchy.mutate({ ...currentParents, [org.id]: parentId })
+  }
+  const hasCompaniesUnder = (org) => orgList.some((o) => o.parentOrganizationId === org.id)
   // Same rule the API enforces for create/remove: a CEO, or an ADMIN of the
   // Grand Parent / Parent. Your own company can never be removed.
   const homeOrganization = (organizations || []).find((org) => org.id === user?.homeOrganizationId)
   const canManageCompanies = user?.role === "CEO" || (user?.role === "ADMIN" && !!homeOrganization?.isMain)
   const hierarchyLabel = (org) => (org.isGrandParent ? "Grand Parent" : org.isParent ? "Parent company" : "Child company")
+  const orgName = (id) => (organizations || []).find((o) => o.id === id)?.name
+  // Where "Add company" puts the new company: a Grand Parent / Parent the
+  // viewer can access (the API re-checks), defaulting to their own; a CEO can
+  // also pick "None" = a new Grand Parent.
+  const newCompanyParents = (organizations || []).filter((o) => o.isMain)
+  const [newCompanyParentId, setNewCompanyParentId] = useState("")
+  const defaultNewParentId = (homeOrganization?.isMain ? homeOrganization.id : newCompanyParents[0]?.id) || (isCeo ? "NONE" : "")
+  useEffect(() => {
+    if (newCompanyParentId !== "NONE" && !newCompanyParents.some((o) => o.id === newCompanyParentId)) setNewCompanyParentId(defaultNewParentId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hierarchyKey, defaultNewParentId])
+
+  // Office types + call-center admins (CEO only; the API enforces it). A
+  // call-center admin opens their own company and every call center, no IT
+  // office.
+  const [officeError, setOfficeError] = useState("")
+  const setOfficeType = useMutation({
+    mutationFn: ({ id, officeType }) => api.patch(`/organization/company/${id}/office-type`, { officeType }),
+    onSuccess: async () => {
+      setOfficeError("")
+      queryClient.invalidateQueries({ queryKey: ["organization"] })
+      await refreshUser()
+    },
+    onError: (err) => setOfficeError(err.response?.data?.error || "Could not change the office type"),
+  })
+  const { data: callCenterAdmins = [] } = useQuery({
+    queryKey: ["call-center-admins"],
+    queryFn: () => api.get("/organization/call-center-admins").then((r) => r.data),
+    enabled: isCeo,
+  })
+  const setCallCenterAccess = useMutation({
+    mutationFn: ({ id, enabled }) => api.patch(`/organization/call-center-admins/${id}`, { enabled }),
+    onSuccess: () => {
+      setOfficeError("")
+      queryClient.invalidateQueries({ queryKey: ["call-center-admins"] })
+    },
+    onError: (err) => setOfficeError(err.response?.data?.error || "Could not change call-center access"),
+  })
+  // Per-company extra access (CEO only): which other Admins / IT Managers may
+  // open a company. `callCenterAdmins` holds every Admin / IT Manager of the
+  // group with their `grantedOrganizationIds`.
+  const onlyAdmins = callCenterAdmins.filter((a) => a.role === "ADMIN")
+  const setCompanyAccess = useMutation({
+    mutationFn: ({ orgId, userId, enabled }) => (enabled
+      ? api.post(`/organization/company/${orgId}/access`, { userId })
+      : api.delete(`/organization/company/${orgId}/access/${userId}`)),
+    onSuccess: () => {
+      setOfficeError("")
+      queryClient.invalidateQueries({ queryKey: ["call-center-admins"] })
+    },
+    onError: (err) => setOfficeError(err.response?.data?.error || "Could not change company access"),
+  })
+  const ROLE_SHORT = { ADMIN: "Admin", IT_MANAGER: "IT" }
 
   const removeSubOrganization = useMutation({
     mutationFn: (id) => api.delete(`/organization/suborganizations/${id}`),
@@ -362,8 +439,67 @@ export default function Settings() {
                 {(organizations || []).map((org) => (
                   <div key={org.id} className="flex min-w-0 items-center justify-between gap-3 rounded-2xl border border-border bg-surface-2 p-3">
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-ink">{org.isGrandParent ? org.name : org.isParent ? `└ ${org.name}` : `↳ ${org.name}`}</p>
-                      <p className="truncate text-[11px] text-muted">{hierarchyLabel(org)}</p>
+                      <p className="truncate text-sm font-semibold text-ink">{org.depth ? `${"· ".repeat(org.depth - 1)}↳ ${org.name}` : org.name}</p>
+                      {canManageHierarchy ? (
+                        <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                          <select
+                            value={currentParents[org.id] || ""}
+                            onChange={(e) => moveCompany(org, e.target.value)}
+                            disabled={saveHierarchy.isPending}
+                            className="max-w-[180px] rounded-lg border border-border bg-surface px-2 py-0.5 text-[11px] font-semibold text-ink disabled:opacity-60"
+                            aria-label={`Company above ${org.name}`}
+                          >
+                            <option value="">Under: none (Grand Parent)</option>
+                            {underChoices(org).map((o) => <option key={o.id} value={o.id}>Under: {o.name}</option>)}
+                          </select>
+                          <select
+                            value={org.officeType || "IT_OFFICE"}
+                            onChange={(e) => setOfficeType.mutate({ id: org.id, officeType: e.target.value })}
+                            disabled={setOfficeType.isPending}
+                            className="rounded-lg border border-border bg-surface px-2 py-0.5 text-[11px] font-semibold text-ink disabled:opacity-60"
+                            aria-label={`Office type of ${org.name}`}
+                          >
+                            <option value="IT_OFFICE">IT office</option>
+                            <option value="CALL_CENTER">Call center</option>
+                          </select>
+                        </div>
+                      ) : (
+                        <p className="truncate text-[11px] text-muted">
+                          {hierarchyLabel(org)}
+                          {orgName(org.parentOrganizationId) ? ` · under ${orgName(org.parentOrganizationId)}` : ""}
+                          {` · ${org.isCallCenter ? "Call center" : "IT office"}`}
+                        </p>
+                      )}
+                      {isCeo && callCenterAdmins.length > 0 && (
+                        <div className="mt-1 flex flex-wrap items-center gap-1">
+                          {callCenterAdmins.filter((u) => u.grantedOrganizationIds?.includes(org.id)).map((u) => (
+                            <span key={u.id} className="inline-flex items-center gap-1 rounded-full bg-surface px-2 py-0.5 text-[10px] font-semibold text-ink">
+                              {u.name} · {ROLE_SHORT[u.role]}
+                              <button
+                                type="button"
+                                onClick={() => setCompanyAccess.mutate({ orgId: org.id, userId: u.id, enabled: false })}
+                                disabled={setCompanyAccess.isPending}
+                                className="text-muted hover:text-red-600"
+                                aria-label={`Remove ${u.name}'s access to ${org.name}`}
+                              >
+                                ×
+                              </button>
+                            </span>
+                          ))}
+                          <select
+                            value=""
+                            onChange={(e) => e.target.value && setCompanyAccess.mutate({ orgId: org.id, userId: e.target.value, enabled: true })}
+                            disabled={setCompanyAccess.isPending}
+                            className="max-w-[160px] rounded-lg border border-border bg-surface px-1.5 py-0.5 text-[10px] font-semibold text-muted disabled:opacity-60"
+                            aria-label={`Give someone access to ${org.name}`}
+                          >
+                            <option value="">+ Give access…</option>
+                            {callCenterAdmins
+                              .filter((u) => u.organization?.id !== org.id && !u.grantedOrganizationIds?.includes(org.id))
+                              .map((u) => <option key={u.id} value={u.id}>{u.name} ({ROLE_SHORT[u.role]}, {u.organization?.name})</option>)}
+                          </select>
+                        </div>
+                      )}
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
                       {organization?.id !== org.id && (
@@ -378,7 +514,7 @@ export default function Settings() {
                           Open
                         </button>
                       )}
-                      {!org.isMain && canManageCompanies && org.id !== user?.homeOrganizationId && (
+                      {!org.isGrandParent && !hasCompaniesUnder(org) && canManageCompanies && org.id !== user?.homeOrganizationId && (
                         <button
                           type="button"
                           onClick={() => {
@@ -397,9 +533,50 @@ export default function Settings() {
                 ))}
               </div>
 
+              {(officeError || hierarchyError) && <p className="mt-2 text-xs text-chip-pink-fg">{hierarchyError || officeError}</p>}
+              {canManageHierarchy && (
+                <p className="mt-2 text-[11px] text-muted">
+                  Admins and IT Managers open their own company and the IT offices under it. A call center opens only for
+                  people a CEO gives access. CEOs open every company. HR stays in its own company.
+                </p>
+              )}
+
+              {isCeo && onlyAdmins.length > 0 && (
+                <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-border pt-4">
+                  <span className="text-xs font-semibold text-muted">Call center admins:</span>
+                  {onlyAdmins.filter((a) => a.callCenterAccess).map((admin) => (
+                    <span key={admin.id} className="inline-flex items-center gap-1 rounded-full bg-surface-2 px-2.5 py-1 text-[11px] font-semibold text-ink">
+                      {admin.name}
+                      <button
+                        type="button"
+                        onClick={() => setCallCenterAccess.mutate({ id: admin.id, enabled: false })}
+                        disabled={setCallCenterAccess.isPending}
+                        className="text-muted hover:text-red-600"
+                        aria-label={`Remove call-center access for ${admin.name}`}
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                  <select
+                    value=""
+                    onChange={(e) => e.target.value && setCallCenterAccess.mutate({ id: e.target.value, enabled: true })}
+                    disabled={setCallCenterAccess.isPending}
+                    className="rounded-lg border border-border bg-surface px-2 py-1 text-[11px] font-semibold text-ink disabled:opacity-60"
+                    aria-label="Give an Admin access to every call center"
+                    title="This Admin can open their own company and every call center, but no IT office."
+                  >
+                    <option value="">+ Add admin…</option>
+                    {onlyAdmins.filter((a) => !a.callCenterAccess).map((admin) => (
+                      <option key={admin.id} value={admin.id}>{admin.name} ({admin.organization?.name})</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               {canManageCompanies && (
               <div className="mt-5 border-t border-border pt-5">
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Add child company</p>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Add company</p>
                 <div className="flex flex-col gap-2 sm:flex-row">
                   <input
                     value={subOrganizationName}
@@ -407,6 +584,19 @@ export default function Settings() {
                     placeholder="e.g. ManagementDock Lahore Office"
                     className="field min-w-0 flex-1"
                   />
+                  {(newCompanyParents.length > 1 || isCeo) && (
+                    <select
+                      value={newCompanyParentId}
+                      onChange={(e) => setNewCompanyParentId(e.target.value)}
+                      className="field min-w-0 appearance-none pr-8 sm:max-w-[240px]"
+                      aria-label="Place the new company under"
+                    >
+                      {isCeo && <option value="NONE">Under: none (Grand Parent)</option>}
+                      {newCompanyParents.map((o) => (
+                        <option key={o.id} value={o.id}>Under: {o.name}</option>
+                      ))}
+                    </select>
+                  )}
                   <button
                     type="button"
                     onClick={() => createSubOrganization.mutate()}
@@ -419,78 +609,6 @@ export default function Settings() {
                 {organizationError && <p className="mt-2 text-xs text-chip-pink-fg">{organizationError}</p>}
               </div>
               )}
-
-              <div className="mt-5 border-t border-border pt-5">
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Company hierarchy</p>
-                <div className="mb-3 flex items-start gap-2 rounded-2xl bg-chip-blue-bg/40 p-3 text-xs leading-5 text-ink dark:bg-chip-blue-bg/10">
-                  <Info size={14} className="mt-0.5 shrink-0 text-chip-blue-fg dark:text-chip-blue-bg" />
-                  <div className="space-y-1">
-                    <p>
-                      <b>Grand Parent → Parent → Child companies.</b> Admins (and IT Managers, for inventory only) can only
-                      reach <b>downward</b>: the Grand Parent reaches the Parent and every Child; the Parent reaches every
-                      Child but never the Grand Parent; a Child only reaches itself.
-                    </p>
-                    <p>
-                      A <b>CEO</b> of any company can open every company in the group. HR and all other roles stay in their
-                      own organization. Only the <b>Grand Parent&apos;s CEO</b> can change these designations.
-                    </p>
-                  </div>
-                </div>
-                <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
-                  <label className="min-w-0">
-                    <span className="mb-1 block text-[11px] font-semibold text-muted">Grand Parent company</span>
-                    <select
-                      value={grandParentId}
-                      onChange={(e) => {
-                        const v = e.target.value
-                        setGrandParentId(v)
-                        if (v === parentId) setParentId("")
-                        setHierarchyError("")
-                      }}
-                      disabled={!canManageHierarchy || saveHierarchy.isPending}
-                      className="field w-full appearance-none pr-8 disabled:opacity-70"
-                      aria-label="Grand Parent company"
-                    >
-                      {(organizations || []).map((org) => <option key={org.id} value={org.id}>{org.name}</option>)}
-                    </select>
-                  </label>
-                  <label className="min-w-0">
-                    <span className="mb-1 block text-[11px] font-semibold text-muted">Parent company</span>
-                    <select
-                      value={parentId}
-                      onChange={(e) => { setParentId(e.target.value); setHierarchyError("") }}
-                      disabled={!canManageHierarchy || saveHierarchy.isPending}
-                      className="field w-full appearance-none pr-8 disabled:opacity-70"
-                      aria-label="Parent company"
-                    >
-                      <option value="">None</option>
-                      {(organizations || []).filter((org) => org.id !== grandParentId).map((org) => (
-                        <option key={org.id} value={org.id}>{org.name}</option>
-                      ))}
-                    </select>
-                  </label>
-                  {canManageHierarchy && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (window.confirm("Change the company hierarchy? This changes which companies each Admin can open.")) saveHierarchy.mutate()
-                      }}
-                      disabled={!hierarchyChanged || !grandParentId || saveHierarchy.isPending}
-                      className="pill-accent self-end px-4 py-2.5 text-sm disabled:opacity-60"
-                      aria-label="Save company hierarchy"
-                    >
-                      {saveHierarchy.isPending ? "Saving…" : "Save"}
-                    </button>
-                  )}
-                </div>
-                {!canManageHierarchy && (
-                  <p className="mt-2 text-[11px] text-muted">Only the Grand Parent company&apos;s CEO can change the hierarchy.</p>
-                )}
-                {hierarchyError && <p className="mt-2 text-xs text-chip-pink-fg">{hierarchyError}</p>}
-                {saveHierarchy.isSuccess && !saveHierarchy.isPending && !hierarchyError && !hierarchyChanged && (
-                  <p className="mt-2 text-xs text-chip-green-fg">Saved.</p>
-                )}
-              </div>
             </>
           ) : (
             <div className="rounded-2xl bg-surface-2 p-4 text-sm text-muted">

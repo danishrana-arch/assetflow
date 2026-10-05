@@ -1,40 +1,9 @@
 import { useEffect, useRef, useState } from "react"
 import { NavLink } from "react-router-dom"
-import {
-  LayoutDashboard,
-  Users,
-  Boxes,
-  ClipboardCheck,
-  FolderKanban,
-  Award,
-  MapPin,
-  PackageSearch,
-  Building2,
-  Ticket,
-  Download,
-  CalendarCheck,
-  CalendarDays,
-  UserCheck,
-  ClipboardList,
-  ShieldCheck,
-  Settings as SettingsIcon,
-  Wallet,
-  Sun,
-  Moon,
-  LogOut,
-  FileText,
-  CalendarRange,
-  Landmark,
-  UserRound,
-  Mic,
-  Speaker,
-  Megaphone,
-  FileSpreadsheet,
-  FileBarChart,
-} from "lucide-react"
+import { Sun, Moon, LogOut } from "lucide-react"
 import { useAuth } from "../context/AuthContext"
 import { useTheme } from "../context/ThemeContext"
-import { isManagement, hasModuleAccess } from "../utils/roles"
+import { navGroups } from "../utils/navItems"
 import Avatar from "./ui/Avatar"
 import logoFull from "../assets/logo1.png"
 
@@ -189,16 +158,11 @@ export default function Sidebar({ expanded, onMouseEnter, onMouseLeave }) {
   const { logout, user } = useAuth()
   const { mode, toggleMode } = useTheme()
 
-  const isAdmin = isManagement(user?.role)
-  const isIT = user?.role === "IT_MANAGER"
-  const isOwner = ["ADMIN", "CEO"].includes(user?.role)
   const isDark = mode === "dark"
+  const groups = navGroups(user)
 
   const navRef = useRef(null)
   const scrollIndicator = useScrollIndicator(navRef)
-
-  const canManageAttendance =
-    hasModuleAccess(user?.role, "attendance") || !!user?.canManageAttendance
 
   return (
     <aside
@@ -275,190 +239,34 @@ export default function Sidebar({ expanded, onMouseEnter, onMouseLeave }) {
           [&::-webkit-scrollbar]:hidden
         "
       >
-        {isAdmin ? (
-          <>
-            <RailItem
-              to="/"
-              label="Dashboard"
-              icon={LayoutDashboard}
-              end
-              isDark={isDark}
-              expanded={expanded}
-            />
-
-            {hasModuleAccess(user?.role, "inventory") && (
-              <RailItem to="/inventory" label="Inventory" icon={Boxes} isDark={isDark} expanded={expanded} />
+        {groups.map((group, index) => (
+          <div key={group.label} className="flex w-full flex-col items-center gap-1.5">
+            {index > 0 && (
+              expanded ? (
+                <p
+                  className={`mt-2 w-full truncate px-3 text-[10px] font-semibold uppercase tracking-[0.14em] ${
+                    isDark ? "text-black/40" : "text-white/40"
+                  }`}
+                >
+                  {group.label}
+                </p>
+              ) : (
+                <span aria-hidden="true" className={`my-1 h-px w-6 ${isDark ? "bg-black/15" : "bg-white/15"}`} />
+              )
             )}
-
-            {hasModuleAccess(user?.role, "employees") && (
-              <RailItem to="/employees" label="Employees" icon={Users} isDark={isDark} expanded={expanded} />
-            )}
-
-             {canManageAttendance && (
-              <>
-                <RailItem to="/attendance" label="Attendance" icon={CalendarCheck} isDark={isDark} expanded={expanded} end />
-                <RailItem to="/attendance/sites" label="Attendance Sites" icon={MapPin} isDark={isDark} expanded={expanded} />
-              </>
-            )}
-
-            <RailItem
-              to="/attendance/me"
-              label="My Attendance"
-              icon={UserCheck}
-              isDark={isDark}
-              expanded={expanded}
-            />
-
- <RailItem to="/calendar" label="Company Calendar" icon={CalendarRange} isDark={isDark} expanded={expanded} />
-            {isOwner && <RailItem to="/organization-comparison" label="Organization Comparison" icon={Landmark} isDark={isDark} expanded={expanded} />}
-
-            {hasModuleAccess(user?.role, "projects") && (
-              <RailItem to="/projects" label="Projects & Tasks" icon={FolderKanban} isDark={isDark} expanded={expanded} />
-            )}
-            {hasModuleAccess(user?.role, "performance") && (
-              <RailItem to="/performance" label="Performance" icon={Award} isDark={isDark} expanded={expanded} />
-            )}
-
-             <RailItem
-              to="/announcements"
-              label="Announcements"
-              icon={Megaphone}
-              isDark={isDark}
-              expanded={expanded}
-            />
-
-            {hasModuleAccess(user?.role, "departments") && (
-              <RailItem to="/departments" label="Departments" icon={Building2} isDark={isDark} expanded={expanded} />
-            )}
-
-            {hasModuleAccess(user?.role, "assetRequests") && (
-              <RailItem to="/asset-requests" label="Asset Requests" icon={PackageSearch} isDark={isDark} expanded={expanded} />
-            )}
-
-            {hasModuleAccess(user?.role, "assetAssignments") && (
-              <RailItem to="/assignments" label="Assignments" icon={ClipboardCheck} isDark={isDark} expanded={expanded} />
-            )}
-
-            <RailItem
-              to="/tickets"
-              label="Tickets"
-              icon={Ticket}
-              isDark={isDark}
-              expanded={expanded}
-            />
-
-            {hasModuleAccess(user?.role, "leave") && (
-              <RailItem to="/leave-requests" label="Leave Requests" icon={ClipboardList} isDark={isDark} expanded={expanded} />
-            )}
-
-            {hasModuleAccess(user?.role, "reports") && (
-              <>
-                <RailItem to="/export" label="Export" icon={Download} isDark={isDark} expanded={expanded} />
-              </>
-            )}
-
-            {hasModuleAccess(user?.role, "hrReports") && (
-              <RailItem to="/reports/hr" label="HR Reports" icon={FileBarChart} isDark={isDark} expanded={expanded} />
-            )}
-
-            {isOwner && (
+            {group.items.map((item) => (
               <RailItem
-                to="/audit-log"
-                label="Audit Log"
-                icon={ShieldCheck}
+                key={item.to}
+                to={item.to}
+                label={item.label}
+                icon={item.icon}
+                end={item.end}
                 isDark={isDark}
                 expanded={expanded}
               />
-            )}
-
-            {hasModuleAccess(user?.role, "employeeForms") && (
-              <RailItem
-                to="/employee-forms"
-                label="Employee Forms"
-                icon={FileText}
-                isDark={isDark}
-                expanded={expanded}
-              />
-            )}
-
-            {isOwner && (
-              <RailItem
-                to="/settings"
-                label="Settings"
-                icon={SettingsIcon}
-                isDark={isDark}
-                expanded={expanded}
-              />
-            )}
-
-            {hasModuleAccess(user?.role, "payroll") && (
-              <RailItem to="/payroll" label="Payroll" icon={Wallet} isDark={isDark} expanded={expanded} />
-            )}
-            {hasModuleAccess(user?.role, "payrollReports") && (
-              <RailItem to="/payroll/reports" label="Payroll Reports" icon={FileSpreadsheet} isDark={isDark} expanded={expanded} />
-            )}
-            <RailItem to="/payroll/me" label="My Payslips" icon={Wallet} isDark={isDark} expanded={expanded} />
-          </>
-        ) : isIT ? (
-          <>
-            <RailItem to="/" label="Dashboard" icon={LayoutDashboard} end isDark={isDark} expanded={expanded} />
-            <RailItem to="/inventory" label="Inventory" icon={Boxes} isDark={isDark} expanded={expanded} />
-            <RailItem to="/employees" label="Employees & Assets" icon={Users} isDark={isDark} expanded={expanded} />
-            <RailItem to="/assignments" label="Asset Assignments" icon={ClipboardCheck} isDark={isDark} expanded={expanded} />
-            <RailItem to="/asset-requests" label="Asset Requests" icon={PackageSearch} isDark={isDark} expanded={expanded} />
-            <RailItem to="/tickets" label="Requests / Tickets" icon={Ticket} isDark={isDark} expanded={expanded} />
-            <RailItem to="/calendar" label="Company Calendar" icon={CalendarDays} isDark={isDark} expanded={expanded} />
-            <RailItem to="/attendance/me" label="My Attendance" icon={CalendarCheck} isDark={isDark} expanded={expanded} />
-            <RailItem to="/payroll/me" label="My Payslips" icon={Wallet} isDark={isDark} expanded={expanded} />
-          </>
-        ) : (
-          <>
-            <RailItem
-              to={`/employees/${user?.id}`}
-              label="My Profile"
-              icon={UserRound}
-              isDark={isDark}
-              expanded={expanded}
-            />
-
-            <RailItem
-              to="/projects"
-              label="My Projects & Tasks"
-              icon={FolderKanban}
-              isDark={isDark}
-              expanded={expanded}
-            />
-
-            <RailItem
-              to="/attendance/me"
-              label="My Attendance"
-              icon={CalendarCheck}
-              isDark={isDark}
-              expanded={expanded}
-            />
-
-            <RailItem to="/calendar" label="Company Calendar" icon={CalendarRange} isDark={isDark} expanded={expanded} />
-
-            <RailItem to="/performance" label="My Performance" icon={Award} isDark={isDark} expanded={expanded} />
-            <RailItem to="/announcements" label="Announcements" icon={Megaphone} isDark={isDark} expanded={expanded} />
-
-            <RailItem
-              to="/payroll/me"
-              label="My Payslips"
-              icon={Wallet}
-              isDark={isDark}
-              expanded={expanded}
-            />
-
-            <RailItem
-              to="/tickets"
-              label="Tickets"
-              icon={Ticket}
-              isDark={isDark}
-              expanded={expanded}
-            />
-          </>
-        )}
+            ))}
+          </div>
+        ))}
       </nav>
 
       {scrollIndicator.visible && (

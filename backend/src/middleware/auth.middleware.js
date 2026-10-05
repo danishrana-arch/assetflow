@@ -5,8 +5,9 @@ const { HIERARCHY_SELECT, canAccessOrganization } = require("../utils/organizati
 
 // Organization switching (X-Organization-Id) follows the company hierarchy —
 // see utils/organization.js. Strictly downward for ADMIN / IT_MANAGER
-// (Grand Parent → Parent → Children; Parent → Children; Child → own only);
-// a CEO may enter any company of their group; HR and every other role are
+// (a Grand Parent → only what's under it, never another Grand Parent;
+// Parent → its Children; Child → own only); a CEO may enter any company of
+// their group, every Grand Parent included; HR and every other role are
 // locked to their own organization. This is THE enforcement point for every
 // organization-scoped API: controllers read req.user.organizationId, which
 // only changes here and only to an organization the user may access.
@@ -38,7 +39,7 @@ async function applyOrganizationScope(req) {
     select: HIERARCHY_SELECT,
   })
 
-  if (!canAccessOrganization(role, home, target)) {
+  if (!canAccessOrganization(role, home, target, { callCenterAccess: req.user.callCenterAccess, grantedOrganizationIds: req.user.grantedOrganizationIds })) {
     const error = new Error(
       "You do not have access to this organization"
     )
@@ -73,6 +74,8 @@ async function requireAuth(req, res, next) {
         role: true,
         status: true,
         departmentId: true,
+        callCenterAccess: true,
+        accessGrants: { select: { organizationId: true } },
         organization: {
           select: {
             companyId: true,
@@ -104,6 +107,8 @@ async function requireAuth(req, res, next) {
         dbUser.organization?.companyId || decoded.companyId,
       role: dbUser.role,
       departmentId: dbUser.departmentId,
+      callCenterAccess: dbUser.callCenterAccess,
+      grantedOrganizationIds: dbUser.accessGrants.map((g) => g.organizationId),
     }
 
     await applyOrganizationScope(req)

@@ -4,27 +4,20 @@ import { useQueryClient } from "@tanstack/react-query"
 import { useAuth } from "../context/AuthContext"
 
 // Tree-style option labels for a native <select> (leading spaces must be
-// non-breaking or the browser strips them):
-//   Grand Parent
+// non-breaking or the browser strips them). The API returns the list in
+// tree order with a `depth` per row (backend utils/organization.js):
+//   Grand Parent A
 //    └─ Parent
-//        ├─ Child 1
-//        └─ Child 2
+//        └─ Child 1
+//   Grand Parent B
+//    └─ Child 2
 const NBSP = " "
 export function treeLabels(organizations) {
-  const hasGrand = organizations.some((o) => o.isGrandParent)
-  const hasParent = organizations.some((o) => o.isParent)
-  const children = organizations.filter((o) => !o.isGrandParent && !o.isParent)
   const labels = {}
   for (const org of organizations) {
-    if (org.isGrandParent) {
-      labels[org.id] = `${org.name} — Grand Parent`
-    } else if (org.isParent) {
-      labels[org.id] = `${hasGrand ? `${NBSP}└─ ` : ""}${org.name} — Parent`
-    } else {
-      const depth = (hasGrand ? 1 : 0) + (hasParent ? 1 : 0)
-      const branch = children[children.length - 1]?.id === org.id ? "└─ " : "├─ "
-      labels[org.id] = depth ? `${NBSP.repeat(depth * 4 - 3)}${branch}${org.name}` : org.name
-    }
+    const depth = org.depth || 0
+    const suffix = `${org.isGrandParent ? " — Grand Parent" : org.isParent ? " — Parent" : ""}${org.isCallCenter ? " · Call center" : ""}`
+    labels[org.id] = `${depth ? `${NBSP.repeat(depth * 4 - 3)}└─ ` : ""}${org.name}${suffix}`
   }
   return labels
 }
@@ -36,10 +29,11 @@ export default function OrganizationSwitcher({ compact = false }) {
 
   if (!user) return null
 
-  // The API only returns organizations this user may access, already ordered
-  // Grand Parent → Parent → Children (backend utils/organization.js).
+  // The API only returns organizations this user may access, already in
+  // tree order (backend utils/organization.js).
   const canSwitch = ["ADMIN", "CEO", "IT_MANAGER"].includes(user.role) && organizations.length > 1
-  const main = organizations[0] || organization
+  const home = organizations.find((o) => o.id === user.homeOrganizationId)
+  const main = home || organizations[0] || organization
   const labels = treeLabels(organizations)
 
   async function handleChange(event) {
