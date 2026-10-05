@@ -111,17 +111,22 @@ function streamPayslipPdf(res, { record, employee, organization, bankAccount }) 
     ...(Number(record.performanceBonus) > 0 ? [["Performance bonus", record.performanceBonus]] : []),
     ["Office expenses (reimbursed)", record.expenseReimbursement],
     ...(Number(record.terminationSettlement) > 0 ? [["Termination settlement", record.terminationSettlement]] : []),
+    // Manual payroll adjustments (net), shown on whichever side they fall.
+    ...(Number(record.adjustmentTotal) > 0 ? [["Payroll adjustments", record.adjustmentTotal]] : []),
   ]
   const deductions = [
     [taxPct ? `Tax (${taxPct}%)` : "Tax", record.tax],
     [leaveDetail ? `Absent (${leaveDetail})` : "Absent", record.absentDeduction],
     [record.lateDays ? `Late (${plural(record.lateDays, "day")})` : "Late", record.lateDeduction],
+    ...(Number(record.halfDayDeduction) > 0 ? [[`Half days (${plural(record.halfDays, "day")})`, record.halfDayDeduction]] : []),
+    ...(Number(record.earlyGoingFine) > 0 ? [[`Early going (${plural(record.earlyGoingDays, "day")})`, record.earlyGoingFine]] : []),
     ...(Number(record.fineDeduction) > 0 ? [["Attendance fines", record.fineDeduction]] : []),
     ...(Number(record.otherDeduction) > 0 ? [["Other deductions", record.otherDeduction]] : []),
     ...(Number(record.terminationDeduction) > 0 ? [["Termination deduction", record.terminationDeduction]] : []),
+    ...(Number(record.adjustmentTotal) < 0 ? [["Payroll adjustments", -Number(record.adjustmentTotal)]] : []),
   ]
   const totalEarnings = earnings.reduce((s, [, v]) => s + Number(v || 0), 0)
-  const totalDeductions = Number(record.deductions || 0)
+  const totalDeductions = Number(record.deductions || 0) + Math.max(0, -Number(record.adjustmentTotal || 0))
 
   const gap = 16
   const tableW = (inner - gap) / 2

@@ -10,6 +10,7 @@ const { isLateCheckIn, resolveArrivalStatus, formatTime12, shiftStartMinutes } =
 const { createNotification, notifyManagement } = require("../utils/notifications")
 const { refreshDraftPayslip, refreshAllDraftPayslips } = require("./payroll.controller")
 const { logAudit } = require("../utils/audit")
+const { attendancePolicy, applyAttendanceEvaluation, dayDeductionAmount, refreshPayslipForDay } = require("../services/attendance-engine")
 
 // Roles that manage fines and employee notes on the Attendance page.
 const FINE_ROLES = ["ADMIN", "CEO", "HR"]
@@ -67,6 +68,12 @@ async function getDailyAttendance(req, res, next) {
           shiftStartDefault: true,
           lateDeductionAmount: true,
           absentFineAmount: true,
+          lateThresholdMinutes: true,
+          lateHalfDayThresholdHours: true,
+          halfDayMinimumHours: true,
+          earlyGoingThresholdHours: true,
+          earlyGoingFineAmount: true,
+          halfDayDeductionPercent: true,
         },
       })
     const date = startOfDay(req.query.date, organization?.timezone)
@@ -87,7 +94,7 @@ async function getDailyAttendance(req, res, next) {
       }),
       prisma.attendanceRecord.findMany({
         where: { organizationId, date },
-        include: { markedBy: true },
+        include: { markedBy: { select: { id: true, name: true, role: true } } },
       }),
       prisma.attendanceNote.findMany({
         where: { organizationId, date },
@@ -115,13 +122,17 @@ async function getDailyAttendance(req, res, next) {
     )
 
     // The automatic fine payroll applies for this day (same rules as
-    // computeAttendanceLines): LATE → org late fine; an ABSENT *record* →
-    // org absent fine (none set = no fine). A day with no record isn't fined.
+    // computeAttendanceLines): a HALF_DAY / EARLY_GOING day → its day-rate
+    // deduction (+ early-going fine), replacing the late fine; LATE → org
+    // late fine; an ABSENT *record* → org absent fine (none set = no fine).
+    // A day with no record isn't fined.
     const absentFine = Number(organization?.absentFineAmount) || 0
     function fineFor(emp, record) {
       const fine = fineByEmployee.get(emp.id)
+      const shortDay = record && ["HALF_DAY", "EARLY_GOING"].includes(record.dayType) && ["PRESENT", "LATE"].includes(record.status)
       const auto =
-        record?.status === "LATE" ? { type: "LATE", amount: lateRate }
+        shortDay ? { type: record.dayType, amount: dayDeductionAmount(record, organization) }
+        : record?.status === "LATE" ? { type: "LATE", amount: lateRate }
         : record?.status === "ABSENT" && absentFine > 0 ? { type: "ABSENT", amount: absentFine }
         : null
       const ps = payslipStatus.get(emp.id) || null
@@ -141,13 +152,14 @@ async function getDailyAttendance(req, res, next) {
 
     // Names for the Location column: the matched attendance site, or the
     // biometric device the punch came from.
-    const siteIds = [...new Set(records.map((r) => r.siteId).filter(Boolean))]
+    const siteIds = [...new Set(records.flatMap((r) => [r.siteId, r.checkOutSiteId]).filter(Boolean))]
     const deviceIds = [...new Set(records.map((r) => r.biometricDeviceId).filter(Boolean))]
     const [sites, devices] = await Promise.all([
-      siteIds.length ? prisma.attendanceSite.findMany({ where: { id: { in: siteIds } }, select: { id: true, name: true } }) : [],
+      siteIds.length ? prisma.attendanceSite.findMany({ where: { id: { in: siteIds } }, select: { id: true, name: true, Project: { select: { name: true } } } }) : [],
       deviceIds.length ? prisma.biometricDevice.findMany({ where: { id: { in: deviceIds } }, select: { id: true, name: true } }) : [],
     ])
     const siteName = new Map(sites.map((s) => [s.id, s.name]))
+    const siteProject = new Map(sites.map((s) => [s.id, s.Project?.name || null]))
     const deviceName = new Map(devices.map((d) => [d.id, d.name]))
 
     const rows = employees.map((emp) => {
@@ -162,11 +174,25 @@ async function getDailyAttendance(req, res, next) {
         checkInAt: record?.checkInAt?.toISOString() || null,
         checkOutAt: record?.checkOutAt?.toISOString() || null,
         // Minutes past the employee's shift start (same shift rule as the
-        // late check) — only for LATE rows with a recorded check-in.
+        // late check) — only for LATE rows with a recorded check-in. Stored
+        // by the attendance engine; older records fall back to the old math.
         lateMinutes:
           record?.status === "LATE" && record.checkInAt
-            ? Math.max(0, localMinutes(record.checkInAt, organization?.timezone || "UTC") - shiftStartMinutes(emp, organization))
+            ? record.lateMinutes ?? Math.max(0, localMinutes(record.checkInAt, organization?.timezone || "UTC") - shiftStartMinutes(emp, organization))
             : null,
+        // Attendance engine result: HALF_DAY / EARLY_GOING / FULL_DAY, why,
+        // and the deduction (days; the amount is in `fine` for fine roles).
+        dayType: record?.dayType || null,
+        dayTypeReason: record?.dayTypeReason || null,
+        scheduledStartAt: record?.scheduledStartAt?.toISOString() || null,
+        scheduledEndAt: record?.scheduledEndAt?.toISOString() || null,
+        lateDurationMinutes: record?.lateMinutes ?? null,
+        earlyGoingMinutes: record?.earlyGoingMinutes ?? null,
+        deductionDays: record?.deductionDays != null ? Number(record.deductionDays) : null,
+        earlyGoingFineAmount: record?.earlyGoingFine != null ? Number(record.earlyGoingFine) : null,
+        markedByRole: record?.markedBy?.role || null,
+        checkOutSiteName: record?.checkOutSiteId ? siteName.get(record.checkOutSiteId) || null : null,
+        projectName: record?.siteId ? siteProject.get(record.siteId) || null : null,
         // Signed minutes from shift start to check-in (negative = early
         // clock-in). Null when there's no check-in.
         arrivalOffsetMinutes: record?.checkInAt
@@ -221,6 +247,7 @@ async function getDailyAttendance(req, res, next) {
             fineSettings: {
               lateFine: lateRate,
               absentFine: organization?.absentFineAmount != null ? Number(organization.absentFineAmount) : null,
+              ...policySettings(organization),
             },
           }
         : {}),
@@ -354,11 +381,35 @@ async function setAttendanceFine(req, res, next) {
   }
 }
 
-// PUT /attendance/fine-settings  { lateFine, absentFine }
+// The half-day / early-going policy as the Attendance page shows it.
+function policySettings(org) {
+  const p = attendancePolicy(org)
+  return {
+    lateHalfDayThresholdHours: p.lateHalfDayThresholdHours,
+    halfDayMinimumHours: p.halfDayMinimumHours,
+    earlyGoingThresholdHours: p.earlyGoingThresholdHours,
+    earlyGoingFineAmount: p.earlyGoingFineAmount,
+    halfDayDeductionPercent: p.halfDayDeductionPercent,
+  }
+}
+
+// Optional policy fields of PUT /attendance/fine-settings: [key, label, max].
+const POLICY_FIELDS = [
+  ["lateHalfDayThresholdHours", "Late-arrival half-day threshold", 12],
+  ["halfDayMinimumHours", "Minimum hours for a full day", 24],
+  ["earlyGoingThresholdHours", "Very-short-day threshold", 24],
+  ["earlyGoingFineAmount", "Early-going fine", MAX_FINE],
+  ["halfDayDeductionPercent", "Half-day deduction", 100],
+]
+
+// PUT /attendance/fine-settings  { lateFine, absentFine, ...policy }
 // HR/ADMIN/CEO only (route). Fine per LATE day (Organization.lateDeductionAmount)
-// and per ABSENT / unpaid-leave day (absentFineAmount; null/"" = no fine). Every
-// DRAFT payslip is refreshed so the new amounts apply right away;
-// submitted/paid payslips keep what they were issued with.
+// and per ABSENT / unpaid-leave day (absentFineAmount; null/"" = no fine),
+// plus the attendance policy (half day / early going, see
+// services/attendance-engine.js) when sent. Every DRAFT payslip is
+// refreshed so the new amounts apply right away; submitted/paid payslips
+// keep what they were issued with. Policy changes apply to attendance
+// recorded from now on (existing days keep their stored result).
 async function setFineSettings(req, res, next) {
   try {
     const { organizationId, userId } = req.user
@@ -371,16 +422,34 @@ async function setFineSettings(req, res, next) {
     if (absent !== null && (Number.isNaN(absent) || absent < 0 || absent > MAX_FINE)) {
       return res.status(400).json({ error: "Absent fine must be a number between 0 and 1,000,000 (or empty for no absent fine)" })
     }
-    await prisma.organization.update({
+
+    const policy = {}
+    for (const [key, label, max] of POLICY_FIELDS) {
+      if (req.body?.[key] === undefined) continue
+      const value = req.body[key] === "" || req.body[key] === null ? 0 : Number(req.body[key])
+      if (Number.isNaN(value) || value < 0 || value > max) {
+        return res.status(400).json({ error: `${label} must be a number between 0 and ${max.toLocaleString()}` })
+      }
+      policy[key] = Math.round(value * 100) / 100
+    }
+    const current = await prisma.organization.findUnique({ where: { id: organizationId }, select: { halfDayMinimumHours: true, earlyGoingThresholdHours: true } })
+    const minHours = policy.halfDayMinimumHours ?? Number(current?.halfDayMinimumHours ?? 0)
+    const shortHours = policy.earlyGoingThresholdHours ?? Number(current?.earlyGoingThresholdHours ?? 0)
+    if (minHours > 0 && shortHours > 0 && shortHours >= minHours) {
+      return res.status(400).json({ error: "The very-short-day threshold must be lower than the minimum hours for a full day" })
+    }
+
+    const saved = await prisma.organization.update({
       where: { id: organizationId },
-      data: { lateDeductionAmount: late, absentFineAmount: absent },
+      data: { lateDeductionAmount: late, absentFineAmount: absent, ...policy },
     })
     const refreshed = await refreshAllDraftPayslips(organizationId)
+    const settings = policySettings(saved)
     logAudit({
       organizationId, actorId: userId, action: "attendance.fine_settings",
-      note: `Late PKR ${late} / day, absent ${absent === null ? "none" : `PKR ${absent} / day`} — ${refreshed} draft payslip(s) refreshed`,
+      note: `Late PKR ${late} / day, absent ${absent === null ? "none" : `PKR ${absent} / day`}; half day when ${settings.lateHalfDayThresholdHours}h+ late or under ${settings.halfDayMinimumHours}h worked (${settings.halfDayDeductionPercent}% of a day); early going at ${settings.earlyGoingThresholdHours}h or less (fine PKR ${settings.earlyGoingFineAmount}) — ${refreshed} draft payslip(s) refreshed`,
     })
-    res.json({ lateFine: late, absentFine: absent, refreshedDrafts: refreshed })
+    res.json({ lateFine: late, absentFine: absent, ...settings, refreshedDrafts: refreshed })
   } catch (err) {
     next(err)
   }
@@ -448,11 +517,14 @@ async function markAttendance(req, res, next) {
     // outside-premises check-in as Present). autoFlagged is left as-is: it
     // records *where* the employee checked in, which the decision doesn't
     // change, so the Attendance page keeps showing "Outside premises".
-    const record = await prisma.attendanceRecord.upsert({
+    const marked = await prisma.attendanceRecord.upsert({
       where: { employeeId_date: { employeeId, date: day } },
       update: { status: finalStatus, markedById: userId },
       create: { organizationId, employeeId, date: day, status: finalStatus, markedById: userId },
     })
+    // An explicit Present on a flagged day re-derives Present/Late from the
+    // check-in time (same as resolveArrivalStatus above).
+    const record = await applyAttendanceEvaluation(prisma, marked.id, { recomputeStatus: ["PRESENT", "LATE"].includes(status) })
     await refreshDraftPayslip({ organizationId, employeeId, month: day.getUTCMonth() + 1, year: day.getUTCFullYear() }).catch(() => null)
 
     res.json(record)
@@ -500,6 +572,10 @@ async function saveDayAttendance(req, res, next) {
         })
       })
     )
+
+    for (const [i, saved] of results.entries()) {
+      await applyAttendanceEvaluation(prisma, saved.id, { recomputeStatus: ["PRESENT", "LATE"].includes(records[i].status) })
+    }
 
     // Status changes move the late/absent fines — keep DRAFT payslips current.
     await Promise.all(
@@ -696,11 +772,14 @@ async function markSelfAttendance(req, res, next) {
       : {latitude:null,longitude:null,distanceMeters:null,siteId:null}
 
     const checkInAt=now
-    const record=await prisma.attendanceRecord.upsert({
+    const upserted=await prisma.attendanceRecord.upsert({
       where:{employeeId_date:{employeeId:userId,date:today}},
       update:{status:finalStatus,markedById:userId,autoFlagged,checkInAt,locationMode:mode,...locationData},
       create:{organizationId,employeeId:userId,date:today,status:finalStatus,markedById:userId,autoFlagged,checkInAt,locationMode:mode,...locationData},
     })
+    // Late minutes / half-day by late arrival, in the site's timezone.
+    const record=await applyAttendanceEvaluation(prisma, upserted.id)
+    refreshPayslipForDay(organizationId, userId, today)
     if (hasCoords) {
       const presenceId=`ape_${Date.now().toString(36)}_${crypto.randomBytes(5).toString('hex')}`
       await prisma.$executeRaw`
@@ -845,6 +924,7 @@ async function syncOfflineAttendance(req, res, next) {
     })
 
     const results = { synced: 0, duplicates: 0, rejected: [] }
+    const touchedDays = new Set()
 
     for (const event of events) {
       const clientEventId = String(event?.clientEventId || "").trim()
@@ -904,6 +984,7 @@ async function syncOfflineAttendance(req, res, next) {
         }
 
         try {
+          let evaluateId = null
           await prisma.$transaction(async (tx) => {
             let siteId = event.siteId ? String(event.siteId) : null
             let distance = null
@@ -1043,6 +1124,9 @@ async function syncOfflineAttendance(req, res, next) {
               `
             }
 
+            // Evaluated after the commit (keeps this transaction short).
+            if (attendance && (status === "CHECK_IN" || status === "CHECK_OUT")) evaluateId = attendance.id
+
             if (anomaly) {
               await tx.$executeRaw`
                 INSERT INTO "AttendanceAnomaly"
@@ -1061,6 +1145,11 @@ async function syncOfflineAttendance(req, res, next) {
             `
           })
 
+          // Late / half-day / early-going result for the day (attendance engine).
+          if (evaluateId) {
+            await applyAttendanceEvaluation(prisma, evaluateId)
+            touchedDays.add(String(event.localDate).slice(0, 10))
+          }
           results.synced += 1
         } catch (processingError) {
           await prisma.$executeRaw`
@@ -1075,6 +1164,7 @@ async function syncOfflineAttendance(req, res, next) {
       }
     }
 
+    for (const key of touchedDays) await refreshPayslipForDay(organizationId, userId, key)
     res.json(results)
   } catch (err) {
     next(err)
@@ -1181,9 +1271,11 @@ async function listAttendanceCorrections(req, res, next) {
     const status = ["PENDING", "APPROVED", "REJECTED"].includes(req.query.status) ? req.query.status : null
     const deptOnly = role === "DEPARTMENT_HEAD" ? departmentId || "__none__" : null
     const rows = await prisma.$queryRaw`
-      SELECT c.*, u.name AS "employeeName", r.date, r."checkInAt", r."checkOutAt", r.status AS "recordStatus"
+      SELECT c.*, u.name AS "employeeName", r.date, r."checkInAt", r."checkOutAt", r.status AS "recordStatus",
+             rb.name AS "requestedByName", rb.role::text AS "requestedByRole"
       FROM "AttendanceCorrection" c
       JOIN "User" u ON u.id=c."employeeId"
+      LEFT JOIN "User" rb ON rb.id=c."requestedById"
       LEFT JOIN "AttendanceRecord" r ON r.id=c."attendanceId"
       WHERE c."organizationId"=${organizationId}
         AND (${status}::text IS NULL OR c.status=${status})
@@ -1239,7 +1331,7 @@ async function reviewAttendanceCorrection(req, res, next) {
       return res.status(404).json({ error: "Correction not found" })
     }
     if (correction.status !== "PENDING") return res.status(400).json({ error: "This correction has already been reviewed" })
-    if (correction.employeeId === userId) return res.status(403).json({ error: "You can't review your own correction" })
+    if (correction.employeeId === userId || correction.requestedById === userId) return res.status(403).json({ error: "You can't review your own correction" })
 
     let attendanceId = correction.attendanceId
     if (decision === "APPROVED") {
@@ -1274,6 +1366,7 @@ async function reviewAttendanceCorrection(req, res, next) {
         update: data,
         create: { organizationId, employeeId: correction.employeeId, date: day, ...data },
       })
+      await applyAttendanceEvaluation(prisma, record.id, { recomputeStatus: true })
       attendanceId = record.id
       await refreshDraftPayslip({ organizationId, employeeId: correction.employeeId, month: day.getUTCMonth() + 1, year: day.getUTCFullYear() }).catch(() => null)
     }
@@ -1293,6 +1386,18 @@ async function reviewAttendanceCorrection(req, res, next) {
       message: reviewNote,
       link: "/attendance/me",
     }).catch(() => {})
+    // A Site Admin who sent it on the employee's behalf hears back too.
+    if (correction.requestedById && correction.requestedById !== correction.employeeId) {
+      createNotification({
+        organizationId,
+        recipientId: correction.requestedById,
+        createdById: userId,
+        type: "INFO",
+        title: decision === "APPROVED" ? "Attendance correction approved" : "Attendance correction rejected",
+        message: reviewNote,
+        link: "/site-attendance",
+      }).catch(() => {})
+    }
     res.json({ id: correction.id, status: decision, attendanceId })
   } catch (err) {
     next(err)

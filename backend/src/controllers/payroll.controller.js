@@ -1,6 +1,7 @@
 const prisma = require("../lib/prisma")
 const { decryptField } = require("../utils/crypto")
 const { logAudit } = require("../utils/audit")
+const { createNotification } = require("../utils/notifications")
 const { toNumber, round2, computePayrollTotals, approvedExpenseTotal, performanceBonusTotal } = require("../utils/payroll")
 const { streamPayslipPdf } = require("../utils/payslip-pdf")
 const { hasModuleAccess } = require("../utils/roles")
@@ -44,16 +45,26 @@ async function computeAttendanceLines({ employeeId, base, month, year, lateRate 
 
   // Days whose automatic fine HR/ADMIN/CEO waived on the Attendance page
   // aren't counted; manual fines added there become fineDeduction.
-  const [lateRecords, absentRecords, fines] = await Promise.all([
+  // HALF_DAY / EARLY_GOING days come straight from the attendance engine's
+  // stored result (services/attendance-engine.js); their half-day deduction
+  // replaces that day's late fine.
+  const [lateRecords, absentRecords, fines, shortDays] = await Promise.all([
     prisma.attendanceRecord.findMany({ where: { employeeId, status: "LATE", date: { gte: monthStart, lt: monthEnd } }, select: { date: true } }),
     prisma.attendanceRecord.findMany({ where: { employeeId, status: "ABSENT", date: { gte: monthStart, lt: monthEnd } }, select: { date: true } }),
     prisma.attendanceFine.findMany({ where: { employeeId, date: { gte: monthStart, lt: monthEnd } }, select: { date: true, waived: true, extraAmount: true } }),
+    prisma.attendanceRecord.findMany({
+      where: { employeeId, status: { in: ["PRESENT", "LATE"] }, dayType: { in: ["HALF_DAY", "EARLY_GOING"] }, date: { gte: monthStart, lt: monthEnd } },
+      select: { date: true, dayType: true, deductionDays: true, earlyGoingFine: true },
+    }),
   ])
   const waivedKeys = new Set(fines.filter((f) => f.waived).map((f) => f.date.toISOString().slice(0, 10)))
   const notWaived = (r) => !waivedKeys.has(r.date.toISOString().slice(0, 10))
-  const lateDays = lateRecords.filter(notWaived).length
+  const shortDayKeys = new Set(shortDays.map((r) => r.date.toISOString().slice(0, 10)))
+  const lateDays = lateRecords.filter(notWaived).filter((r) => !shortDayKeys.has(r.date.toISOString().slice(0, 10))).length
   const absentDays = absentRecords.filter(notWaived).length
   const fineDeduction = round2(fines.reduce((s, f) => s + toNumber(f.extraAmount), 0))
+  const chargedShortDays = shortDays.filter(notWaived)
+  const halfDayDeductionDays = chargedShortDays.reduce((s, r) => s + toNumber(r.deductionDays), 0)
 
   const unpaidLeaves = await prisma.leaveApplication.findMany({
     where: {
@@ -86,6 +97,10 @@ async function computeAttendanceLines({ employeeId, base, month, year, lateRate 
     lateDays,
     absentDeduction: round2((absentDays + fullUnpaidDays) * perDay + halfUnpaidDays * (perDay / 2)),
     lateDeduction: round2(lateDays * lateRate),
+    halfDays: chargedShortDays.length,
+    halfDayDeduction: round2(halfDayDeductionDays * perDay),
+    earlyGoingDays: chargedShortDays.filter((r) => r.dayType === "EARLY_GOING").length,
+    earlyGoingFine: round2(chargedShortDays.reduce((s, r) => s + toNumber(r.earlyGoingFine), 0)),
     fineDeduction,
     expenseReimbursement: await approvedExpenseTotal(prisma, employeeId, month, year),
     performanceBonus: await performanceBonusTotal(prisma, employeeId, month, year),
@@ -340,6 +355,11 @@ async function previewPayroll(req, res, next) {
         baseSalary: round2(toNumber(amounts.baseSalary)),
         absentDeduction: round2(toNumber(amounts.absentDeduction)),
         lateDeduction: round2(toNumber(amounts.lateDeduction)),
+        halfDays: toNumber(amounts.halfDays),
+        halfDayDeduction: round2(toNumber(amounts.halfDayDeduction)),
+        earlyGoingDays: toNumber(amounts.earlyGoingDays),
+        earlyGoingFine: round2(toNumber(amounts.earlyGoingFine)),
+        adjustmentTotal: round2(toNumber(amounts.adjustmentTotal)),
         fineDeduction: round2(toNumber(amounts.fineDeduction)),
         expenseReimbursement: round2(toNumber(amounts.expenseReimbursement)),
         performanceBonus: round2(toNumber(amounts.performanceBonus)),
@@ -372,6 +392,8 @@ async function previewPayroll(req, res, next) {
         lateDays: sum((e) => e.attendance.late),
         absentDeduction: sum((e) => e.absentDeduction),
         lateDeduction: sum((e) => e.lateDeduction),
+        halfDays: sum((e) => e.halfDays),
+        halfDayDeduction: sum((e) => e.halfDayDeduction + e.earlyGoingFine),
         netPay: sum((e) => e.netPay),
       },
       issues: {
@@ -413,6 +435,8 @@ async function listPayroll(req, res, next) {
       where: { organizationId, month, year },
       include: {
         employee: { select: { id: true, name: true, email: true, photoUrl: true, department: { select: { name: true } } } },
+        // Manual adjustments after generation → "Adjusted" badge.
+        _count: { select: { adjustments: { where: { type: { not: "FIELD_EDIT" } } } } },
       },
       orderBy: { employee: { name: "asc" } },
     })
@@ -619,15 +643,386 @@ async function updatePayroll(req, res, next) {
       return res.status(400).json({ error: "Set a termination date before adding termination amounts" })
     }
 
-    const updated = await prisma.payrollRecord.update({
-      where: { id },
-      data: { ...data, ...computePayrollTotals({ ...existing, ...data }) },
+    const totals = computePayrollTotals({ ...existing, ...data })
+    // Every changed amount is kept in the adjustment history (original →
+    // new value, who, when, why) — a draft edit is never a silent overwrite.
+    const reason = cleanText(req.body.adjustmentReason, 500) || "Edited on the draft payslip"
+    const edits = FIELD_EDIT_LINES
+      .filter((line) => data[line] !== undefined && round2(toNumber(data[line])) !== round2(toNumber(existing[line])))
+      .map((line) => {
+        const before = round2(toNumber(existing[line]))
+        const after = round2(toNumber(data[line]))
+        const sign = ADDITION_LINES.includes(line) ? 1 : -1
+        return { line, before, after, effect: round2((after - before) * sign) }
+      })
+    const updated = await prisma.$transaction(async (tx) => {
+      const saved = await tx.payrollRecord.update({ where: { id }, data: { ...data, ...totals } })
+      let runningNet = toNumber(existing.netPay)
+      for (const e of edits) {
+        const nextNet = Math.max(0, round2(runningNet + e.effect))
+        await tx.payrollAdjustment.create({
+          data: {
+            organizationId, payrollRecordId: id, employeeId: existing.employeeId, type: "FIELD_EDIT", line: e.line,
+            amount: e.effect, originalValue: e.before, newValue: e.after, previousNetPay: runningNet, newNetPay: nextNet,
+            reason, payslipStatus: existing.status, createdById: userId,
+          },
+        })
+        runningNet = nextNet
+      }
+      return saved
     })
+    if (edits.length) {
+      logAudit({
+        organizationId, actorId: userId, action: "payroll.edited", targetType: "PayrollRecord", targetId: id,
+        note: `${existing.month}/${existing.year}: ${edits.map((e) => `${LINE_LABELS[e.line] || e.line} ${e.before} → ${e.after}`).join(", ")} — ${reason}`,
+      })
+    }
 
     if (data.terminationDate && !existing.terminationDate) {
       logAudit({ organizationId, actorId: userId, action: "payroll.termination_added", targetType: "PayrollRecord", targetId: id, note: `${existing.month}/${existing.year}` })
     }
     res.json(updated)
+  } catch (err) {
+    next(err)
+  }
+}
+
+/* ------------------------------------------------------------------------
+   Payroll adjustments — manual, audited changes after a payslip exists.
+   Never edits the attendance record itself: removing a late fine here
+   credits the payslip, the LATE day stays LATE on the Attendance page.
+   Who may adjust, by payslip status (DRAFT = generated, PENDING_APPROVAL =
+   submitted to the CEO, PAID = finalized):
+     DRAFT            ADMIN, HR, CEO
+     PENDING_APPROVAL ADMIN, CEO
+     PAID             CEO only, with an explicit confirmFinalized override
+------------------------------------------------------------------------ */
+
+const LINE_LABELS = {
+  baseSalary: "Basic salary",
+  bonus: "Bonus",
+  performanceBonus: "Performance bonus",
+  expenseReimbursement: "Office expenses",
+  terminationSettlement: "Termination settlement",
+  tax: "Tax",
+  taxPercent: "Tax %",
+  absentDeduction: "Absent / unpaid leave",
+  lateDeduction: "Late fines",
+  halfDayDeduction: "Half-day deductions",
+  earlyGoingFine: "Early-going fines",
+  fineDeduction: "Manual attendance fines",
+  otherDeduction: "Other deductions",
+  terminationDeduction: "Termination deduction",
+  manualFine: "Manual fine",
+  manualDeduction: "Manual deduction",
+  allowance: "Allowance",
+  attendance: "Attendance correction",
+  other: "Other adjustment",
+}
+const ADDITION_LINES = ["bonus", "terminationSettlement"]
+// Amount fields a draft edit (PATCH) can change, logged as FIELD_EDIT rows.
+const FIELD_EDIT_LINES = ["bonus", "tax", "otherDeduction", "terminationSettlement", "terminationDeduction"]
+const FINE_LINES = ["lateDeduction", "absentDeduction", "halfDayDeduction", "earlyGoingFine", "fineDeduction"]
+const DEDUCTION_LINES = [...FINE_LINES, "otherDeduction", "tax", "terminationDeduction"]
+
+// sign: +1 raises net pay, -1 lowers it, 0 = the amount's own sign.
+// lines: allowed existing payslip lines (credited back, never past their value).
+const ADJUSTMENT_TYPES = {
+  REMOVE_FINE: { sign: 1, lines: FINE_LINES, removesWholeLine: true, label: "Remove fine" },
+  REDUCE_FINE: { sign: 1, lines: FINE_LINES, label: "Reduce fine" },
+  ADD_FINE: { sign: -1, defaultLine: "manualFine", label: "Add fine" },
+  ADD_DEDUCTION: { sign: -1, defaultLine: "manualDeduction", label: "Add deduction" },
+  REMOVE_DEDUCTION: { sign: 1, lines: DEDUCTION_LINES, label: "Remove / reduce deduction" },
+  ALLOWANCE: { sign: 1, defaultLine: "allowance", label: "Allowance" },
+  ATTENDANCE_CORRECTION: { sign: 0, defaultLine: "attendance", label: "Attendance correction" },
+  OTHER: { sign: 0, defaultLine: "other", label: "Other adjustment" },
+}
+
+const ADJUST_ROLES = { DRAFT: ["ADMIN", "HR", "CEO"], PENDING_APPROVAL: ["ADMIN", "CEO"], PAID: ["CEO"] }
+const MAX_ADJUSTMENT = 10000000
+
+// Net amount already credited back on a line by earlier adjustments.
+function creditedOn(adjustments, line) {
+  return round2(adjustments.filter((a) => a.type !== "FIELD_EDIT" && a.line === line).reduce((s, a) => s + toNumber(a.amount), 0))
+}
+
+function adjustmentTotalOf(adjustments) {
+  return round2(adjustments.filter((a) => a.type !== "FIELD_EDIT").reduce((s, a) => s + toNumber(a.amount), 0))
+}
+
+function adjustPermission(role, status) {
+  const allowed = (ADJUST_ROLES[status] || []).includes(role)
+  return { canAdjust: allowed, requiresOverride: allowed && status === "PAID" }
+}
+
+function serializeAdjustment(a) {
+  return {
+    id: a.id,
+    type: a.type,
+    typeLabel: a.type === "FIELD_EDIT" ? "Payslip edit" : a.type === "REVERSAL" ? "Reversal" : ADJUSTMENT_TYPES[a.type]?.label || a.type,
+    line: a.line,
+    lineLabel: a.line ? LINE_LABELS[a.line] || a.line : null,
+    amount: toNumber(a.amount),
+    originalValue: a.originalValue == null ? null : toNumber(a.originalValue),
+    newValue: a.newValue == null ? null : toNumber(a.newValue),
+    previousNetPay: toNumber(a.previousNetPay),
+    newNetPay: toNumber(a.newNetPay),
+    reason: a.reason,
+    payslipStatus: a.payslipStatus,
+    finalizedOverride: a.finalizedOverride,
+    reversesId: a.reversesId,
+    reversedById: a.reversedBy?.id || null,
+    createdAt: a.createdAt,
+    createdByName: a.createdBy?.name || null,
+    createdByRole: a.createdBy?.role || null,
+  }
+}
+
+const ADJUSTMENT_INCLUDE = { createdBy: { select: { name: true, role: true } }, reversedBy: { select: { id: true } } }
+
+// Payslip lines with what's been credited back on each.
+function lineSummary(record, adjustments) {
+  return DEDUCTION_LINES.map((line) => {
+    const original = round2(toNumber(record[line]))
+    const credited = creditedOn(adjustments, line)
+    return { line, label: LINE_LABELS[line], original, credited, effective: round2(original - credited), overCredited: credited > original }
+  }).filter((l) => l.original > 0 || l.credited !== 0)
+}
+
+// Loads a payslip the caller may see: their own, or any in their current
+// organization with the payroll module.
+async function loadVisiblePayslip(req) {
+  const { userId, organizationId, role } = req.user
+  const record = await prisma.payrollRecord.findUnique({
+    where: { id: req.params.id },
+    include: { employee: { select: { id: true, name: true, email: true, department: { select: { name: true } } } } },
+  })
+  if (!record) return null
+  const isOwn = record.employeeId === userId
+  if (!isOwn && !(hasModuleAccess(role, "payroll") && record.organizationId === organizationId)) return null
+  return { record, isOwn }
+}
+
+// GET /api/payroll/:id/details — full breakdown, the attendance days behind
+// the deductions, and the adjustment history.
+async function getPayrollDetails(req, res, next) {
+  try {
+    const visible = await loadVisiblePayslip(req)
+    if (!visible) return res.status(404).json({ error: "Payslip not found" })
+    const { record, isOwn } = visible
+    const monthStart = new Date(Date.UTC(record.year, record.month - 1, 1))
+    const monthEnd = new Date(Date.UTC(record.year, record.month, 1))
+    const [adjustments, days, waived, organization] = await Promise.all([
+      prisma.payrollAdjustment.findMany({ where: { payrollRecordId: record.id }, include: ADJUSTMENT_INCLUDE, orderBy: { createdAt: "asc" } }),
+      prisma.attendanceRecord.findMany({
+        where: {
+          employeeId: record.employeeId,
+          date: { gte: monthStart, lt: monthEnd },
+          OR: [{ status: { in: ["LATE", "ABSENT"] } }, { dayType: { in: ["HALF_DAY", "EARLY_GOING"] } }],
+        },
+        select: {
+          date: true, status: true, dayType: true, dayTypeReason: true, checkInAt: true, checkOutAt: true,
+          scheduledStartAt: true, lateMinutes: true, earlyGoingMinutes: true, deductionDays: true, earlyGoingFine: true,
+        },
+        orderBy: { date: "asc" },
+      }),
+      prisma.attendanceFine.findMany({ where: { employeeId: record.employeeId, date: { gte: monthStart, lt: monthEnd }, waived: true }, select: { date: true } }),
+      prisma.organization.findUnique({ where: { id: record.organizationId }, select: { timezone: true, absentFineAmount: true, lateDeductionAmount: true } }),
+    ])
+    const waivedKeys = new Set(waived.map((w) => w.date.toISOString().slice(0, 10)))
+    const perDay = toNumber(organization?.absentFineAmount)
+    const lateRate = toNumber(organization?.lateDeductionAmount) || 500
+    const attendanceDays = days.map((d) => {
+      const key = d.date.toISOString().slice(0, 10)
+      const shortDay = ["HALF_DAY", "EARLY_GOING"].includes(d.dayType) && ["PRESENT", "LATE"].includes(d.status)
+      const amount = waivedKeys.has(key) ? 0
+        : shortDay ? round2(toNumber(d.deductionDays) * perDay + toNumber(d.earlyGoingFine))
+        : d.status === "LATE" ? lateRate
+        : d.status === "ABSENT" ? perDay
+        : 0
+      return {
+        date: key,
+        status: d.status,
+        dayType: d.dayType,
+        reason: d.dayTypeReason || (d.status === "LATE" ? "Late arrival" : d.status === "ABSENT" ? "Absent" : null),
+        checkInAt: d.checkInAt, checkOutAt: d.checkOutAt, scheduledStartAt: d.scheduledStartAt,
+        lateMinutes: d.lateMinutes, earlyGoingMinutes: d.earlyGoingMinutes,
+        deductionDays: d.deductionDays == null ? null : toNumber(d.deductionDays),
+        amount,
+        waived: waivedKeys.has(key),
+      }
+    })
+    const permission = isOwn && !hasModuleAccess(req.user.role, "payroll")
+      ? { canAdjust: false, requiresOverride: false }
+      : adjustPermission(req.user.role, record.status)
+    // An employee can't adjust their own payslip, whatever their role.
+    if (isOwn) permission.canAdjust = false
+
+    res.json({
+      record: { ...record, bankAccountNumber: undefined },
+      timezone: organization?.timezone || "UTC",
+      lines: lineSummary(record, adjustments),
+      adjustments: adjustments.map(serializeAdjustment),
+      adjusted: adjustments.some((a) => a.type !== "FIELD_EDIT"),
+      attendanceDays,
+      permission,
+      types: Object.entries(ADJUSTMENT_TYPES).map(([key, t]) => ({ key, label: t.label, sign: t.sign, lines: t.lines || null, removesWholeLine: !!t.removesWholeLine })),
+      lineLabels: LINE_LABELS,
+    })
+  } catch (err) {
+    next(err)
+  }
+}
+
+// Applies one adjustment row to a payslip inside a transaction and returns it.
+async function writeAdjustment(tx, { record, adjustments, userId, type, line, amount, originalValue, newValue, reason, finalizedOverride, reversesId }) {
+  const nextAdjustmentTotal = round2(adjustmentTotalOf(adjustments) + amount)
+  const totals = computePayrollTotals({ ...record, adjustmentTotal: nextAdjustmentTotal })
+  const row = await tx.payrollAdjustment.create({
+    data: {
+      organizationId: record.organizationId, payrollRecordId: record.id, employeeId: record.employeeId,
+      type, line, amount, originalValue, newValue,
+      previousNetPay: toNumber(record.netPay), newNetPay: totals.netPay,
+      reason, payslipStatus: record.status, finalizedOverride: !!finalizedOverride, reversesId: reversesId || null, createdById: userId,
+    },
+    include: ADJUSTMENT_INCLUDE,
+  })
+  const updated = await tx.payrollRecord.update({ where: { id: record.id }, data: { adjustmentTotal: nextAdjustmentTotal, ...totals } })
+  return { row, updated }
+}
+
+function checkAdjustAccess(req, record) {
+  const { role, userId } = req.user
+  if (record.employeeId === userId) return { status: 403, error: "You can't adjust your own payslip" }
+  const permission = adjustPermission(role, record.status)
+  if (!permission.canAdjust) {
+    return {
+      status: 403,
+      error: record.status === "PAID"
+        ? "This payslip is finalized (paid). Only the CEO can change it, through the finalized-payslip override."
+        : record.status === "PENDING_APPROVAL"
+          ? "This payslip was submitted for approval — only an Admin or the CEO can adjust it now."
+          : "You don't have permission to adjust payslips",
+    }
+  }
+  if (permission.requiresOverride && req.body?.confirmFinalized !== true) {
+    return { status: 409, code: "FINALIZED", error: "This payslip is finalized (paid). Confirm the finalized-payslip override to record a change." }
+  }
+  return null
+}
+
+// POST /api/payroll/:id/adjustments  { type, line?, amount?, reason, confirmFinalized? }
+async function createPayrollAdjustment(req, res, next) {
+  try {
+    const { organizationId, userId } = req.user
+    const type = String(req.body?.type || "")
+    const def = ADJUSTMENT_TYPES[type]
+    if (!def) return res.status(400).json({ error: `type must be one of: ${Object.keys(ADJUSTMENT_TYPES).join(", ")}` })
+    const reason = cleanText(req.body?.reason, 500)
+    if (!reason) return res.status(400).json({ error: "A reason is required for every payroll adjustment" })
+
+    const result = await prisma.$transaction(async (tx) => {
+      const record = await tx.payrollRecord.findFirst({ where: { id: req.params.id, organizationId } })
+      if (!record) return { status: 404, error: "Payroll record not found" }
+      const denied = checkAdjustAccess(req, record)
+      if (denied) return denied
+      const adjustments = await tx.payrollAdjustment.findMany({ where: { payrollRecordId: record.id } })
+
+      let line = def.lines ? String(req.body?.line || "") : def.defaultLine
+      if (def.lines && !def.lines.includes(line)) return { status: 400, error: `Pick which line to adjust: ${def.lines.map((l) => LINE_LABELS[l]).join(", ")}` }
+
+      let amount
+      let originalValue = null
+      let newValue = null
+      if (def.lines) {
+        const original = round2(toNumber(record[line]))
+        const remaining = round2(original - creditedOn(adjustments, line))
+        if (remaining <= 0) return { status: 400, error: `${LINE_LABELS[line]} on this payslip is already ${original > 0 ? "fully removed" : "zero"}` }
+        if (def.removesWholeLine) {
+          amount = remaining
+        } else {
+          amount = Number(req.body?.amount)
+          if (!Number.isFinite(amount) || amount <= 0) return { status: 400, error: "Amount must be a positive number" }
+          amount = round2(amount)
+          if (amount > remaining) return { status: 400, error: `You can credit at most ${remaining.toLocaleString()} back on ${LINE_LABELS[line]}` }
+        }
+        originalValue = remaining
+        newValue = round2(remaining - amount)
+      } else {
+        const raw = Number(req.body?.amount)
+        if (!Number.isFinite(raw) || raw === 0 || Math.abs(raw) > MAX_ADJUSTMENT) return { status: 400, error: "Amount must be a non-zero number" }
+        if (def.sign !== 0 && raw < 0) return { status: 400, error: "Enter the amount as a positive number" }
+        amount = round2(def.sign === 0 ? raw : raw * def.sign)
+        const before = adjustmentTotalOf(adjustments)
+        originalValue = before
+        newValue = round2(before + amount)
+      }
+
+      const { row, updated } = await writeAdjustment(tx, {
+        record, adjustments, userId, type, line, amount, originalValue, newValue, reason,
+        finalizedOverride: record.status === "PAID",
+      })
+      return { row, updated, record }
+    })
+    if (result.error) return res.status(result.status).json({ error: result.error, code: result.code })
+
+    const { row, updated, record } = result
+    logAudit({
+      organizationId, actorId: userId, action: "payroll.adjusted", targetType: "PayrollRecord", targetId: record.id,
+      note: `${record.month}/${record.year} ${ADJUSTMENT_TYPES[type].label}${row.line ? ` (${LINE_LABELS[row.line] || row.line})` : ""} ${toNumber(row.amount) > 0 ? "+" : ""}${toNumber(row.amount)} — net ${toNumber(row.previousNetPay)} → ${toNumber(row.newNetPay)}${row.finalizedOverride ? " [finalized override]" : ""} — ${reason}`,
+    })
+    if (record.status !== "DRAFT") {
+      createNotification({
+        organizationId, recipientId: record.employeeId, createdById: userId, type: "INFO",
+        title: "Payslip adjusted",
+        message: `${ADJUSTMENT_TYPES[type].label}: ${toNumber(row.amount) > 0 ? "+" : "−"}PKR ${Math.abs(toNumber(row.amount)).toLocaleString()} — ${reason}`,
+        link: "/payroll/me",
+      }).catch(() => {})
+    }
+    res.status(201).json({ adjustment: serializeAdjustment(row), record: { ...updated, bankAccountNumber: undefined } })
+  } catch (err) {
+    next(err)
+  }
+}
+
+// POST /api/payroll/:id/adjustments/:adjustmentId/reverse  { reason, confirmFinalized? }
+// Undoes an adjustment by adding the opposite one — the original row stays
+// in the history.
+async function reversePayrollAdjustment(req, res, next) {
+  try {
+    const { organizationId, userId } = req.user
+    const reason = cleanText(req.body?.reason, 500)
+    if (!reason) return res.status(400).json({ error: "A reason is required to reverse an adjustment" })
+
+    const result = await prisma.$transaction(async (tx) => {
+      const record = await tx.payrollRecord.findFirst({ where: { id: req.params.id, organizationId } })
+      if (!record) return { status: 404, error: "Payroll record not found" }
+      const denied = checkAdjustAccess(req, record)
+      if (denied) return denied
+      const adjustments = await tx.payrollAdjustment.findMany({ where: { payrollRecordId: record.id }, include: { reversedBy: { select: { id: true } } } })
+      const target = adjustments.find((a) => a.id === req.params.adjustmentId)
+      if (!target) return { status: 404, error: "Adjustment not found" }
+      if (target.type === "FIELD_EDIT") return { status: 400, error: "Payslip edits are changed from the Edit panel, not reversed" }
+      if (target.type === "REVERSAL") return { status: 400, error: "A reversal can't be reversed — add a new adjustment instead" }
+      if (target.reversedBy) return { status: 409, error: "This adjustment was already reversed" }
+      const amount = round2(-toNumber(target.amount))
+      const before = target.line && DEDUCTION_LINES.includes(target.line)
+        ? round2(toNumber(record[target.line]) - creditedOn(adjustments, target.line))
+        : adjustmentTotalOf(adjustments)
+      const after = target.line && DEDUCTION_LINES.includes(target.line) ? round2(before - amount) : round2(before + amount)
+      const { row, updated } = await writeAdjustment(tx, {
+        record, adjustments, userId, type: "REVERSAL", line: target.line, amount, originalValue: before, newValue: after,
+        reason, finalizedOverride: record.status === "PAID", reversesId: target.id,
+      })
+      return { row, updated, record }
+    })
+    if (result.error) return res.status(result.status).json({ error: result.error, code: result.code })
+
+    logAudit({
+      organizationId, actorId: userId, action: "payroll.adjustment_reversed", targetType: "PayrollRecord", targetId: result.record.id,
+      note: `${result.record.month}/${result.record.year} reversal ${toNumber(result.row.amount)} — net ${toNumber(result.row.previousNetPay)} → ${toNumber(result.row.newNetPay)} — ${reason}`,
+    })
+    res.status(201).json({ adjustment: serializeAdjustment(result.row), record: { ...result.updated, bankAccountNumber: undefined } })
   } catch (err) {
     next(err)
   }
@@ -883,6 +1278,9 @@ module.exports = {
   getPayrollSummary,
   myPayroll,
   updatePayroll,
+  getPayrollDetails,
+  createPayrollAdjustment,
+  reversePayrollAdjustment,
   createEmployeePayslip,
   applyTaxToMonth,
   downloadPayslipPdf,

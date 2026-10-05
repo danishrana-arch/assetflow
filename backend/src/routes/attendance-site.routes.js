@@ -6,6 +6,8 @@ const {
   createSite,
   updateSite,
   assignEmployees,
+  listSiteAdminCandidates,
+  setSiteAdmins,
   verifySiteLocation,
   deleteSite,
 } = require("../controllers/attendance-site.controller")
@@ -23,5 +25,8 @@ router.post("/", createSite)
 router.patch("/:id", updateSite)
 router.delete("/:id", deleteSite)
 router.put("/:id/employees", noStore, assignEmployees)
+// Site Admin / Project Manager assignment — ADMIN/CEO only (checked inside).
+router.get("/site-admin-candidates", noStore, listSiteAdminCandidates)
+router.put("/:id/admins", noStore, setSiteAdmins)
 
 module.exports = router

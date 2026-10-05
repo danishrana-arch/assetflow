@@ -14,6 +14,7 @@ const ASSIGNABLE_ROLES = [
   "EMPLOYEE",
   "DEPARTMENT_HEAD",
   "IT_MANAGER",
+  "SITE_ADMIN",
 ]
 
 // The CEO is capped at three per organization.
@@ -52,6 +53,9 @@ const ROLE_MODULES = {
   MANAGEMENT: ["employees", "projects", "tasks", "attendance", "performance", "reports"],
   DEPARTMENT_HEAD: ["departments", "employees", "attendance", "projects", "tasks", "leave"],
   IT_MANAGER: ["inventory", "assets", "assetAssignments", "assetRequests", "tickets"],
+  // Site Admin / Project Manager: marks attendance only for the employees of
+  // the sites assigned to them (AttendanceSiteAdmin) — not a global admin.
+  SITE_ADMIN: ["siteAttendance"],
   EMPLOYEE: [],
 }
 

@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "react-router-dom"
-import { Building2, Clock3, FolderKanban, MapPin, Pencil, Plus, Save, Trash2, Users, X } from "lucide-react"
+import { Building2, Clock3, FolderKanban, MapPin, Pencil, Plus, Save, Trash2, UserCog, Users, X } from "lucide-react"
 import api from "../api/client"
 import { useAuth } from "../context/AuthContext"
 import { hasModuleAccess } from "../utils/roles"
@@ -59,10 +59,108 @@ function siteToForm(site) {
   }
 }
 
+// Site Admins / Project Managers on one site (PUT /attendance-sites/:id/admins).
+// ADMIN/CEO add or remove them; one person can hold many sites. Picking a
+// plain Employee asks to change their role to Site Admin first.
+function SiteAdminsSection({ site, canAssign }) {
+  const queryClient = useQueryClient()
+  const [adding, setAdding] = useState("")
+  const [error, setError] = useState("")
+  const admins = Array.isArray(site.siteAdmins) ? site.siteAdmins : []
+
+  const { data: candidates = [] } = useQuery({
+    queryKey: ["site-admin-candidates", site.organizationId],
+    queryFn: () => api.get("/attendance-sites/site-admin-candidates", { params: { organizationId: site.organizationId } }).then((r) => r.data),
+    enabled: canAssign,
+    staleTime: 60000,
+  })
+
+  const save = useMutation({
+    mutationFn: ({ userIds, convertEmployees }) => api.put(`/attendance-sites/${site.id}/admins`, { userIds, convertEmployees }).then((r) => r.data),
+    onSuccess: () => {
+      setAdding(""); setError("")
+      queryClient.invalidateQueries({ queryKey: ["attendance-sites"] })
+      queryClient.invalidateQueries({ queryKey: ["site-admin-candidates"] })
+    },
+    onError: (err) => setError(err.response?.data?.error || "Couldn't update Site Admins"),
+  })
+
+  function add(userId) {
+    const person = candidates.find((c) => c.id === userId)
+    if (!person) return
+    let convertEmployees = false
+    if (person.role === "EMPLOYEE") {
+      if (!window.confirm(`${person.name} is an Employee. Change their role to Site Admin / Project Manager and assign them to ${site.name}?\n\nThey will be able to mark attendance only for this site's employees.`)) { setAdding(""); return }
+      convertEmployees = true
+    }
+    save.mutate({ userIds: [...admins.map((a) => a.id), userId], convertEmployees })
+  }
+
+  function remove(admin) {
+    if (!window.confirm(`Remove ${admin.name} as Site Admin of ${site.name}? Their past attendance actions stay in the history.`)) return
+    save.mutate({ userIds: admins.filter((a) => a.id !== admin.id).map((a) => a.id) })
+  }
+
+  const assignedIds = new Set(admins.map((a) => a.id))
+  const options = candidates.filter((c) => !assignedIds.has(c.id))
+
+  return (
+    <div className="mt-4">
+      <p className="mb-2 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted"><UserCog size={12} /> Site Admins / Project Managers</p>
+      <div className="flex flex-wrap items-center gap-1.5">
+        {admins.map((admin) => (
+          <span key={admin.id} className="inline-flex items-center gap-1 rounded-full bg-chip-blue-bg px-2.5 py-1 text-xs font-medium text-chip-blue-fg">
+            {admin.name}
+            {admin.role !== "SITE_ADMIN" && <span className="text-[9px] uppercase opacity-80" title="This person no longer has the Site Admin role, so this assignment has no effect">(not a Site Admin)</span>}
+            {canAssign && (
+              <button type="button" onClick={() => remove(admin)} disabled={save.isPending} className="rounded-full p-0.5 hover:bg-black/10 disabled:opacity-50" aria-label={`Remove ${admin.name}`}>
+                <X size={11} />
+              </button>
+            )}
+          </span>
+        ))}
+        {!admins.length && <span className="text-xs text-muted-2">No Site Admin yet.</span>}
+        {canAssign && (
+          <select
+            value={adding}
+            onChange={(e) => { setAdding(e.target.value); if (e.target.value) add(e.target.value) }}
+            disabled={save.isPending}
+            className="field h-8 w-auto py-1 text-xs"
+            aria-label={`Add a Site Admin to ${site.name}`}
+          >
+            <option value="">+ Add Site Admin…</option>
+            {options.filter((c) => c.role === "SITE_ADMIN").length > 0 && (
+              <optgroup label="Site Admins">
+                {options.filter((c) => c.role === "SITE_ADMIN").map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}{c.siteCount ? ` · ${c.siteCount} site${c.siteCount === 1 ? "" : "s"}` : ""}</option>
+                ))}
+              </optgroup>
+            )}
+            {options.filter((c) => c.role === "EMPLOYEE").length > 0 && (
+              <optgroup label="Employees (role will change to Site Admin)">
+                {options.filter((c) => c.role === "EMPLOYEE").map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </optgroup>
+            )}
+          </select>
+        )}
+      </div>
+      {canAssign && (
+        <p className="mt-2 text-[10px] text-muted-2">
+          A Site Admin marks check-in, check-out and absence for this site's employees (for workers without the app) from Site Attendance. They get no other admin access.
+          To add someone new, create them on <Link to="/employees" className="font-semibold text-accent hover:underline">Employees</Link> with the Site Admin role.
+        </p>
+      )}
+      {error && <p className="mt-1.5 text-xs text-danger">{error}</p>}
+    </div>
+  )
+}
+
 export default function AttendanceSites() {
   const { user, organization, organizations } = useAuth()
   const queryClient = useQueryClient()
   const canManage = hasModuleAccess(user?.role, "attendance")
+  // Granting Site Admin power is ADMIN/CEO only (same rule as the API).
+  const canAssignSiteAdmins = ["ADMIN", "CEO"].includes(user?.role)
   // Can pick which company a site belongs to: CEO / ADMIN with more than one
   // accessible company (the list already follows the company hierarchy).
   const isMainCompanyAdmin = ["ADMIN", "CEO"].includes(user?.role) && (organizations || []).length > 1
@@ -265,6 +363,7 @@ export default function AttendanceSites() {
                   )}
                   {(site.employees || []).length > 0 && <p className="mt-2 text-[10px] text-muted-2">These employees can only check in from inside this site. Work from home is disabled for them, and a check-in from outside is marked Absent with their location recorded.</p>}
                 </div>
+                <SiteAdminsSection site={site} canAssign={canAssignSiteAdmins} />
               </div>
             )
           })}

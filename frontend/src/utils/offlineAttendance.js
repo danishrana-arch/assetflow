@@ -64,7 +64,7 @@ export function readCachedAssignedSites() {
 // tagged per user and only ever synced by its owner).
 export function clearAttendanceCaches() {
   try {
-    ;[ATTENDANCE_CACHE_KEY, SITES_CACHE_KEY, ...LEGACY_CACHE_KEYS].forEach((k) => localStorage.removeItem(k))
+    ;[ATTENDANCE_CACHE_KEY, SITES_CACHE_KEY, ...LEGACY_CACHE_KEYS, "assetflow_site_admin_rosters_v1", "assetflow_site_admin_rejected_v1"].forEach((k) => localStorage.removeItem(k))
   } catch {}
 }
 
@@ -187,14 +187,113 @@ async function readWholeQueue() {
   }
 }
 
-// The current user's queued events only. Events queued before owners were
-// recorded (no ownerUserId) are kept as before — they can only have come
-// from the single user this device had then.
-export async function getOfflineAttendanceQueue() {
+// Site Admin actions (marking other workers' attendance) share the same
+// queue/store, tagged kind "SITE_ADMIN", and sync to their own endpoint.
+export const SITE_ADMIN_KIND = "SITE_ADMIN"
+
+async function ownQueue() {
   const userId = currentAttendanceUserId()
   const all = await readWholeQueue()
   if (!userId) return []
   return all.filter((item) => !item.ownerUserId || item.ownerUserId === userId)
+}
+
+// The current user's own queued check-ins/outs only. Events queued before
+// owners were recorded (no ownerUserId) are kept as before — they can only
+// have come from the single user this device had then.
+export async function getOfflineAttendanceQueue() {
+  return (await ownQueue()).filter((item) => item.kind !== SITE_ADMIN_KIND)
+}
+
+// The current Site Admin's queued actions for other workers.
+export async function getSiteAdminQueue() {
+  return (await ownQueue()).filter((item) => item.kind === SITE_ADMIN_KIND)
+}
+
+export async function queueSiteAdminAction(action) {
+  return queueOfflineAttendance({ ...action, kind: SITE_ADMIN_KIND, localRecordedAt: action.localRecordedAt || new Date().toISOString() })
+}
+
+// Rejections the server says can't succeed on retry (e.g. the site was
+// unassigned, the worker was already checked in) are dropped from the queue
+// and kept here so the Site Admin can see what didn't go through.
+const SITE_ADMIN_REJECTED_KEY = "assetflow_site_admin_rejected_v1"
+
+export function readSiteAdminRejections() {
+  const userId = currentAttendanceUserId()
+  try {
+    const value = JSON.parse(localStorage.getItem(SITE_ADMIN_REJECTED_KEY) || "null")
+    return value && value.userId === userId && Array.isArray(value.items) ? value.items : []
+  } catch {
+    return []
+  }
+}
+
+export function clearSiteAdminRejections() {
+  try { localStorage.removeItem(SITE_ADMIN_REJECTED_KEY) } catch {}
+}
+
+function rememberSiteAdminRejections(items) {
+  const userId = currentAttendanceUserId()
+  if (!userId || !items.length) return
+  try {
+    const merged = [...items, ...readSiteAdminRejections()].slice(0, 50)
+    localStorage.setItem(SITE_ADMIN_REJECTED_KEY, JSON.stringify({ userId, items: merged }))
+  } catch {}
+}
+
+let siteAdminSyncRunning = null
+
+// Sends the queued Site Admin actions (oldest first). The server is
+// authoritative and idempotent per clientEventId, so a retry after a dropped
+// response never creates a second check-in.
+export async function syncSiteAdminQueue(api) {
+  if (siteAdminSyncRunning) return siteAdminSyncRunning
+  siteAdminSyncRunning = (async () => {
+    if (!navigator.onLine) return { synced: 0, duplicates: 0, rejected: [], remaining: (await getSiteAdminQueue()).length }
+    const items = (await getSiteAdminQueue()).sort((a, b) => String(a.localRecordedAt).localeCompare(String(b.localRecordedAt)))
+    if (!items.length) return { synced: 0, duplicates: 0, rejected: [], remaining: 0 }
+    const response = await api.post("/site-admin/sync", { events: items.slice(0, 200) })
+    const data = response.data || {}
+    const rejected = data.rejected || []
+    const retryIds = new Set(rejected.filter((x) => !x.permanent).map((x) => x.clientEventId).filter(Boolean))
+    const sent = items.slice(0, 200)
+    await clearOfflineAttendanceEvents(sent.map((x) => x.clientEventId).filter((id) => !retryIds.has(id)))
+    const byId = new Map(sent.map((x) => [x.clientEventId, x]))
+    rememberSiteAdminRejections(
+      rejected.filter((x) => x.permanent).map((x) => ({ ...x, event: byId.get(x.clientEventId) || null, at: new Date().toISOString() }))
+    )
+    return { ...data, remaining: (await getSiteAdminQueue()).length }
+  })()
+  try {
+    return await siteAdminSyncRunning
+  } finally {
+    siteAdminSyncRunning = null
+  }
+}
+
+// Last-known roster per site, so the Site Admin can keep working offline.
+const SITE_ROSTER_CACHE_KEY = "assetflow_site_admin_rosters_v1"
+
+export function cacheSiteAdminData(key, data) {
+  const userId = currentAttendanceUserId()
+  if (!userId) return
+  try {
+    const value = JSON.parse(localStorage.getItem(SITE_ROSTER_CACHE_KEY) || "null")
+    const entries = value && value.userId === userId ? value.entries || {} : {}
+    entries[key] = { savedAt: new Date().toISOString(), data }
+    localStorage.setItem(SITE_ROSTER_CACHE_KEY, JSON.stringify({ userId, entries }))
+  } catch {}
+}
+
+export function readCachedSiteAdminData(key) {
+  const userId = currentAttendanceUserId()
+  try {
+    const value = JSON.parse(localStorage.getItem(SITE_ROSTER_CACHE_KEY) || "null")
+    return value && value.userId === userId ? value.entries?.[key]?.data : undefined
+  } catch {
+    return undefined
+  }
 }
 
 export async function clearOfflineAttendanceEvents(clientEventIds) {

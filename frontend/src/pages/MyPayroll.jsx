@@ -266,12 +266,30 @@ export default function MyPayroll() {
                 <Line label="Tax" detail={Number(record.taxPercent) ? `${Number(record.taxPercent)}%` : null} amount={record.tax} tone="deduct" />
                 <Line label="Absent" detail={leaveDetail || null} amount={record.absentDeduction} tone="deduct" />
                 <Line label="Late" detail={record.lateDays ? plural(record.lateDays, "day") : null} amount={record.lateDeduction} tone="deduct" />
+                {Number(record.halfDayDeduction) > 0 && (
+                  <Line label="Half days" detail={plural(record.halfDays, "day")} amount={record.halfDayDeduction} tone="deduct" />
+                )}
+                {Number(record.earlyGoingFine) > 0 && (
+                  <Line label="Early going" detail={plural(record.earlyGoingDays, "day")} amount={record.earlyGoingFine} tone="deduct" />
+                )}
                 {Number(record.fineDeduction) > 0 && <Line label="Attendance fines" amount={record.fineDeduction} tone="deduct" />}
                 {Number(record.otherDeduction) > 0 && <Line label="Other deductions" amount={record.otherDeduction} tone="deduct" />}
                 {Number(record.terminationDeduction) > 0 && (
                   <Line label="Termination deduction" amount={record.terminationDeduction} tone="deduct" />
                 )}
               </div>
+
+              {Number(record.adjustmentTotal) !== 0 && (
+                <div className="mt-3 border-t border-border pt-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-2">Adjustments</p>
+                  <Line
+                    label="Payroll adjustments"
+                    detail="made by HR / Admin after generation"
+                    amount={Math.abs(Number(record.adjustmentTotal))}
+                    tone={Number(record.adjustmentTotal) > 0 ? "add" : "deduct"}
+                  />
+                </div>
+              )}
 
               <div className="mt-3 flex items-baseline justify-between border-t border-border pt-3">
                 <span className="text-sm font-semibold text-ink">Total</span>

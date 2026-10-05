@@ -9,13 +9,16 @@ function round2(n) {
   return Math.round(n * 100) / 100
 }
 
-// `deductions` is the total of every deduction line; netPay never goes
-// below zero.
+// `deductions` is the total of every deduction line; manual payroll
+// adjustments (adjustmentTotal, signed) are applied on top; netPay never
+// goes below zero.
 function computePayrollTotals(r) {
   const deductions = round2(
     toNumber(r.tax) +
       toNumber(r.absentDeduction) +
       toNumber(r.lateDeduction) +
+      toNumber(r.halfDayDeduction) +
+      toNumber(r.earlyGoingFine) +
       toNumber(r.fineDeduction) +
       toNumber(r.otherDeduction) +
       toNumber(r.terminationDeduction)
@@ -26,7 +29,7 @@ function computePayrollTotals(r) {
     toNumber(r.performanceBonus) +
     toNumber(r.expenseReimbursement) +
     toNumber(r.terminationSettlement)
-  return { deductions, netPay: Math.max(0, round2(additions - deductions)) }
+  return { deductions, netPay: Math.max(0, round2(additions - deductions + toNumber(r.adjustmentTotal))) }
 }
 
 // Sum of an employee's performance-review bonuses assigned to a payroll month.

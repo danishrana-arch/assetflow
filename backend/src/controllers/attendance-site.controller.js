@@ -4,6 +4,8 @@ const prisma = require("../lib/prisma")
 const { distanceMeters } = require("../utils/geo")
 const { accessibleOrganizationIds, hasCrossCompanyAccess, loadHomeOrganization } = require("../utils/organization")
 const { normalizeBoundary, siteDistance, polygonCentroid, polygonPerimeterMeters, polygonAreaSqMeters } = require("../utils/site-geofence")
+const { logAudit } = require("../utils/audit")
+const { createNotification } = require("../utils/notifications")
 
 const MANAGEMENT = ["ADMIN", "CEO", "HR", "MANAGEMENT", "DEPARTMENT_HEAD"]
 
@@ -78,7 +80,12 @@ async function listSites(req, res, next) {
             GROUP BY x.eid
           ) b
           JOIN "User" eu ON eu.id = b.eid AND eu.status = 'ACTIVE'
-        ), '[]'::json) AS "employees"
+        ), '[]'::json) AS "employees",
+        COALESCE((
+          SELECT json_agg(json_build_object('id', au.id, 'name', au.name, 'role', au.role::text, 'status', au.status::text) ORDER BY au.name)
+          FROM "AttendanceSiteAdmin" sa JOIN "User" au ON au.id = sa."userId"
+          WHERE sa."siteId" = s.id
+        ), '[]'::json) AS "siteAdmins"
       FROM "AttendanceSite" s
       JOIN "Organization" o ON o.id = s."organizationId"
       LEFT JOIN "User" u ON u.id = s."managerId"
@@ -317,6 +324,99 @@ async function assignEmployees(req, res, next) {
   }
 }
 
+// Assigning Site Admins is ADMIN/CEO only (it grants attendance-marking
+// power), within the same organization scope as site management.
+const SITE_ADMIN_ASSIGNERS = ["ADMIN", "CEO"]
+
+// GET /attendance-sites/site-admin-candidates?organizationId=
+// Active Site Admins of the organization, plus regular employees who can be
+// made one (role EMPLOYEE). Other roles are never offered — a manager/HR
+// user is not silently downgraded.
+async function listSiteAdminCandidates(req, res, next) {
+  try {
+    if (!SITE_ADMIN_ASSIGNERS.includes(req.user.role)) return res.status(403).json({ error: "Only an Admin or CEO can assign Site Admins" })
+    const scope = await getOrganizationScope(req)
+    if (!scope) return res.status(404).json({ error: "Organization not found" })
+    const organizationId = String(req.query.organizationId || req.user.organizationId)
+    if (!canUseOrganization(scope, organizationId)) return res.status(403).json({ error: "You do not have access to this organization" })
+    const users = await prisma.user.findMany({
+      where: { organizationId, status: "ACTIVE", role: { in: ["SITE_ADMIN", "EMPLOYEE"] } },
+      select: { id: true, name: true, role: true, designation: true, _count: { select: { siteAdminAssignments: true } } },
+      orderBy: [{ role: "desc" }, { name: "asc" }],
+    })
+    res.json(users.map((u) => ({ id: u.id, name: u.name, role: u.role, designation: u.designation, siteCount: u._count.siteAdminAssignments })))
+  } catch (err) {
+    next(err)
+  }
+}
+
+// PUT /attendance-sites/:id/admins  { userIds: [], convertEmployees?: boolean }
+// Replaces the site's Site Admins. A user with role EMPLOYEE is changed to
+// SITE_ADMIN only when convertEmployees is true (the UI asks first). The
+// same person can hold many sites — this never creates a second user.
+async function setSiteAdmins(req, res, next) {
+  try {
+    if (!SITE_ADMIN_ASSIGNERS.includes(req.user.role)) return res.status(403).json({ error: "Only an Admin or CEO can assign Site Admins" })
+    const scope = await getOrganizationScope(req)
+    if (!scope) return res.status(404).json({ error: "Organization not found" })
+    const site = await prisma.attendanceSite.findFirst({
+      where: { id: req.params.id, organizationId: { in: scope.organizationIds } },
+      select: { id: true, name: true, organizationId: true, active: true },
+    })
+    if (!site) return res.status(404).json({ error: "Site not found" })
+
+    const requested = [...new Set((Array.isArray(req.body?.userIds) ? req.body.userIds : []).map(String))]
+    const users = requested.length
+      ? await prisma.user.findMany({ where: { id: { in: requested } }, select: { id: true, name: true, role: true, status: true, organizationId: true } })
+      : []
+    const byId = new Map(users.map((u) => [u.id, u]))
+    const toConvert = []
+    for (const id of requested) {
+      const u = byId.get(id)
+      if (!u || u.organizationId !== site.organizationId) return res.status(400).json({ error: "Every Site Admin must belong to this site's organization" })
+      if (u.status !== "ACTIVE") return res.status(400).json({ error: `${u.name} is not an active employee` })
+      if (u.role === "EMPLOYEE") {
+        if (req.body?.convertEmployees !== true) return res.status(409).json({ error: `${u.name} is an Employee — confirm changing their role to Site Admin`, code: "CONVERT_REQUIRED", userId: u.id })
+        toConvert.push(u)
+      } else if (u.role !== "SITE_ADMIN") {
+        return res.status(400).json({ error: `${u.name} is ${u.role.replace("_", " ")} — only Site Admin users (or Employees made Site Admin) can be assigned` })
+      }
+    }
+
+    const before = await prisma.attendanceSiteAdmin.findMany({ where: { siteId: site.id }, include: { user: { select: { name: true } } } })
+    const beforeIds = new Set(before.map((b) => b.userId))
+    await prisma.$transaction(async (tx) => {
+      for (const u of toConvert) await tx.user.update({ where: { id: u.id }, data: { role: "SITE_ADMIN" } })
+      await tx.attendanceSiteAdmin.deleteMany({ where: { siteId: site.id, userId: { notIn: requested } } })
+      for (const userId of requested) {
+        if (beforeIds.has(userId)) continue
+        await tx.attendanceSiteAdmin.create({ data: { siteId: site.id, userId, organizationId: site.organizationId, assignedById: req.user.userId } })
+      }
+    })
+
+    const added = requested.filter((id) => !beforeIds.has(id))
+    const removed = before.filter((b) => !requested.includes(b.userId))
+    for (const u of toConvert) {
+      logAudit({ organizationId: site.organizationId, actorId: req.user.userId, action: "employee.role_changed", targetType: "User", targetId: u.id, note: `${u.name}: EMPLOYEE → SITE_ADMIN (assigned to ${site.name})` })
+    }
+    if (added.length || removed.length) {
+      logAudit({
+        organizationId: site.organizationId, actorId: req.user.userId, action: "attendance_site.admins_changed", targetType: "AttendanceSite", targetId: site.id,
+        note: `${site.name}: ${added.length ? `added ${added.map((id) => byId.get(id)?.name).join(", ")}` : ""}${added.length && removed.length ? "; " : ""}${removed.length ? `removed ${removed.map((r) => r.user?.name).join(", ")}` : ""}`,
+      })
+    }
+    for (const id of added) {
+      createNotification({
+        organizationId: site.organizationId, recipientId: id, createdById: req.user.userId, type: "INFO",
+        title: "Site assigned", message: `You can now mark attendance at ${site.name}.`, link: "/site-attendance",
+      }).catch(() => {})
+    }
+    res.json({ siteId: site.id, siteAdmins: requested.length, added: added.length, removed: removed.length, converted: toConvert.length })
+  } catch (err) {
+    next(err)
+  }
+}
+
 async function verifySiteLocation(req, res, next) {
   try {
     const { siteId, latitude, longitude } = req.body
@@ -438,6 +538,8 @@ module.exports = {
   createSite,
   updateSite,
   assignEmployees,
+  listSiteAdminCandidates,
+  setSiteAdmins,
   verifySiteLocation,
   deleteSite,
 }

@@ -24,6 +24,7 @@ import {
   FileSpreadsheet,
   FileBarChart,
   Receipt,
+  HardHat,
 } from "lucide-react"
 import { isManagement, hasModuleAccess } from "./roles"
 
@@ -134,6 +135,11 @@ export function navGroups(user) {
   }
 
   return keep([
+    // Site Admin / Project Manager: their site workspace first, then the
+    // same self-service pages as any employee.
+    ...(role === "SITE_ADMIN"
+      ? [{ label: "Sites", items: [{ to: "/site-attendance", label: "Site Attendance", icon: HardHat }] }]
+      : []),
     {
       label: "Overview",
       items: [

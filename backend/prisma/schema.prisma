@@ -25,6 +25,16 @@ model Organization {
   // Flat fine per ABSENT day, set from the Attendance page. Null = the
   // salary-banded rate (same as unpaid leave).
   absentFineAmount          Decimal?                  @db.Decimal(10, 2)
+  // Attendance & payroll policy (Attendance page → Policy & fines), applied by
+  // services/attendance-engine.js. An hours value of 0 turns that rule off.
+  // Late by >= lateHalfDayThresholdHours → HALF_DAY; worked < halfDayMinimumHours
+  // → HALF_DAY; worked <= earlyGoingThresholdHours → EARLY_GOING (+ fine).
+  // A half day deducts halfDayDeductionPercent of the day rate (absentFineAmount).
+  lateHalfDayThresholdHours Decimal                   @default(3) @db.Decimal(4, 2)
+  halfDayMinimumHours       Decimal                   @default(4.5) @db.Decimal(4, 2)
+  earlyGoingThresholdHours  Decimal                   @default(2) @db.Decimal(4, 2)
+  earlyGoingFineAmount      Decimal                   @default(0) @db.Decimal(10, 2)
+  halfDayDeductionPercent   Decimal                   @default(50) @db.Decimal(5, 2)
   payrollAccountNumber      String?
   payrollBankName           String?
   workingHoursPerDay        Decimal                   @default(8) @db.Decimal(4, 2)
@@ -228,8 +238,13 @@ model User {
   AttendanceAnomaly_AttendanceAnomaly_resolvedByIdToUser       AttendanceAnomaly[]       @relation("AttendanceAnomaly_resolvedByIdToUser")
   AttendanceCorrection_AttendanceCorrection_employeeIdToUser   AttendanceCorrection[]    @relation("AttendanceCorrection_employeeIdToUser")
   AttendanceCorrection_AttendanceCorrection_reviewedByIdToUser AttendanceCorrection[]    @relation("AttendanceCorrection_reviewedByIdToUser")
-  AttendancePresenceEvent                                      AttendancePresenceEvent[]
-  attendanceRecords                                            AttendanceRecord[]        @relation("AttendanceOf")
+  AttendancePresenceEvent                                      AttendancePresenceEvent[] @relation("PresenceEventEmployee")
+  presenceEventsActed                                          AttendancePresenceEvent[] @relation("PresenceEventActor")
+  attendanceCorrectionsRequested                               AttendanceCorrection[]    @relation("AttendanceCorrectionRequestedBy")
+  siteAdminAssignments                                         AttendanceSiteAdmin[]     @relation("SiteAdminOf")
+  siteAdminAssignmentsGiven                                    AttendanceSiteAdmin[]     @relation("SiteAdminAssignedBy")
+  payrollAdjustmentsMade                                       PayrollAdjustment[]       @relation("PayrollAdjustmentBy")
+  attendanceRecords                                           AttendanceRecord[]        @relation("AttendanceOf")
   attendanceMarkedBy                                           AttendanceRecord[]        @relation("AttendanceMarkedBy")
   attendanceNotes                                              AttendanceNote[]          @relation("AttendanceNoteEmployee")
   attendanceFines                                              AttendanceFine[]          @relation("AttendanceFineEmployee")
@@ -767,6 +782,24 @@ model AttendanceRecord {
   // HR/ADMIN/CEO marked the employee's note as seen (Attendance page).
   employeeNoteSeenAt      DateTime?
   employeeNoteSeenById    String?
+  // Result of the attendance engine (services/attendance-engine.js), written
+  // on every check-in/out, admin mark, correction, biometric sync and site
+  // admin action. Payroll reads these instead of recalculating. A null
+  // dayType = no half-day/early-going rule applied (full day, leave,
+  // absent, non-workday, or not checked out yet).
+  scheduledStartAt        DateTime?
+  scheduledEndAt          DateTime?
+  lateMinutes             Int?
+  earlyGoingMinutes       Int?
+  dayType                 AttendanceDayType?
+  dayTypeReason           String?
+  // Days deducted for a HALF_DAY / EARLY_GOING day (halfDayDeductionPercent / 100).
+  deductionDays           Decimal?                  @db.Decimal(4, 2)
+  // Early-going fine snapshot (Organization.earlyGoingFineAmount at evaluation).
+  earlyGoingFine          Decimal?                  @db.Decimal(10, 2)
+  evaluatedAt             DateTime?
+  // Site of the check-out when it differs from the check-in site (siteId).
+  checkOutSiteId          String?
   AttendanceAnomaly       AttendanceAnomaly[]
   AttendanceCorrection    AttendanceCorrection[]
   AttendancePresenceEvent AttendancePresenceEvent[]
@@ -868,12 +901,58 @@ model PayrollRecord {
   terminationSettlement Decimal       @default(0) @db.Decimal(12, 2)
   terminationDeduction  Decimal       @default(0) @db.Decimal(12, 2)
   terminationNote       String?
+  // From the attendance engine: days marked HALF_DAY / EARLY_GOING, their
+  // day-rate deduction, and the early-going fines.
+  halfDays              Int           @default(0)
+  halfDayDeduction      Decimal       @default(0) @db.Decimal(12, 2)
+  earlyGoingDays        Int           @default(0)
+  earlyGoingFine        Decimal       @default(0) @db.Decimal(12, 2)
+  // Sum of PayrollAdjustment.amount (excluding FIELD_EDIT rows, which are
+  // already in the edited field). Added to net pay; + raises it.
+  adjustmentTotal       Decimal       @default(0) @db.Decimal(12, 2)
+  adjustments           PayrollAdjustment[]
   approvedBy            User?         @relation("PayrollApprovedBy", fields: [approvedById], references: [id])
   employee              User          @relation("PayrollOf", fields: [employeeId], references: [id], onDelete: Cascade)
   generatedBy           User?         @relation("PayrollGeneratedBy", fields: [generatedById], references: [id])
 
   @@unique([employeeId, month, year])
   @@index([organizationId, year, month])
+}
+
+// Audit trail of every manual change to a payslip after it's generated.
+// Rows are never edited or deleted (except with the payslip itself); undoing
+// one adds a REVERSAL row. `amount` is the effect on net pay (+ raises it).
+// type: REMOVE_FINE / REDUCE_FINE / ADD_FINE / ADD_DEDUCTION /
+// REMOVE_DEDUCTION / ALLOWANCE / ATTENDANCE_CORRECTION / OTHER / REVERSAL
+// (summed into PayrollRecord.adjustmentTotal), or FIELD_EDIT (a direct edit
+// of bonus / tax % / other deduction / termination — logged, not summed).
+model PayrollAdjustment {
+  id                String             @id @default(cuid())
+  organizationId    String
+  payrollRecordId   String
+  employeeId        String
+  type              String
+  // Payslip line the change is about (e.g. lateDeduction, bonus), if any.
+  line              String?
+  amount            Decimal            @db.Decimal(12, 2)
+  originalValue     Decimal?           @db.Decimal(12, 2)
+  newValue          Decimal?           @db.Decimal(12, 2)
+  previousNetPay    Decimal            @db.Decimal(12, 2)
+  newNetPay         Decimal            @db.Decimal(12, 2)
+  reason            String
+  payslipStatus     PayrollStatus
+  // Made on a PAID (finalized) payslip through the explicit CEO override.
+  finalizedOverride Boolean            @default(false)
+  reversesId        String?            @unique
+  createdById       String?
+  createdAt         DateTime           @default(now())
+  payrollRecord     PayrollRecord      @relation(fields: [payrollRecordId], references: [id], onDelete: Cascade)
+  createdBy         User?              @relation("PayrollAdjustmentBy", fields: [createdById], references: [id], onDelete: SetNull)
+  reverses          PayrollAdjustment? @relation("PayrollAdjustmentReversal", fields: [reversesId], references: [id], onDelete: SetNull)
+  reversedBy        PayrollAdjustment? @relation("PayrollAdjustmentReversal")
+
+  @@index([payrollRecordId, createdAt])
+  @@index([organizationId, createdAt])
 }
 
 // An office expense an employee paid out of pocket (e.g. tea/supplies
@@ -967,8 +1046,12 @@ model AttendanceCorrection {
   status                                       String            @default("PENDING")
   reviewedById                                 String?
   reviewNote                                   String?
+  // Who sent the request when it isn't the employee (a Site Admin for a
+  // worker without a phone). Null = the employee themselves.
+  requestedById                                String?
   createdAt                                    DateTime          @default(now())
   updatedAt                                    DateTime          @default(now())
+  requestedBy                                  User?             @relation("AttendanceCorrectionRequestedBy", fields: [requestedById], references: [id], onDelete: SetNull)
   AttendanceRecord                             AttendanceRecord? @relation(fields: [attendanceId], references: [id], onUpdate: NoAction)
   User_AttendanceCorrection_employeeIdToUser   User              @relation("AttendanceCorrection_employeeIdToUser", fields: [employeeId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   Organization                                 Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade, onUpdate: NoAction)
@@ -992,14 +1075,20 @@ model AttendancePresenceEvent {
   inside           Boolean?
   clientEventId    String?
   metadata         Json?
+  // Who performed the action when it wasn't the employee (Site Admin
+  // attendance marking), and the site's project at that moment.
+  actorId          String?
+  projectId        String?
   createdAt        DateTime          @default(now())
   AttendanceRecord AttendanceRecord? @relation(fields: [attendanceId], references: [id], onUpdate: NoAction)
-  User             User              @relation(fields: [employeeId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  User             User              @relation("PresenceEventEmployee", fields: [employeeId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  actor            User?             @relation("PresenceEventActor", fields: [actorId], references: [id], onDelete: SetNull)
   Organization     Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   AttendanceSite   AttendanceSite?   @relation(fields: [siteId], references: [id], onUpdate: NoAction)
 
   @@index([attendanceId, recordedAt], map: "AttendancePresenceEvent_attendance_recorded_idx")
   @@index([employeeId, recordedAt], map: "AttendancePresenceEvent_employee_recorded_idx")
+  @@index([actorId, recordedAt])
 }
 
 model AttendanceSite {
@@ -1030,6 +1119,7 @@ model AttendanceSite {
   Organization            Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   Project                 Project?                  @relation(fields: [projectId], references: [id], onUpdate: NoAction)
   AttendanceSiteEmployee  AttendanceSiteEmployee[]
+  siteAdmins              AttendanceSiteAdmin[]
 
   @@index([organizationId, active])
   @@index([projectId])
@@ -1045,6 +1135,25 @@ model AttendanceSiteEmployee {
 
   @@id([siteId, employeeId])
   @@index([employeeId])
+}
+
+// Site Admin / Project Manager (UserRole SITE_ADMIN) assigned to a site. One
+// person can hold many sites and a site can have several. Assigned by
+// ADMIN/CEO from Attendance Sites; the role only marks attendance for the
+// employees of the sites listed here.
+model AttendanceSiteAdmin {
+  siteId         String
+  userId         String
+  organizationId String
+  assignedById   String?
+  createdAt      DateTime       @default(now())
+  site           AttendanceSite @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  user           User           @relation("SiteAdminOf", fields: [userId], references: [id], onDelete: Cascade)
+  assignedBy     User?          @relation("SiteAdminAssignedBy", fields: [assignedById], references: [id], onDelete: SetNull)
+
+  @@id([siteId, userId])
+  @@index([userId])
+  @@index([organizationId])
 }
 
 model AttendanceSyncEvent {
@@ -1124,6 +1233,7 @@ enum UserRole {
   MANAGEMENT
   DEPARTMENT_HEAD
   IT_MANAGER
+  SITE_ADMIN
 }
 
 enum EmployeeFormSubmissionStatus {
@@ -1221,6 +1331,12 @@ enum AttendanceStatus {
   ABSENT
   LEAVE
   LATE
+}
+
+enum AttendanceDayType {
+  FULL_DAY
+  HALF_DAY
+  EARLY_GOING
 }
 
 enum AttendanceSource {

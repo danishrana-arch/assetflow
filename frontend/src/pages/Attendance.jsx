@@ -51,6 +51,10 @@ const FILTERS = {
   timeoff: { label: "Time off", match: (r) => r.status === "LEAVE" },
   // Not a summary tile — kept for the dashboard's "Present" deep link.
   present: { label: "Present", match: attended },
+  // Advance Filter only (attendance engine results / who marked it).
+  halfday: { label: "Half day", match: (r) => attended(r) && r.dayType === "HALF_DAY" },
+  earlygoing: { label: "Early going", match: (r) => attended(r) && r.dayType === "EARLY_GOING" },
+  siteadmin: { label: "Marked by Site Admin", match: (r) => r.markedByRole === "SITE_ADMIN" },
 }
 
 const SUMMARIES = [
@@ -268,6 +272,61 @@ function StatusMenu({ row, canWrite, onMark }) {
   )
 }
 
+const DAY_RESULT = {
+  HALF_DAY: { label: "Half day", tone: "orange" },
+  EARLY_GOING: { label: "Early going", tone: "pink" },
+}
+
+// Half day / early going result from the attendance engine, with the
+// details behind it (scheduled start, actual check-in, late duration, early
+// departure, deduction) in a popover.
+function DayResult({ row, timeZone }) {
+  const pop = useAnchoredPopover(280)
+  const cfg = DAY_RESULT[row.dayType]
+  if (!cfg) return null
+  const fine = row.fine
+  const lines = [
+    ["Scheduled start", row.scheduledStartAt ? formatTime(row.scheduledStartAt, { timeZone }) : "—"],
+    ["Actual check-in", row.checkInAt ? formatTime(row.checkInAt, { timeZone }) : "—"],
+    ["Late by", row.lateDurationMinutes ? formatDuration(row.lateDurationMinutes) : "On time"],
+    ...(row.checkOutAt ? [["Check-out", formatTime(row.checkOutAt, { timeZone })], ["Left early by", row.earlyGoingMinutes ? formatDuration(row.earlyGoingMinutes) : "—"]] : []),
+    ["Deduction", `${row.deductionDays ?? 0.5} day${fine ? ` · ${pkr(fine.waived ? 0 : fine.autoAmount)}` : ""}`],
+    ...(row.earlyGoingFineAmount ? [["Early-going fine", pkr(row.earlyGoingFineAmount)]] : []),
+  ]
+  return (
+    <>
+      <button ref={pop.anchorRef} type="button" onClick={pop.toggle} aria-expanded={pop.open} className="mt-1 inline-flex items-center gap-1 hover:opacity-80" title={row.dayTypeReason || cfg.label}>
+        <StatusPill tone={cfg.tone}>{cfg.label}</StatusPill>
+      </button>
+      {pop.open && createPortal(
+        <div ref={pop.panelRef} style={pop.panelStyle} className="rounded-2xl border border-border bg-surface p-3 text-xs shadow-pop">
+          <p className="font-semibold text-ink">{cfg.label} — {row.name}</p>
+          {row.dayTypeReason && <p className="mt-1 text-muted">{row.dayTypeReason}</p>}
+          <dl className="mt-2 space-y-1">
+            {lines.map(([k, v]) => (
+              <div key={k} className="flex justify-between gap-3"><dt className="text-muted">{k}</dt><dd className="font-semibold text-ink">{v}</dd></div>
+            ))}
+          </dl>
+          {fine?.waived && <p className="mt-2 text-[10px] text-chip-green-fg">The automatic deduction for this day is waived.</p>}
+          {fine?.locked && <p className="mt-1 text-[10px] text-muted-2">This month's payslip is {fine.payslipStatus === "PAID" ? "paid" : "submitted"} — change it with a payroll adjustment.</p>}
+          {!fine && <p className="mt-2 text-[10px] text-muted-2">Deduction amounts are visible to HR, Admin and CEO.</p>}
+        </div>,
+        document.body
+      )}
+    </>
+  )
+}
+
+// "Marked by Ali · Site Admin · Lahore Site" for attendance a Site Admin marked.
+function SiteAdminMark({ row }) {
+  if (row.markedByRole !== "SITE_ADMIN") return null
+  return (
+    <p className="mb-1 text-[11px] text-chip-blue-fg">
+      Marked by {row.markedByName} · Site Admin{row.siteName ? ` · ${row.siteName}` : ""}{row.checkOutSiteName ? ` → out at ${row.checkOutSiteName}` : ""}
+    </p>
+  )
+}
+
 const NOTE_MAX = 500
 
 // The employee's own note / extra hours claimed (from My Attendance), and a
@@ -323,41 +382,58 @@ function pkr(n) {
   return `PKR ${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}`
 }
 
-// "Fines" header panel (HR/ADMIN/CEO): one late fine and one absent fine
-// per day for the whole organization (PUT /attendance/fine-settings).
-// Payroll applies them to every LATE / ABSENT day; draft payslips are
-// refreshed on save. Shows what today's late/absent rows add up to.
-function FineSettings({ settings, lateCount, absentCount, dayTotal, onSaved }) {
+// The half-day / early-going rules (services/attendance-engine.js on the
+// server), edited in the same panel as the fines: [key, label, unit, help].
+const POLICY_FIELDS = [
+  ["lateHalfDayThresholdHours", "Late-arrival half day", "hours late", "Arriving this many hours (or more) after the scheduled start makes the day a half day."],
+  ["halfDayMinimumHours", "Minimum for a full day", "hours worked", "Working less than this (break counted as office time) makes the day a half day."],
+  ["halfDayDeductionPercent", "Half-day deduction", "% of day rate", "How much of the day rate (the absent fine / day above) a half day deducts."],
+  ["earlyGoingThresholdHours", "Very short day", "hours or less", "Working this little is recorded as Early going: half-day deduction plus the fine below."],
+  ["earlyGoingFineAmount", "Early-going fine", "PKR", "Added on top of the half-day deduction for an Early-going day. 0 = no fine."],
+]
+
+// "Policy & fines" header panel (HR/ADMIN/CEO): the late and absent fine per
+// day plus the half-day / early-going policy, for the whole organization
+// (PUT /attendance/fine-settings). Payroll applies them; draft payslips are
+// refreshed on save. Shows what today's rows add up to. Set any hours to 0
+// to turn that rule off.
+function FineSettings({ settings, lateCount, absentCount, halfDayCount, dayTotal, onSaved }) {
   const pop = usePopover()
-  const [form, setForm] = useState({ lateFine: "", absentFine: "" })
+  const [form, setForm] = useState({})
+  const fromSettings = () => ({
+    lateFine: String(settings.lateFine ?? ""),
+    absentFine: settings.absentFine == null ? "" : String(settings.absentFine),
+    ...Object.fromEntries(POLICY_FIELDS.map(([key]) => [key, settings[key] == null ? "" : String(settings[key])])),
+  })
   const save = useMutation({
-    mutationFn: () => api.put("/attendance/fine-settings", { lateFine: form.lateFine, absentFine: form.absentFine }).then((r) => r.data),
+    mutationFn: () => api.put("/attendance/fine-settings", form).then((r) => r.data),
     onSuccess: (res) => onSaved(res),
   })
   function toggle() {
     if (!pop.open) {
-      setForm({ lateFine: String(settings.lateFine ?? ""), absentFine: settings.absentFine == null ? "" : String(settings.absentFine) })
+      setForm(fromSettings())
       save.reset()
     }
     pop.setOpen((v) => !v)
   }
-  const unchanged =
-    String(form.lateFine) === String(settings.lateFine ?? "") &&
-    String(form.absentFine) === (settings.absentFine == null ? "" : String(settings.absentFine))
+  const initial = fromSettings()
+  const unchanged = Object.keys(initial).every((k) => String(form[k] ?? "") === initial[k])
+  const dayRate = Number(form.absentFine) || 0
+  const halfDayAmount = (dayRate * (Number(form.halfDayDeductionPercent) || 0)) / 100
 
   return (
     <div className="relative" ref={pop.ref}>
-      <button type="button" onClick={toggle} className="pill-secondary flex items-center gap-1.5 px-4 py-2.5 text-sm" aria-expanded={pop.open} title="Late and absent fine amounts">
-        <Wallet size={15} /> Fines
+      <button type="button" onClick={toggle} className="pill-secondary flex items-center gap-1.5 px-4 py-2.5 text-sm" aria-expanded={pop.open} title="Fines and the half-day / early-going policy">
+        <Wallet size={15} /> Policy &amp; fines
         {dayTotal > 0 && <span className="rounded-full bg-chip-pink-bg px-2 py-0.5 text-[10px] font-semibold text-chip-pink-fg">{pkr(dayTotal)}</span>}
       </button>
       {pop.open && (
         <form
           onSubmit={(e) => { e.preventDefault(); save.mutate() }}
-          className="absolute right-0 z-30 mt-2 w-80 rounded-2xl border border-border bg-surface p-4 shadow-pop"
+          className="absolute right-0 z-30 mt-2 max-h-[80vh] w-[min(24rem,calc(100vw-2rem))] overflow-y-auto rounded-2xl border border-border bg-surface p-4 shadow-pop"
         >
-          <p className="text-sm font-semibold text-ink">Attendance fines</p>
-          <p className="mt-0.5 text-xs text-muted">Deducted in payroll for every late or absent day.</p>
+          <p className="text-sm font-semibold text-ink">Attendance &amp; payroll policy</p>
+          <p className="mt-0.5 text-xs text-muted">Deducted in payroll for late, absent, half and very short days.</p>
 
           <div className="mt-3 grid grid-cols-2 gap-2">
             <label className="text-[11px] font-medium text-muted">
@@ -376,13 +452,39 @@ function FineSettings({ settings, lateCount, absentCount, dayTotal, onSaved }) {
             </label>
           </div>
           <p className="mt-1.5 text-[10px] leading-4 text-muted-2">
-            The absent fine is also charged per unpaid-leave day (half for a half day). Leave it empty for no absent fine.
+            The absent fine is also charged per unpaid-leave day (half for a half day) and is the day rate the half-day deduction uses. Leave it empty for no absent fine.
           </p>
+
+          <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-muted">Half day &amp; early going</p>
+          <div className="mt-2 space-y-2.5">
+            {POLICY_FIELDS.map(([key, label, unit, help]) => (
+              <label key={key} className="block text-[11px] font-medium text-muted">
+                <span className="flex items-center justify-between gap-2">
+                  <span className="text-ink">{label}</span>
+                  <span className="relative w-32">
+                    <input
+                      type="number" min="0" step="any" required value={form[key] ?? ""}
+                      onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
+                      className="field py-1.5 pr-14 text-right text-xs"
+                    />
+                    <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[9px] text-muted-2">{unit}</span>
+                  </span>
+                </span>
+                <span className="mt-0.5 block text-[10px] leading-4 text-muted-2">{help}</span>
+              </label>
+            ))}
+          </div>
+          <p className="mt-2 rounded-xl bg-surface-2 px-3 py-2 text-[11px] text-muted">
+            {dayRate > 0
+              ? <>A half day deducts <span className="font-semibold text-ink">{pkr(halfDayAmount)}</span>{Number(form.earlyGoingFineAmount) > 0 && <> · an early-going day <span className="font-semibold text-ink">{pkr(halfDayAmount + Number(form.earlyGoingFineAmount))}</span></>}. A half day replaces that day's late fine. Hours set to 0 turn a rule off.</>
+              : <>No absent fine / day is set, so half days are recorded but deduct nothing{Number(form.earlyGoingFineAmount) > 0 ? " (the early-going fine still applies)" : ""}.</>}
+          </p>
+          <p className="mt-1.5 text-[10px] leading-4 text-muted-2">Policy changes apply to attendance recorded from now on; days already recorded keep their result.</p>
 
           <div className="mt-3 rounded-xl bg-surface-2 px-3 py-2 text-xs text-ink">
             <p className="font-semibold">This day</p>
             <p className="mt-0.5 text-muted">
-              {lateCount} late · {absentCount} absent — <span className="font-semibold text-chip-pink-fg">{pkr(dayTotal)}</span> in fines
+              {lateCount} late · {absentCount} absent · {halfDayCount} half / short — <span className="font-semibold text-chip-pink-fg">{pkr(dayTotal)}</span> in deductions
             </p>
           </div>
 
@@ -395,7 +497,7 @@ function FineSettings({ settings, lateCount, absentCount, dayTotal, onSaved }) {
           <div className="mt-3 flex justify-end gap-2">
             <button type="button" onClick={() => pop.setOpen(false)} className="pill-secondary px-3 py-1.5 text-xs">Close</button>
             <button type="submit" disabled={save.isPending || unchanged || form.lateFine === ""} className="pill-accent px-3 py-1.5 text-xs disabled:opacity-50">
-              {save.isPending ? "Saving…" : "Save fines"}
+              {save.isPending ? "Saving…" : "Save policy"}
             </button>
           </div>
           <p className="mt-2 text-[10px] text-muted-2">Submitted or paid payslips keep the amounts they were issued with.</p>
@@ -810,6 +912,7 @@ export default function Attendance() {
               settings={fineSettings}
               lateCount={rows.filter((r) => r.fine?.autoType === "LATE").length}
               absentCount={rows.filter((r) => r.fine?.autoType === "ABSENT").length}
+              halfDayCount={rows.filter((r) => r.fine?.autoType === "HALF_DAY" || r.fine?.autoType === "EARLY_GOING").length}
               dayTotal={dayFineTotal}
               onSaved={onFineSaved}
             />
@@ -948,8 +1051,9 @@ export default function Attendance() {
                       {c.requestedCheckOutAt && <>Out <span className="font-medium text-ink">{formatTime(c.requestedCheckOutAt, { timeZone })}</span>{c.checkOutAt ? ` (was ${formatTime(c.checkOutAt, { timeZone })})` : ""}</>}
                     </p>
                     <p className="mt-0.5 text-xs text-muted-2">“{c.reason}”</p>
+                    {c.requestedByName && <p className="mt-0.5 text-[11px] text-chip-blue-fg">Requested by {c.requestedByName}{c.requestedByRole === "SITE_ADMIN" ? " (Site Admin)" : ""}</p>}
                   </div>
-                  {canResolve && c.employeeId !== user?.id ? (
+                  {canResolve && c.employeeId !== user?.id && c.requestedById !== user?.id ? (
                     <div className="flex items-center gap-2">
                       <button type="button" disabled={busy} onClick={() => decideCorrection(c, "APPROVED")} className="pill-accent flex items-center gap-1 px-3 py-1.5 text-xs disabled:opacity-50">
                         <Check size={12} /> Approve
@@ -959,7 +1063,7 @@ export default function Attendance() {
                       </button>
                     </div>
                   ) : (
-                    <span className="text-[11px] text-muted-2">{c.employeeId === user?.id ? "Your own request" : "View only"}</span>
+                    <span className="text-[11px] text-muted-2">{c.employeeId === user?.id || c.requestedById === user?.id ? "Your own request" : "View only"}</span>
                   )}
                 </div>
               )
@@ -1077,14 +1181,18 @@ export default function Attendance() {
                 <Link to={`/employees/${row.employeeId}`} className="block truncate text-sm font-semibold text-ink hover:text-accent hover:underline" title={`Open ${row.name}'s profile`}>{row.name}</Link>
                 <p className="truncate text-xs text-muted">{row.department || "—"}</p>
               </div>
-              <StatusMenu row={row} canWrite={canWrite} onMark={setLocalStatus} />
+              <div className="flex flex-col items-end">
+                <StatusMenu row={row} canWrite={canWrite} onMark={setLocalStatus} />
+                <DayResult row={row} timeZone={timeZone} />
+              </div>
             </div>
             <div className="mt-3 space-y-2">
               <ClockInOut row={row} date={data?.date || date} timeZone={timeZone} />
               <WorkingTimeProgress workingMinutes={row.workingMinutes} checkInAt={row.checkInAt} checkOutAt={row.checkOutAt} expectedMinutes={row.expectedWorkingMinutes} date={data?.date || date} className="!max-w-none" />
               <LocationFlag row={row} />
-              {(row.note || canNote || row.employeeNote || row.extraMinutes) && (
+              {(row.note || canNote || row.employeeNote || row.extraMinutes || row.markedByRole === "SITE_ADMIN") && (
                 <div className="border-t border-border pt-2">
+                  <SiteAdminMark row={row} />
                   <EmployeeNoteLine row={row} date={date} canReview={canNote} onChanged={onEmployeeNoteChanged} />
                   <NoteCell row={row} date={date} canEdit={canNote} onSaved={onNoteSaved} />
                 </div>
@@ -1131,11 +1239,13 @@ export default function Attendance() {
                     </td>
                     <td className="px-4 py-3"><LocationFlag row={row} /></td>
                     <td className="w-[250px] px-4 py-3">
+                      <SiteAdminMark row={row} />
                       <EmployeeNoteLine row={row} date={date} canReview={canNote} onChanged={onEmployeeNoteChanged} />
                       <NoteCell row={row} date={date} canEdit={canNote} onSaved={onNoteSaved} />
                     </td>
                     <td className="px-4 py-3">
                       <StatusMenu row={row} canWrite={canWrite} onMark={setLocalStatus} />
+                      <div><DayResult row={row} timeZone={timeZone} /></div>
                     </td>                  </tr>
                 ))}
                 {visibleRows.length === 0 && !isLoading && (

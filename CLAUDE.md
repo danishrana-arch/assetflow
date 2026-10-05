@@ -2349,6 +2349,80 @@ column is kept but no longer read; the endpoint `PATCH
 - Verified: 49/49 rule unit checks + 80/80 end-to-end API checks on a
   temporary org (deleted afterwards — 0 rows left), frontend build passes.
 
+## Post-module addition: attendance engine, half-day policy, SITE_ADMIN, payroll adjustments (2026-10-05)
+
+Migration `20261005160000_attendance_policy_site_admin_payroll_adjustments`
+(additive) — **deployed**; JS client regenerated (engine DLL hit the usual
+EPERM). **Restart the backend** — the running one has the old client.
+
+- **Attendance engine** (`backend/src/services/attendance-engine.js`): the one
+  place schedule / late minutes / early-going minutes / worked time / half-day
+  / early-going / deduction are calculated (site timezone if the record has a
+  site, else org; break counted as office time — a check-out inside the break
+  counts to the break end; night shifts; holidays, non-workdays and approved
+  half-day leave skip the rules). `applyAttendanceEvaluation()` runs after
+  every write: self check-in, offline sync (after the commit), biometric
+  sync, admin mark/save, correction approval, auto check-out, Site Admin
+  actions. Result stored on `AttendanceRecord` (`dayType` FULL_DAY/HALF_DAY/
+  EARLY_GOING, `dayTypeReason`, `lateMinutes`, `earlyGoingMinutes`,
+  `scheduledStart/EndAt`, `deductionDays`, `earlyGoingFine`). Payroll reads
+  these. Present/Late is re-derived unless `autoFlagged`. Existing records are
+  not back-filled. The checkout job uses the engine's `scheduleFor`.
+- **Policy** (Organization): `lateHalfDayThresholdHours` 3, `halfDayMinimumHours`
+  4.5, `earlyGoingThresholdHours` 2, `earlyGoingFineAmount` 0,
+  `halfDayDeductionPercent` 50 (of the day rate = `absentFineAmount`; not set
+  = half days deduct nothing). 0 hours = rule off. Edited in the Attendance
+  page's "Policy & fines" panel (`PUT /attendance/fine-settings`, ADMIN/CEO/HR).
+  Rules: ≥ threshold late → HALF_DAY; worked ≤ early threshold → EARLY_GOING
+  (half-day deduction + fine); worked < minimum → HALF_DAY. A half/short day
+  replaces that day's late fine; `AttendanceFine.waived` also waives it.
+- **Payroll**: `PayrollRecord.halfDays/halfDayDeduction/earlyGoingDays/
+  earlyGoingFine/adjustmentTotal`; net = additions − deductions +
+  adjustmentTotal. New `PayrollAdjustment` audit table. `GET /payroll/:id/details`
+  (breakdown, attendance days, history), `POST /payroll/:id/adjustments`
+  (REMOVE/REDUCE_FINE, ADD_FINE, ADD/REMOVE_DEDUCTION, ALLOWANCE,
+  ATTENDANCE_CORRECTION, OTHER; reason required; can't credit more than a line
+  holds), `POST …/:adjId/reverse` (adds a REVERSAL row). Who: DRAFT —
+  ADMIN/HR/CEO; PENDING_APPROVAL — ADMIN/CEO; PAID (finalized) — CEO only with
+  `confirmFinalized`, flagged `finalizedOverride`, employee notified. Never
+  your own payslip. Direct draft edits (PATCH) are logged as FIELD_EDIT rows.
+  No new status enum: DRAFT = generated, PAID = finalized, "Adjusted" is a
+  badge from the adjustment count. Removing a fine never changes attendance.
+  UI: Payroll → Details drawer (`components/PayrollDetailsDrawer.jsx`); new
+  lines on Payroll, My Payslips, PDF, preview.
+- **SITE_ADMIN role** ("Site Admin / Project Manager", module `siteAttendance`
+  only — no employees/payroll/settings/org attendance). `AttendanceSiteAdmin`
+  (site↔user, many-to-many). ADMIN/CEO assign on Attendance Sites
+  (`PUT /attendance-sites/:id/admins`; an EMPLOYEE is converted only after
+  confirm; other roles refused). Workspace `/site-attendance`
+  (`pages/SiteAttendance.jsx`, eager-loaded for offline): site/project picker,
+  search, big Check In / Check Out / Mark absent, correction request, history
+  tab. API `/api/site-admin/*` (SITE_ADMIN only): every action re-checks
+  assignment, active site, non-completed project, same org, and that the
+  worker is on the site (direct or project member). The site geofence applies
+  to the Site Admin's device (STRICT blocks, WARNING flags + anomaly, DISABLED
+  skips). Online and offline go through `AttendanceSyncEvent` (idempotent by
+  clientEventId; offline ≤ 7 days old, original time kept); duplicates and
+  second check-ins are refused. Each action → `AttendancePresenceEvent`
+  (`actorId`, `projectId`, metadata: previous/new status, source, device,
+  site/project names) + audit log; history is read from these, so it survives
+  moving sites or site deletion. Corrections are requests
+  (`AttendanceCorrection.requestedById`) approved by attendance `canUpdate`
+  roles (HR is read-only by default). Check-out at another site →
+  `AttendanceRecord.checkOutSiteId`. Offline queue: same IndexedDB store, kind
+  `SITE_ADMIN`, `syncSiteAdminQueue` (permanent rejections dropped and shown).
+- **HR Reports**: attendance gains day result / reason / late & early minutes /
+  deductions / marked by (+role) / project / check-out site, status filter
+  Full/Half/Early going, project, marked-by, "only Site Admin"; new types
+  `payroll-adjustments` and `site-admin-activity`.
+- Verified: 17/17 engine edge cases; 124/124 end-to-end API checks on a
+  temporary backend (:4099) with a throwaway organization (deleted — 0 rows
+  left), covering every case in the request; frontend build passes. The user's
+  dev backend (port 4000) runs the background jobs over every org, including
+  test orgs — keep test dates outside the checkout job's 3-day window.
+- Pre-existing, not changed: `GET /attendance-sites` has no role check (any
+  logged-in user of the org can list sites and their employees).
+
 ## Automated RBAC test run (2026-09-28)
 
 There's no automated test suite in either app (`npm test` isn't

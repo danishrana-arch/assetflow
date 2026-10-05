@@ -11,20 +11,25 @@ const { accessibleOrganizations } = require("../utils/organization")
 // exact same rows as CSV/XLSX — so an export always matches the preview
 // generated with the same filters.
 
-const REPORT_TYPES = ["attendance", "employees", "leave", "late-absence", "anomalies", "headcount"]
-const DATE_REQUIRED = new Set(["attendance", "leave", "late-absence", "anomalies"])
+const REPORT_TYPES = ["attendance", "employees", "leave", "late-absence", "anomalies", "headcount", "payroll-adjustments", "site-admin-activity"]
+const DATE_REQUIRED = new Set(["attendance", "leave", "late-absence", "anomalies", "payroll-adjustments", "site-admin-activity"])
+// Day results from the attendance engine, accepted as a "status" filter.
+const DAY_TYPE_FILTERS = ["HALF_DAY", "EARLY_GOING", "FULL_DAY"]
+const ATTENDANCE_STATUSES = ["PRESENT", "LATE", "ABSENT", "LEAVE"]
+const DAY_TYPE_LABEL = { FULL_DAY: "Full day", HALF_DAY: "Half day", EARLY_GOING: "Early going" }
 const MAX_RANGE_DAYS = 366
 const PREVIEW_LIMIT = 500
 // Reports with one row per employee per day are shown/exported date by
 // date (one page / one Excel sheet per date), so their preview carries more
 // rows for the frontend to page through.
-const DATE_GROUPED = new Set(["attendance", "late-absence", "anomalies"])
+const DATE_GROUPED = new Set(["attendance", "late-absence", "anomalies", "site-admin-activity"])
 const GROUPED_PREVIEW_LIMIT = 5000
 
 // Row highlight shared by the preview, Excel and print: absent → red,
 // late → yellow. Mirrors the frontend's rowTone().
 function rowTone(row) {
   if (row.status === "ABSENT") return "absent"
+  if (row.dayResult === "Half day" || row.dayResult === "Early going") return "late"
   if (row.status === "LATE" || String(row.late || "").startsWith("Late")) return "late"
   return null
 }
@@ -111,7 +116,7 @@ const EMPLOYEE_SELECT = {
 async function loadOrgSettings(orgIds) {
   const orgs = await prisma.organization.findMany({
     where: { id: { in: orgIds } },
-    select: { id: true, name: true, timezone: true, shiftStartDefault: true, lateThresholdMinutes: true, breakStart: true, breakEnd: true, workingDaysPerWeek: true, workingHoursPerDay: true },
+    select: { id: true, name: true, timezone: true, shiftStartDefault: true, lateThresholdMinutes: true, breakStart: true, breakEnd: true, workingDaysPerWeek: true, workingHoursPerDay: true, absentFineAmount: true },
   })
   return new Map(orgs.map((o) => [o.id, o]))
 }
@@ -120,18 +125,26 @@ async function attendanceRows(orgIds, q, range, { onlyLateAbsent = false } = {})
   const [employees, orgMap, sites] = await Promise.all([
     prisma.user.findMany({ where: employeeWhere(orgIds, q), select: EMPLOYEE_SELECT, orderBy: { name: "asc" } }),
     loadOrgSettings(orgIds),
-    prisma.attendanceSite.findMany({ where: { organizationId: { in: orgIds } }, select: { id: true, name: true } }),
+    prisma.attendanceSite.findMany({ where: { organizationId: { in: orgIds } }, select: { id: true, name: true, projectId: true, Project: { select: { name: true } } } }),
   ])
   const empById = new Map(employees.map((e) => [e.id, e]))
   const siteName = new Map(sites.map((s) => [s.id, s.name]))
+  const siteProject = new Map(sites.map((s) => [s.id, s.Project?.name || ""]))
+  const projectSiteIds = q.projectId ? sites.filter((s) => s.projectId === String(q.projectId)).map((s) => s.id) : null
+  const status = String(q.status || "")
   const records = await prisma.attendanceRecord.findMany({
     where: {
       organizationId: { in: orgIds },
       employeeId: { in: [...empById.keys()] },
       date: { gte: range.from, lt: range.endExclusive },
       ...(q.siteId ? { siteId: String(q.siteId) } : {}),
-      ...(!onlyLateAbsent && q.status ? { status: String(q.status) } : {}),
+      ...(projectSiteIds ? { siteId: { in: q.siteId ? projectSiteIds.filter((id) => id === String(q.siteId)) : projectSiteIds } } : {}),
+      ...(!onlyLateAbsent && ATTENDANCE_STATUSES.includes(status) ? { status } : {}),
+      ...(!onlyLateAbsent && DAY_TYPE_FILTERS.includes(status) ? { dayType: status } : {}),
+      ...(q.markedById ? { markedById: String(q.markedById) } : {}),
+      ...(q.siteAdminOnly === "1" ? { markedBy: { role: "SITE_ADMIN" } } : {}),
     },
+    include: { markedBy: { select: { name: true, role: true } } },
     orderBy: [{ date: "asc" }],
   })
   const anomalies = records.length
@@ -150,7 +163,9 @@ async function attendanceRows(orgIds, q, range, { onlyLateAbsent = false } = {})
     const tz = getTimeZone(org?.timezone)
     const late = lateByMinutes(r, emp, org, tz)
     const isLate = r.status === "LATE" || late != null
-    if (onlyLateAbsent && !(isLate || r.status === "ABSENT")) continue
+    const shortDay = ["HALF_DAY", "EARLY_GOING"].includes(r.dayType) && ["PRESENT", "LATE"].includes(r.status)
+    if (onlyLateAbsent && !(isLate || r.status === "ABSENT" || shortDay)) continue
+    const perDay = Number(org?.absentFineAmount || 0)
     const worked = r.workingMinutes ?? calculateWorkingMinutes(r.checkInAt, r.checkOutAt, org)
     const brk = breakOverlapMinutes(r.checkInAt, r.checkOutAt, tz, org?.breakStart, org?.breakEnd)
     rows.push({
@@ -167,7 +182,19 @@ async function attendanceRows(orgIds, q, range, { onlyLateAbsent = false } = {})
       status: r.status,
       late: isLate ? (late != null ? `Late by ${late} min` : "Late") : "On time",
       site: (r.siteId && siteName.get(r.siteId)) || "",
+      project: (r.siteId && siteProject.get(r.siteId)) || "",
+      checkOutSite: (r.checkOutSiteId && siteName.get(r.checkOutSiteId)) || "",
       locationMode: r.locationMode,
+      dayResult: r.dayType ? DAY_TYPE_LABEL[r.dayType] : "",
+      dayReason: r.dayTypeReason || "",
+      lateMinutes: r.lateMinutes ?? "",
+      earlyGoingMinutes: r.earlyGoingMinutes ?? "",
+      halfDayDeduction: shortDay ? Math.round(Number(r.deductionDays || 0) * perDay * 100) / 100 : "",
+      deductionDays: shortDay && r.deductionDays != null ? Number(r.deductionDays) : "",
+      earlyGoingFine: shortDay && r.earlyGoingFine != null && Number(r.earlyGoingFine) > 0 ? Number(r.earlyGoingFine) : "",
+      markedBy: r.markedBy?.name || "",
+      markedByRole: r.markedBy?.role === "SITE_ADMIN" ? "Site Admin" : r.markedBy?.role ? r.markedBy.role.replace("_", " ") : "",
+      source: r.source === "BIOMETRIC" ? "Biometric" : r.markedById && r.markedById === r.employeeId ? "Self" : r.markedById ? "Marked" : "System",
       anomalies: (anomaliesByRecord.get(r.id) || []).join("; "),
     })
   }
@@ -175,7 +202,7 @@ async function attendanceRows(orgIds, q, range, { onlyLateAbsent = false } = {})
   // Late & Absence also counts scheduled workdays with no attendance record
   // at all, excluding org holidays and approved leave — the same "no record
   // means absent" rule the attendance sheet export uses, minus days off.
-  if (onlyLateAbsent && (!q.status || q.status === "ABSENT")) {
+  if (onlyLateAbsent && (!q.status || q.status === "ABSENT") && !q.markedById && q.siteAdminOnly !== "1" && !q.siteId && !q.projectId) {
     const [holidays, leaves] = await Promise.all([
       prisma.holiday.findMany({ where: { organizationId: { in: orgIds }, date: { gte: range.from, lt: range.endExclusive } }, select: { organizationId: true, date: true } }),
       prisma.leaveApplication.findMany({
@@ -199,7 +226,8 @@ async function attendanceRows(orgIds, q, range, { onlyLateAbsent = false } = {})
         rows.push({
           _date: key, employee: emp.name, employeeId: emp.id, organization: org?.name || "", department: emp.department?.name || "",
           date: key, checkIn: "", checkOut: "", worked: "", break: "", status: "ABSENT", late: "No attendance recorded",
-          site: "", locationMode: "", anomalies: "",
+          site: "", project: "", checkOutSite: "", locationMode: "", dayResult: "", dayReason: "", lateMinutes: "", earlyGoingMinutes: "",
+          halfDayDeduction: "", deductionDays: "", earlyGoingFine: "", markedBy: "", markedByRole: "", source: "", anomalies: "",
         })
       }
     }
@@ -209,11 +237,29 @@ async function attendanceRows(orgIds, q, range, { onlyLateAbsent = false } = {})
   const columns = [
     ["employee", "Employee"], ["organization", "Organization"], ["department", "Department"],
     ["date", "Date"], ["checkIn", "Check-in"], ["checkOut", "Check-out"], ["worked", "Worked"], ["break", "Break"],
-    ["status", "Status"], ["late", "Late status"], ["site", "Attendance site"], ["locationMode", "Location mode"], ["anomalies", "Anomalies"],
+    ["status", "Status"], ["late", "Late status"], ["dayResult", "Day result"], ["dayReason", "Reason"],
+    ["lateMinutes", "Late (min)"], ["earlyGoingMinutes", "Early going (min)"], ["deductionDays", "Deduction (days)"],
+    ["halfDayDeduction", "Half-day deduction"], ["earlyGoingFine", "Early-going fine"],
+    ["site", "Attendance site"], ["checkOutSite", "Check-out site"], ["project", "Project"], ["locationMode", "Location mode"],
+    ["markedBy", "Marked by"], ["markedByRole", "Marked by role"], ["source", "Source"], ["anomalies", "Anomalies"],
   ]
   const byStatus = rows.reduce((acc, r) => ({ ...acc, [r.status]: (acc[r.status] || 0) + 1 }), {})
   const lateCount = rows.filter((r) => r.late.startsWith("Late")).length
-  return { columns, rows, summary: { ...byStatus, "Late (by check-in)": lateCount } }
+  const sumOf = (key) => Math.round(rows.reduce((s, r) => s + (Number(r[key]) || 0), 0) * 100) / 100
+  return {
+    columns,
+    rows,
+    summary: {
+      ...byStatus,
+      "Late (by check-in)": lateCount,
+      "Full days": rows.filter((r) => r.dayResult === "Full day").length,
+      "Half days": rows.filter((r) => r.dayResult === "Half day").length,
+      "Early going": rows.filter((r) => r.dayResult === "Early going").length,
+      "Half-day deductions": sumOf("halfDayDeduction"),
+      "Early-going fines": sumOf("earlyGoingFine"),
+      "Marked by Site Admin": rows.filter((r) => r.markedByRole === "Site Admin").length,
+    },
+  }
 }
 
 async function employeeRows(orgIds, q, range) {
@@ -351,6 +397,106 @@ async function headcountRows(orgIds, q, range) {
   return { columns, rows, summary }
 }
 
+const ADJUSTMENT_TYPE_LABEL = {
+  REMOVE_FINE: "Remove fine", REDUCE_FINE: "Reduce fine", ADD_FINE: "Add fine", ADD_DEDUCTION: "Add deduction",
+  REMOVE_DEDUCTION: "Remove / reduce deduction", ALLOWANCE: "Allowance", ATTENDANCE_CORRECTION: "Attendance correction",
+  OTHER: "Other adjustment", REVERSAL: "Reversal", FIELD_EDIT: "Payslip edit",
+}
+
+// Every manual payroll change (adjustments and audited draft edits), by when
+// it was made.
+async function payrollAdjustmentRows(orgIds, q, range) {
+  const adjustments = await prisma.payrollAdjustment.findMany({
+    where: {
+      organizationId: { in: orgIds },
+      createdAt: { gte: range.from, lt: range.endExclusive },
+      ...(q.employeeId ? { employeeId: String(q.employeeId) } : {}),
+      ...(q.departmentId ? { payrollRecord: { employee: { departmentId: String(q.departmentId) } } } : {}),
+    },
+    include: {
+      createdBy: { select: { name: true, role: true } },
+      payrollRecord: { select: { month: true, year: true, employee: { select: { name: true, organization: { select: { name: true } }, department: { select: { name: true } } } } } },
+    },
+    orderBy: { createdAt: "asc" },
+  })
+  const orgMap = await loadOrgSettings(orgIds)
+  const rows = adjustments.map((a) => {
+    const tz = getTimeZone(orgMap.get(a.organizationId)?.timezone)
+    const e = a.payrollRecord?.employee
+    return {
+      employee: e?.name || "", employeeId: a.employeeId, organization: e?.organization?.name || "", department: e?.department?.name || "",
+      payPeriod: a.payrollRecord ? `${a.payrollRecord.year}-${String(a.payrollRecord.month).padStart(2, "0")}` : "",
+      type: ADJUSTMENT_TYPE_LABEL[a.type] || a.type, line: a.line || "",
+      amount: Number(a.amount), originalValue: a.originalValue == null ? "" : Number(a.originalValue), newValue: a.newValue == null ? "" : Number(a.newValue),
+      previousNetPay: Number(a.previousNetPay), newNetPay: Number(a.newNetPay),
+      reason: a.reason, payslipStatus: a.payslipStatus, finalizedOverride: a.finalizedOverride ? "Yes" : "No",
+      changedBy: a.createdBy?.name || "", changedByRole: a.createdBy?.role || "",
+      changedAt: `${fmtDate(a.createdAt)} ${fmtTime(a.createdAt, tz)}`,
+    }
+  })
+  const columns = [
+    ["employee", "Employee"], ["organization", "Organization"], ["department", "Department"], ["payPeriod", "Pay period"],
+    ["type", "Type"], ["line", "Payslip line"], ["amount", "Effect on net pay"], ["originalValue", "Original value"], ["newValue", "New value"],
+    ["previousNetPay", "Net pay before"], ["newNetPay", "Net pay after"], ["reason", "Reason"], ["payslipStatus", "Payslip status"],
+    ["finalizedOverride", "Finalized override"], ["changedBy", "Changed by"], ["changedByRole", "Role"], ["changedAt", "Changed at"],
+  ]
+  const summary = {
+    Adjustments: rows.filter((r) => r.type !== "Payslip edit").length,
+    "Payslip edits": rows.filter((r) => r.type === "Payslip edit").length,
+    "Net effect (adjustments)": Math.round(adjustments.filter((a) => a.type !== "FIELD_EDIT").reduce((s, a) => s + Number(a.amount), 0) * 100) / 100,
+  }
+  return { columns, rows, summary }
+}
+
+// Attendance actions performed by Site Admins (who, where, what, when).
+async function siteAdminActivityRows(orgIds, q, range) {
+  const events = await prisma.attendancePresenceEvent.findMany({
+    where: {
+      organizationId: { in: orgIds },
+      actorId: q.markedById ? String(q.markedById) : { not: null },
+      eventType: { startsWith: "SITE_ADMIN_" },
+      recordedAt: { gte: addDaysUTC(range.from, -1), lt: addDaysUTC(range.endExclusive, 1) },
+      ...(q.siteId ? { siteId: String(q.siteId) } : {}),
+      ...(q.projectId ? { projectId: String(q.projectId) } : {}),
+      ...(q.employeeId ? { employeeId: String(q.employeeId) } : {}),
+    },
+    include: { actor: { select: { name: true } }, AttendanceSite: { select: { name: true, timezone: true } } },
+    orderBy: { recordedAt: "asc" },
+  })
+  const orgMap = await loadOrgSettings(orgIds)
+  const fromKey = fmtDate(range.from)
+  const toKey = fmtDate(range.to)
+  const rows = []
+  for (const e of events) {
+    const org = orgMap.get(e.organizationId)
+    const orgTz = getTimeZone(org?.timezone)
+    const tz = getTimeZone(e.AttendanceSite?.timezone || org?.timezone)
+    const day = new Intl.DateTimeFormat("en-CA", { timeZone: orgTz }).format(e.recordedAt)
+    if (day < fromKey || day > toKey) continue
+    const m = e.metadata || {}
+    rows.push({
+      _date: day, date: day, time: fmtTime(e.recordedAt, tz),
+      siteAdmin: e.actor?.name || m.actorName || "", employee: m.employeeName || "", employeeId: e.employeeId,
+      organization: org?.name || "", site: e.AttendanceSite?.name || m.siteName || "", project: m.projectName || "",
+      action: String(m.action || e.eventType.replace("SITE_ADMIN_", "")).replace("_", " "),
+      previousStatus: m.previousStatus || "", newStatus: m.newStatus || "",
+      checkIn: m.checkInAt ? fmtTime(m.checkInAt, tz) : "", checkOut: m.checkOutAt ? fmtTime(m.checkOutAt, tz) : "",
+      source: m.source === "OFFLINE" ? "Offline (synced)" : "Online",
+      location: e.inside === true ? "Inside site" : e.inside === false ? `Outside (${Math.round(e.distanceMeters || 0)}m)` : "No location",
+      note: m.note || "",
+    })
+  }
+  const columns = [
+    ["date", "Date"], ["time", "Time"], ["siteAdmin", "Site Admin"], ["employee", "Employee"], ["organization", "Organization"],
+    ["site", "Site"], ["project", "Project"], ["action", "Action"], ["previousStatus", "Previous status"], ["newStatus", "New status"],
+    ["checkIn", "Check-in"], ["checkOut", "Check-out"], ["source", "Source"], ["location", "Site Admin location"], ["note", "Note"],
+  ]
+  const summary = rows.reduce((acc, r) => ({ ...acc, [r.action]: (acc[r.action] || 0) + 1 }), {})
+  summary["Site Admins"] = new Set(rows.map((r) => r.siteAdmin)).size
+  summary.Sites = new Set(rows.map((r) => r.site)).size
+  return { columns, rows, summary }
+}
+
 const BUILDERS = {
   attendance: (o, q, r) => attendanceRows(o, q, r),
   "late-absence": (o, q, r) => attendanceRows(o, q, r, { onlyLateAbsent: true }),
@@ -358,10 +504,13 @@ const BUILDERS = {
   leave: leaveRows,
   anomalies: anomalyRows,
   headcount: headcountRows,
+  "payroll-adjustments": payrollAdjustmentRows,
+  "site-admin-activity": siteAdminActivityRows,
 }
 const TITLES = {
   attendance: "Attendance Report", employees: "Employee Report", leave: "Leave Report",
   "late-absence": "Late & Absence Report", anomalies: "Attendance Anomalies Report", headcount: "Headcount Report",
+  "payroll-adjustments": "Payroll Adjustments Report", "site-admin-activity": "Site Admin Activity Report",
 }
 
 // ---------- output ----------
@@ -425,13 +574,22 @@ async function getHrReportOptions(req, res, next) {
   try {
     const organizations = await authorizedOrganizations(req.user.userId, req.user.role)
     const orgIds = organizations.map((o) => o.id)
-    const [departments, employees, sites] = await Promise.all([
+    const [departments, employees, sites, projects] = await Promise.all([
       prisma.department.findMany({ where: { organizationId: { in: orgIds } }, select: { id: true, name: true, organizationId: true }, orderBy: { name: "asc" } }),
-      prisma.user.findMany({ where: { organizationId: { in: orgIds } }, select: { id: true, name: true, departmentId: true, organizationId: true, status: true }, orderBy: { name: "asc" } }),
-      prisma.attendanceSite.findMany({ where: { organizationId: { in: orgIds } }, select: { id: true, name: true, organizationId: true }, orderBy: { name: "asc" } }),
+      prisma.user.findMany({ where: { organizationId: { in: orgIds } }, select: { id: true, name: true, departmentId: true, organizationId: true, status: true, role: true }, orderBy: { name: "asc" } }),
+      prisma.attendanceSite.findMany({ where: { organizationId: { in: orgIds } }, select: { id: true, name: true, organizationId: true, projectId: true }, orderBy: { name: "asc" } }),
+      prisma.project.findMany({ where: { organizationId: { in: orgIds } }, select: { id: true, name: true, organizationId: true }, orderBy: { name: "asc" } }),
     ])
     const current = orgIds.includes(req.user.organizationId) ? req.user.organizationId : orgIds[0] || null
-    res.json({ organizations, departments, employees, sites, defaultOrganizationId: current, reportTypes: REPORT_TYPES })
+    // "Marked by": anyone who can mark attendance for others.
+    const markers = employees.filter((e) => e.role !== "EMPLOYEE").map(({ id, name, role, organizationId }) => ({ id, name, role, organizationId }))
+    res.json({
+      organizations, departments,
+      employees: employees.map(({ role, ...e }) => e),
+      sites, projects, markers,
+      siteAdmins: markers.filter((m) => m.role === "SITE_ADMIN"),
+      defaultOrganizationId: current, reportTypes: REPORT_TYPES,
+    })
   } catch (err) {
     next(err)
   }

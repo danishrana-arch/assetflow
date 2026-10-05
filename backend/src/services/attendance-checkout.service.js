@@ -1,8 +1,9 @@
 const prisma = require("../lib/prisma")
 const { toDateOnly } = require("../utils/date")
 const { createNotification } = require("../utils/notifications")
-const { formatTime12, shiftStartMinutes } = require("../utils/attendance-rules")
-const { dateKeyInTimeZone, localDateKeyToUtc, localDateTimeToUtc, parseHHMM } = require("../utils/timezone")
+const { applyAttendanceEvaluation, refreshPayslipForDay, scheduleFor } = require("./attendance-engine")
+const { formatTime12 } = require("../utils/attendance-rules")
+const { dateKeyInTimeZone, localDateKeyToUtc } = require("../utils/timezone")
 
 const CHECK_INTERVAL_MS = 5 * 60 * 1000
 const DAY_MS = 86400000
@@ -15,22 +16,12 @@ const NOTE_MAX_LENGTH = 500
 
 let running = false
 
-function hhmm(minutes) {
-  return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`
-}
-
 // The instant this record's shift ends: the employee's own shiftEnd, else
 // the organization's shiftEndDefault, else shift start + workingHoursPerDay.
 // A shift ending at/before its start time ends on the next calendar day.
 function shiftEndInstant(record, employee, organization, timezone) {
-  const start = shiftStartMinutes(employee, organization)
-  const end =
-    parseHHMM(employee.shiftEnd) ??
-    parseHHMM(organization.shiftEndDefault) ??
-    (start + Math.round(Number(organization.workingHoursPerDay || 8) * 60)) % (24 * 60)
-  const dateKey = record.date.toISOString().slice(0, 10)
-  const instant = localDateTimeToUtc(`${dateKey} ${hhmm(end)}:00`, timezone)
-  return end <= start ? new Date(instant.getTime() + DAY_MS) : instant
+  // Same schedule the attendance engine evaluates the day against.
+  return scheduleFor(employee, organization, record.date.toISOString().slice(0, 10), timezone).endAt
 }
 
 // The shift is "missed" once the record's own day is over (local midnight),
@@ -86,6 +77,8 @@ async function processOrganization(organization, now) {
         data: { checkOutAt, autoCheckedOut: true },
       })
       if (!count) continue
+      await applyAttendanceEvaluation(prisma, record.id)
+      await refreshPayslipForDay(organization.id, record.employeeId, record.date)
       const outLabel = formatTime12(checkOutAt, timezone)
       await appendSystemNote(organization.id, record.employeeId, record.date, `Didn't check out — checked out automatically at shift end (${outLabel}).`)
       await createNotification({

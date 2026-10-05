@@ -18,16 +18,20 @@ const REPORT_TYPES = [
   { value: "late-absence", label: "Late & Absence Report", needsDates: true },
   { value: "anomalies", label: "Attendance Anomalies Report", needsDates: true },
   { value: "headcount", label: "Headcount Report", needsDates: false },
+  { value: "payroll-adjustments", label: "Payroll Adjustments Report", needsDates: true },
+  { value: "site-admin-activity", label: "Site Admin Activity Report", needsDates: true },
 ]
 
 // Which extra filters each report type shows.
 const EXTRA_FILTERS = {
-  attendance: ["status", "siteId"],
-  "late-absence": ["lateStatus", "siteId"],
+  attendance: ["status", "siteId", "projectId", "markedById", "siteAdminOnly"],
+  "late-absence": ["lateStatus", "siteId", "projectId"],
   anomalies: ["anomalyStatus", "siteId"],
   leave: ["leaveStatus", "leaveType"],
   employees: ["employeeStatus"],
   headcount: [],
+  "payroll-adjustments": [],
+  "site-admin-activity": ["siteId", "projectId", "siteAdminId"],
 }
 const NO_EMPLOYEE_FILTER = new Set(["headcount"])
 
@@ -51,6 +55,10 @@ function initialFilters() {
     leaveType: "",
     anomalyStatus: "",
     employeeStatus: "",
+    projectId: "",
+    markedById: "",
+    siteAdminOnly: false,
+    siteAdminId: "",
   }
 }
 
@@ -70,6 +78,10 @@ function buildParams(f) {
   if (extras.includes("leaveType") && f.leaveType) p.leaveType = f.leaveType
   if (extras.includes("anomalyStatus") && f.anomalyStatus) p.anomalyStatus = f.anomalyStatus
   if (extras.includes("employeeStatus") && f.employeeStatus) p.employeeStatus = f.employeeStatus
+  if (extras.includes("projectId") && f.projectId) p.projectId = f.projectId
+  if (extras.includes("markedById") && f.markedById) p.markedById = f.markedById
+  if (extras.includes("siteAdminOnly") && f.siteAdminOnly) p.siteAdminOnly = "1"
+  if (extras.includes("siteAdminId") && f.siteAdminId) p.markedById = f.siteAdminId
   return p
 }
 
@@ -138,6 +150,9 @@ export default function HrReportGenerator() {
     [options, orgId, filters.departmentId]
   )
   const sites = useMemo(() => (options?.sites || []).filter(inOrg), [options, orgId])
+  const projects = useMemo(() => (options?.projects || []).filter(inOrg), [options, orgId])
+  const markers = useMemo(() => (options?.markers || []).filter(inOrg), [options, orgId])
+  const siteAdmins = useMemo(() => (options?.siteAdmins || []).filter(inOrg), [options, orgId])
 
   const typeMeta = REPORT_TYPES.find((t) => t.value === filters.type)
   const extras = EXTRA_FILTERS[filters.type] || []
@@ -148,7 +163,7 @@ export default function HrReportGenerator() {
       // Keep dependent selections valid.
       if (key === "organizationId") { next.departmentId = ""; next.employeeId = ""; next.siteId = "" }
       if (key === "departmentId") next.employeeId = ""
-      if (key === "type") { next.status = ""; next.siteId = "" }
+      if (key === "type") { next.status = ""; next.siteId = ""; next.projectId = ""; next.markedById = ""; next.siteAdminOnly = false; next.siteAdminId = "" }
       return next
     })
   }
@@ -280,6 +295,9 @@ export default function HrReportGenerator() {
               <option value="LATE">Late</option>
               <option value="ABSENT">Absent</option>
               <option value="LEAVE">Leave</option>
+              <option value="FULL_DAY">Full day</option>
+              <option value="HALF_DAY">Half day</option>
+              <option value="EARLY_GOING">Early going / very short day</option>
             </SelectField>
           )}
           {extras.includes("lateStatus") && (
@@ -293,6 +311,30 @@ export default function HrReportGenerator() {
               <option value="">All sites</option>
               {sites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </SelectField>
+          )}
+          {extras.includes("projectId") && projects.length > 0 && (
+            <SelectField label="Project" value={filters.projectId} onChange={(e) => set("projectId", e.target.value)}>
+              <option value="">All projects</option>
+              {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </SelectField>
+          )}
+          {extras.includes("markedById") && (
+            <SelectField label="Marked by" value={filters.markedById} onChange={(e) => set("markedById", e.target.value)}>
+              <option value="">Anyone</option>
+              {markers.map((m) => <option key={m.id} value={m.id}>{m.name}{m.role === "SITE_ADMIN" ? " (Site Admin)" : ""}</option>)}
+            </SelectField>
+          )}
+          {extras.includes("siteAdminId") && (
+            <SelectField label="Site Admin" value={filters.siteAdminId} onChange={(e) => set("siteAdminId", e.target.value)}>
+              <option value="">All Site Admins</option>
+              {siteAdmins.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+            </SelectField>
+          )}
+          {extras.includes("siteAdminOnly") && (
+            <label className="flex items-center gap-2 self-end pb-2.5 text-sm font-medium text-ink">
+              <input type="checkbox" checked={!!filters.siteAdminOnly} onChange={(e) => set("siteAdminOnly", e.target.checked)} className="h-4 w-4 accent-[var(--accent)]" />
+              Only marked by a Site Admin
+            </label>
           )}
           {extras.includes("anomalyStatus") && (
             <SelectField label="Anomaly status" value={filters.anomalyStatus} onChange={(e) => set("anomalyStatus", e.target.value)}>

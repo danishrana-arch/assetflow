@@ -1430,7 +1430,7 @@ export default function EmployeeProfile() {
                         </SelectField>
                         <SelectField label="Role" value={editForm.role} disabled={!canChangeRole} onChange={setField("role")}>
                           {Object.entries(ROLE_LABELS)
-                            .filter(([value]) => ["ADMIN", "CEO", "HR", "MANAGEMENT", "DEPARTMENT_HEAD", "IT_MANAGER", "EMPLOYEE"].includes(value))
+                            .filter(([value]) => ["ADMIN", "CEO", "HR", "MANAGEMENT", "DEPARTMENT_HEAD", "IT_MANAGER", "SITE_ADMIN", "EMPLOYEE"].includes(value))
                             // HR can't hand out the owner-tier roles.
                             .filter(([value]) => canChangeRoleAndStatus || !["ADMIN", "CEO"].includes(value) || value === editForm.role)
                             .filter(([value]) => value !== "CEO" || employee.role === "CEO" || (managerOptions || []).filter((m) => m.role === "CEO").length < 3)

@@ -12,6 +12,8 @@ import DashboardLayout from "./layouts/DashboardLayout"
 // can't succeed, crashing with "Failed to fetch dynamically imported
 // module" instead of loading the page that's supposed to work offline.
 import MyAttendance from "./pages/MyAttendance"
+// Same reason: the Site Admin workspace is used at sites with no signal.
+import SiteAttendance from "./pages/SiteAttendance"
 const Login = lazy(() => import("./pages/Login"))
 const Register = lazy(() => import("./pages/Register"))
 const Welcome = lazy(() => import("./pages/Welcome"))
@@ -122,12 +124,14 @@ function ProtectedShell() {
 
   const isManager = isManagement(user.role)
   const isIT = user.role === "IT_MANAGER"
+  // A Site Admin lands on their site workspace instead of their profile.
+  const home = user.role === "SITE_ADMIN" ? "/site-attendance" : `/employees/${user.id}`
 
   return (
     <Suspense fallback={<PageFallback />}>
       <Routes>
         <Route element={<DashboardLayout />}>
-          <Route index element={isManager || isIT ? <Dashboard /> : <Navigate to={`/employees/${user.id}`} replace />} />
+          <Route index element={isManager || isIT ? <Dashboard /> : <Navigate to={home} replace />} />
           <Route path="/dashboard" element={isManager || isIT ? <Dashboard /> : <Navigate to={`/employees/${user.id}`} replace />} />
           <Route path="/employees" element={<RequireEmployeeDirectory><Employees /></RequireEmployeeDirectory>} />
           <Route path="/employees/:id" element={<EmployeeProfile />} />
@@ -146,6 +150,7 @@ function ProtectedShell() {
           <Route path="/attendance" element={<RequireModule moduleKey="attendance"><Attendance /></RequireModule>} />
           <Route path="/attendance/sites" element={<RequireModule moduleKey="attendance"><AttendanceSites /></RequireModule>} />
           <Route path="/attendance/me" element={<MyAttendance />} />
+          <Route path="/site-attendance" element={user.role === "SITE_ADMIN" ? <SiteAttendance /> : <Navigate to={isManager ? "/attendance/sites" : home} replace />} />
           <Route path="/leave-requests" element={<RequireModule moduleKey="leave"><LeaveRequests /></RequireModule>} />
           <Route path="/leave-calendar" element={<Navigate to="/calendar" replace />} />
           <Route path="/holidays" element={<RequireModule moduleKey="leave"><Holidays /></RequireModule>} />

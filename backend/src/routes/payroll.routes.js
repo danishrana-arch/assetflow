@@ -6,6 +6,9 @@ const {
   getPayrollSummary,
   myPayroll,
   updatePayroll,
+  getPayrollDetails,
+  createPayrollAdjustment,
+  reversePayrollAdjustment,
   createEmployeePayslip,
   applyTaxToMonth,
   downloadPayslipPdf,
@@ -27,6 +30,14 @@ router.use(requireAuth)
 router.get("/me", noStore, myPayroll)
 // Own payslip for anyone; others' need the payroll module (checked inside).
 router.get("/:id/pdf", noStore, downloadPayslipPdf)
+// Breakdown + attendance days + adjustment history: own payslip, or the
+// payroll module (checked inside).
+router.get("/:id/details", noStore, getPayrollDetails)
+// Manual, audited adjustments after generation. Role-by-status rules
+// (DRAFT: ADMIN/HR/CEO, submitted: ADMIN/CEO, paid: CEO override) are
+// enforced inside; the route only lets payroll roles through.
+router.post("/:id/adjustments", requireRole("ADMIN", "HR", "CEO"), createPayrollAdjustment)
+router.post("/:id/adjustments/:adjustmentId/reverse", requireRole("ADMIN", "HR", "CEO"), reversePayrollAdjustment)
 
 router.get("/", requireModule("payroll"), noStore, listPayroll)
 router.get("/summary", requireModule("payrollReports"), noStore, getPayrollSummary)

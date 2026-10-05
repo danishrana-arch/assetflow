@@ -1,6 +1,6 @@
 import { Fragment, useMemo, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Wallet, Play, Send, CheckCircle2, XCircle, Trash2, ChevronLeft, ChevronRight, UserX, Pencil, Plus, Minus, Receipt, Percent, ClipboardCheck } from "lucide-react"
+import { Wallet, Play, Send, CheckCircle2, XCircle, Trash2, ChevronLeft, ChevronRight, UserX, Pencil, Plus, Minus, Receipt, Percent, ClipboardCheck, FileSearch } from "lucide-react"
 import { Link } from "react-router-dom"
 import api from "../api/client"
 import { useAuth } from "../context/AuthContext"
@@ -10,6 +10,7 @@ import Avatar from "../components/ui/Avatar"
 import StatusPill from "../components/ui/StatusPill"
 import EmptyState from "../components/ui/EmptyState"
 import { TextField, SelectField } from "../components/ui/Field"
+import PayrollDetailsDrawer from "../components/PayrollDetailsDrawer"
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
@@ -45,6 +46,7 @@ function editorStateFor(r, { withTermination = false } = {}) {
     taxPercent: Number(r.taxPercent) || 0,
     otherDeduction: Number(r.otherDeduction) || "",
     note: r.note || "",
+    adjustmentReason: "",
     termination: hasTermination,
     terminationDate: r.terminationDate ? r.terminationDate.slice(0, 10) : new Date().toISOString().slice(0, 10),
     terminationSettlement: Number(r.terminationSettlement) || "",
@@ -122,9 +124,10 @@ function PayslipEditor({ record, state, setState, onSave, onCancel, saving, erro
         <TextField label="Other deductions (−)" type="number" min="0" step="any" placeholder="0" value={state.otherDeduction} onChange={set("otherDeduction")} />
       </div>
       <p className="text-xs text-muted-2">
-        Calculated automatically: absent {money(record.absentDeduction)}, late {money(record.lateDeduction)}, attendance fines {money(record.fineDeduction)} (set on the Attendance page), office expenses {money(record.expenseReimbursement)}, performance bonus {money(record.performanceBonus)}.
+        Calculated automatically: absent {money(record.absentDeduction)}, late {money(record.lateDeduction)}, half days {money(record.halfDayDeduction)}, early going {money(record.earlyGoingFine)}, attendance fines {money(record.fineDeduction)} (set on the Attendance page), office expenses {money(record.expenseReimbursement)}, performance bonus {money(record.performanceBonus)}. To remove or reduce one of these, use Details → Add adjustment.
       </p>
       <TextField label="Note on payslip (optional)" maxLength={1000} value={state.note} onChange={set("note")} />
+      <TextField label="Reason for this change (kept in the adjustment history)" maxLength={500} placeholder="e.g. Bonus approved by management" value={state.adjustmentReason} onChange={set("adjustmentReason")} />
 
       <label className="flex items-center gap-2 text-sm font-medium text-ink">
         <input type="checkbox" checked={state.termination} onChange={set("termination")} className="h-4 w-4 accent-[var(--accent)]" />
@@ -218,7 +221,7 @@ function PayrollReview({ month, year, canGenerate, onGenerate, generating, onClo
     : []
 
   const rows = (data?.employees || []).filter((e) =>
-    !onlyIssues || e.attendance.absent || e.attendance.late || e.attendance.unrecordedDays || e.attendance.openCheckOuts || e.attendance.unpaidLeaveDays
+    !onlyIssues || e.attendance.absent || e.attendance.late || e.halfDays || e.attendance.unrecordedDays || e.attendance.openCheckOuts || e.attendance.unpaidLeaveDays
   )
   const toWrite = (data?.totals.create || 0) + (data?.totals.refresh || 0)
 
@@ -328,8 +331,11 @@ function PayrollReview({ month, year, canGenerate, onGenerate, generating, onClo
                       <td className={`px-3 py-2 font-mono ${a.unrecordedDays ? "text-chip-yellow-fg" : ""}`}>{a.unrecordedDays || "—"}</td>
                       <td className="px-3 py-2">
                         <Amount value={e.deductions} tone="deduct" />
-                        {(e.absentDeduction > 0 || e.lateDeduction > 0) && (
-                          <div className="text-[10px] text-muted">absent {money(e.absentDeduction)} · late {money(e.lateDeduction)}</div>
+                        {(e.absentDeduction > 0 || e.lateDeduction > 0 || e.halfDayDeduction > 0 || e.earlyGoingFine > 0) && (
+                          <div className="text-[10px] text-muted">
+                            absent {money(e.absentDeduction)} · late {money(e.lateDeduction)}
+                            {(e.halfDayDeduction > 0 || e.earlyGoingFine > 0) && <> · half/short ({e.halfDays}) {money(e.halfDayDeduction + e.earlyGoingFine)}</>}
+                          </div>
                         )}
                       </td>
                       <td className="px-3 py-2"><Amount value={additions} tone="add" /></td>
@@ -384,6 +390,7 @@ export default function Payroll() {
   const [showTaxPanel, setShowTaxPanel] = useState(false)
   const [taxPercentAll, setTaxPercentAll] = useState(0)
   const [showReview, setShowReview] = useState(false)
+  const [detailsId, setDetailsId] = useState(null)
 
   const { data: records, isLoading } = useQuery({
     queryKey: ["payroll", month, year],
@@ -437,6 +444,7 @@ export default function Payroll() {
           taxPercent: s.taxPercent,
           otherDeduction: s.otherDeduction,
           note: s.note,
+          adjustmentReason: s.adjustmentReason,
           ...(s.termination
             ? {
                 terminationDate: s.terminationDate,
@@ -568,6 +576,15 @@ export default function Payroll() {
     const isEditing = editing?.id === r.id
     return (
       <div className="flex items-center justify-end gap-1.5">
+        {(canManagePayroll || isCeo) && (
+          <button
+            onClick={() => setDetailsId(r.id)}
+            title="Payroll details, attendance deductions and adjustments"
+            className="flex items-center gap-1 rounded-full border border-border-strong px-3 py-1.5 text-xs font-semibold text-ink hover:bg-surface-2"
+          >
+            <FileSearch size={12} /> Details
+          </button>
+        )}
         {isDraft && canManagePayroll && !isEditing && (
           <button
             onClick={() => startEdit(r)}
@@ -836,6 +853,8 @@ export default function Payroll() {
         </div>
       )}
 
+      {detailsId && <PayrollDetailsDrawer recordId={detailsId} onClose={() => setDetailsId(null)} />}
+
       {/* Mobile cards */}
       <div className="space-y-3 md:hidden">
         {(records || []).map((r) => (
@@ -848,7 +867,10 @@ export default function Payroll() {
                   <div className="truncate text-xs text-muted">{r.employee?.department?.name || "—"}</div>
                 </div>
               </div>
-              <StatusPill tone={STATUS_TONE[r.status]}>{r.status.replace("_", " ")}</StatusPill>
+              <div className="flex flex-col items-end gap-1">
+                <StatusPill tone={STATUS_TONE[r.status]}>{r.status.replace("_", " ")}</StatusPill>
+                {r._count?.adjustments > 0 && <StatusPill tone="purple">Adjusted</StatusPill>}
+              </div>
             </div>
 
             {r.terminationDate && (
@@ -863,6 +885,9 @@ export default function Payroll() {
               <div><p className="text-muted-2">Office expenses</p><Amount value={r.expenseReimbursement} tone="add" /></div>
               <div><p className="text-muted-2">Absent{absenceSummary(r) ? ` (${absenceSummary(r)})` : ""}</p><Amount value={r.absentDeduction} tone="deduct" /></div>
               <div><p className="text-muted-2">Late{r.lateDays ? ` (${r.lateDays})` : ""}</p><Amount value={r.lateDeduction} tone="deduct" /></div>
+              {Number(r.halfDayDeduction) > 0 && <div><p className="text-muted-2">Half days ({r.halfDays})</p><Amount value={r.halfDayDeduction} tone="deduct" /></div>}
+              {Number(r.earlyGoingFine) > 0 && <div><p className="text-muted-2">Early going ({r.earlyGoingDays})</p><Amount value={r.earlyGoingFine} tone="deduct" /></div>}
+              {Number(r.adjustmentTotal) !== 0 && <div><p className="text-muted-2">Adjustments</p><Amount value={Math.abs(Number(r.adjustmentTotal))} tone={Number(r.adjustmentTotal) > 0 ? "add" : "deduct"} /></div>}
               {Number(r.fineDeduction) > 0 && <div><p className="text-muted-2">Attendance fines</p><Amount value={r.fineDeduction} tone="deduct" /></div>}
               {Number(r.otherDeduction) > 0 && <div><p className="text-muted-2">Other</p><Amount value={r.otherDeduction} tone="deduct" /></div>}
               {Number(r.terminationSettlement) > 0 && <div><p className="text-muted-2">Settlement</p><Amount value={r.terminationSettlement} tone="add" /></div>}
@@ -945,6 +970,12 @@ export default function Payroll() {
                     <td className="px-4 py-3">
                       <Amount value={r.lateDeduction} tone="deduct" />
                       {r.lateDays > 0 && <div className="text-[11px] text-muted">{r.lateDays} day{r.lateDays === 1 ? "" : "s"}</div>}
+                      {Number(r.halfDayDeduction) > 0 && (
+                        <div className="text-[11px] text-muted">half days ({r.halfDays}) <Amount value={r.halfDayDeduction} tone="deduct" /></div>
+                      )}
+                      {Number(r.earlyGoingFine) > 0 && (
+                        <div className="text-[11px] text-muted">early going <Amount value={r.earlyGoingFine} tone="deduct" /></div>
+                      )}
                       {Number(r.fineDeduction) > 0 && (
                         <div className="text-[11px] text-muted">fines <Amount value={r.fineDeduction} tone="deduct" /></div>
                       )}
@@ -956,9 +987,15 @@ export default function Payroll() {
                       )}
                     </td>
                     <td className="px-4 py-3"><Amount value={r.expenseReimbursement} tone="add" /></td>
-                    <td className="px-4 py-3 font-mono text-sm font-semibold text-ink">{money(r.netPay)}</td>
+                    <td className="px-4 py-3 font-mono text-sm font-semibold text-ink">
+                      {money(r.netPay)}
+                      {Number(r.adjustmentTotal) !== 0 && (
+                        <div className="text-[11px] font-normal text-muted">adjustments <Amount value={Math.abs(Number(r.adjustmentTotal))} tone={Number(r.adjustmentTotal) > 0 ? "add" : "deduct"} /></div>
+                      )}
+                    </td>
                     <td className="px-4 py-3">
                       <StatusPill tone={STATUS_TONE[r.status]}>{r.status.replace("_", " ")}</StatusPill>
+                      {r._count?.adjustments > 0 && <div className="mt-1"><StatusPill tone="purple">Adjusted</StatusPill></div>}
                     </td>
                     <td className="px-4 py-3">{renderActions(r)}</td>
                   </tr>

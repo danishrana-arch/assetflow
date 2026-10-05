@@ -3,6 +3,7 @@ const prisma = require("../lib/prisma")
 const { encryptField, decryptField } = require("../utils/crypto")
 const { dateKeyInTimeZone, isWithinBreak, localDateKeyToUtc } = require("../utils/timezone")
 const { isLateCheckIn } = require("../utils/attendance-rules")
+const { applyAttendanceEvaluation, refreshPayslipForDay } = require("../services/attendance-engine")
 
 const VENDORS = ["ZKTECO", "HIKVISION", "SUPREMA", "ANVIZ", "ESSL", "HTTP", "CUSTOM"]
 const MODES = ["PULL", "PUSH", "HTTP"]
@@ -100,11 +101,15 @@ async function syncAttendanceFromPunches({ organizationId, employeeId, deviceId,
   const employee = await prisma.user.findUnique({ where: { id: employeeId }, select: { shiftStart: true } })
   const status = isLateCheckIn(checkInAt, employee, organization) ? "LATE" : "PRESENT"
 
-  await prisma.attendanceRecord.upsert({
+  const record = await prisma.attendanceRecord.upsert({
     where: { employeeId_date: { employeeId, date } },
     update: { status, source: "BIOMETRIC", biometricDeviceId: deviceId, checkInAt, checkOutAt, workingMinutes },
     create: { organizationId, employeeId, date, status, source: "BIOMETRIC", biometricDeviceId: deviceId, checkInAt, checkOutAt, workingMinutes },
   })
+  // Late / half-day / early-going result (attendance engine), then keep the
+  // month's DRAFT payslip current.
+  await applyAttendanceEvaluation(prisma, record.id)
+  await refreshPayslipForDay(organizationId, employeeId, date)
 }
 
 // Biometric device management lives under Settings, which is ADMIN/CEO-only
