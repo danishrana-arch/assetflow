@@ -24,6 +24,7 @@ import { FieldValue, TextField, SelectField } from "../components/ui/Field"
 import EmptyState from "../components/ui/EmptyState"
 import WorkingTimeProgress from "../components/ui/WorkingTimeProgress"
 import EmployeeDocuments from "../components/EmployeeDocuments"
+import { SalaryRevisionForm, SalaryHistory, SalaryHistoryTitle } from "../components/SalaryRevision"
 import { nearestAssignedSite } from "../utils/siteGeofence"
 import { getAttendanceDeviceId } from "../utils/offlineAttendance"
 
@@ -49,7 +50,7 @@ const DAY_TONE = {
   ABSENT: "bg-chip-pink-bg text-chip-pink-fg",
   LEAVE: "bg-chip-blue-bg text-chip-blue-fg",
 }
-const LEAVE_TYPE_LABEL = { CASUAL: "Paid", SICK: "Sick", UNPAID: "Unpaid" }
+const LEAVE_TYPE_LABEL = { ANNUAL: "Annual", CASUAL: "Casual", SICK: "Sick", UNPAID: "Unpaid" }
 
 function MonthNav({ monthKey, onChange, minMonth, maxMonth }) {
   const canPrev = !minMonth || monthKey > minMonth
@@ -262,6 +263,22 @@ export default function EmployeeProfile() {
   const showAssets = lens === "full" || lens === "it" || lens === "manager"
   const showFinancial = !isIT && (lens === "full" || lens === "finance")
   const showPersonalDetails = !isIT && (lens === "full" || lens === "hr")
+  // Salary history: payroll roles (ADMIN/CEO/HR) or the employee themselves.
+  // Increment/decrement: ADMIN/CEO/HR, never on your own profile, HR never
+  // on an Admin's/CEO's (same rules as the backend).
+  const canSeeSalaryHistory = isSelf || hasModuleAccess(user?.role, "payroll")
+  const canReviseSalary =
+    !isSelf && ["ADMIN", "CEO", "HR"].includes(user?.role) &&
+    !(user?.role === "HR" && ["ADMIN", "CEO"].includes(employee?.role))
+  const [showSalaryForm, setShowSalaryForm] = useState(false)
+  // Pro-rata leave balance (same numbers as My Attendance) for the employee
+  // themselves and leave-module roles; others see the simple count below.
+  const { data: leaveBalance } = useQuery({
+    queryKey: ["leave-balance", id, "profile"],
+    queryFn: () => api.get("/leaves/balance", { params: isSelf ? {} : { employeeId: id } }).then((r) => r.data),
+    enabled: Boolean(employee) && !isIT && (isSelf || hasModuleAccess(user?.role, "leave")),
+    staleTime: 60000,
+  })
 
   const { data: departments } = useQuery({
     queryKey: ["departments"],
@@ -270,8 +287,8 @@ export default function EmployeeProfile() {
   })
 
   const { data: managerOptions } = useQuery({
-    queryKey: ["employee-manager-options"],
-    queryFn: () => api.get("/employees", { params: { page: 1, pageSize: 200, includeCompanyManagers: true } }).then((r) => r.data?.data || r.data || []),
+    queryKey: ["employees", "reporting-managers"],
+    queryFn: () => api.get("/employees", { params: { page: 1, pageSize: 100, managersOnly: 1 } }).then((r) => r.data?.data || r.data || []),
     enabled: canEditFully,
   })
 
@@ -663,23 +680,32 @@ export default function EmployeeProfile() {
 
   // Leave balance — same day counting as before, split by leave type.
   const year = now.getFullYear()
-  const leaveUsed = { CASUAL: 0, SICK: 0, UNPAID: 0 }
+  // Fallback (no access to the balance endpoint): approved days per type.
+  const leaveUsed = { ANNUAL: 0, CASUAL: 0, SICK: 0, UNPAID: 0 }
   for (const l of employee.leaveApplications || []) {
     if (new Date(l.startDate).getFullYear() !== year) continue
-    const days = Math.max(1, Math.round((new Date(l.endDate) - new Date(l.startDate)) / 86400000) + 1)
-    leaveUsed[l.type || "CASUAL"] = (leaveUsed[l.type || "CASUAL"] || 0) + days
+    const days = l.isHalfDay ? 0.5 : Math.max(1, Math.round((new Date(l.endDate) - new Date(l.startDate)) / 86400000) + 1)
+    leaveUsed[l.type || "ANNUAL"] = (leaveUsed[l.type || "ANNUAL"] || 0) + days
   }
-  const paidAllowance = Number(employee.organization?.casualLeaveAllowance || 0)
-  const sickAllowance = Number(employee.organization?.sickLeaveAllowance || 0)
-  const paidLeft = Math.max(0, paidAllowance - leaveUsed.CASUAL)
-  const sickLeft = Math.max(0, sickAllowance - leaveUsed.SICK)
-  const totalLeaveLeft = paidLeft + sickLeft
-  const totalLeaveUsed = leaveUsed.CASUAL + leaveUsed.SICK + leaveUsed.UNPAID
-  const leaveBreakdown = [
-    { key: "paid", label: "Paid", value: paidLeft, note: `left of ${paidAllowance}`, dot: "bg-emerald-500" },
-    { key: "sick", label: "Sick", value: sickLeft, note: `left of ${sickAllowance}`, dot: "bg-sky-500" },
-    { key: "unpaid", label: "Unpaid", value: leaveUsed.UNPAID, note: "taken", dot: "bg-amber-400" },
-  ]
+  const lb = leaveBalance
+  const totalLeaveLeft = lb ? lb.schedule.remainingThisYear : null
+  const totalLeaveUsed = lb ? lb.schedule.used + (lb.unpaid?.used || 0) : leaveUsed.ANNUAL + leaveUsed.CASUAL + leaveUsed.SICK + leaveUsed.UNPAID
+  const leaveBreakdown = lb
+    ? [
+        { key: "annual", label: "Annual", value: lb.annual.remaining, note: `left of ${lb.annual.total}`, dot: "bg-emerald-500" },
+        { key: "casual", label: "Casual", value: lb.casual.remaining, note: `left of ${lb.casual.total}`, dot: "bg-violet-500" },
+        { key: "sick", label: "Sick", value: lb.sick.remaining, note: `left of ${lb.sick.total}`, dot: "bg-sky-500" },
+        { key: "unpaid", label: "Unpaid", value: lb.unpaid?.used || 0, note: "taken", dot: "bg-amber-400" },
+      ]
+    : [
+        { key: "annual", label: "Annual", value: leaveUsed.ANNUAL, note: "taken", dot: "bg-emerald-500" },
+        { key: "casual", label: "Casual", value: leaveUsed.CASUAL, note: "taken", dot: "bg-violet-500" },
+        { key: "sick", label: "Sick", value: leaveUsed.SICK, note: "taken", dot: "bg-sky-500" },
+        { key: "unpaid", label: "Unpaid", value: leaveUsed.UNPAID, note: "taken", dot: "bg-amber-400" },
+      ]
+  const leaveEarnedNote = lb?.schedule?.currentMonth
+    ? `${lb.schedule.currentMonth.accrued} of ${lb.schedule.yearEntitlement} days earned by ${lb.schedule.currentMonth.name} · ${lb.schedule.currentMonth.remaining} available now`
+    : null
 
   const projectMemberships = employee.projectMemberships || []
   const projectBreakdown = [
@@ -834,11 +860,12 @@ export default function EmployeeProfile() {
               <span className="rounded-full bg-surface-2 px-2.5 py-1 text-[11px] font-semibold text-muted">{year}</span>
             </div>
             <SummarySplit
-              total={totalLeaveLeft}
-              totalLabel="Total leaves left"
-              totalNote={`${totalLeaveUsed} ${totalLeaveUsed === 1 ? "day" : "days"} used this year`}
+              total={totalLeaveLeft ?? totalLeaveUsed}
+              totalLabel={totalLeaveLeft != null ? "Paid leave left this year" : "Leave days taken"}
+              totalNote={totalLeaveLeft != null ? `${totalLeaveUsed} ${totalLeaveUsed === 1 ? "day" : "days"} used this year` : "Approved this year"}
               items={leaveBreakdown}
             />
+            {leaveEarnedNote && <p className="mt-3 text-[11px] text-muted-2">Pro-rata: {leaveEarnedNote}</p>}
           </section>
         )}
       </div>
@@ -1433,6 +1460,10 @@ export default function EmployeeProfile() {
                         </SelectField>
                         <SelectField label="Reporting Manager" value={editForm.managerId} onChange={setField("managerId")}>
                           <option value="">None</option>
+                          {/* A manager set before the Admin / CEO / Department Head rule stays selectable until changed. */}
+                          {employee.manager && editForm.managerId === employee.manager.id && !(managerOptions || []).some((m) => m.id === employee.manager.id) && (
+                            <option value={employee.manager.id}>{employee.manager.name} — not a manager role, please change</option>
+                          )}
                           {(managerOptions || []).filter((manager) => manager.id !== employee.id).map((manager) => (
                             <option key={manager.id} value={manager.id}>{manager.name} — {ROLE_LABELS[manager.role] || manager.role}</option>
                           ))}
@@ -1581,6 +1612,30 @@ export default function EmployeeProfile() {
                       <FieldValue label="Base Salary" value={employee.baseSalary != null && employee.baseSalary !== "" ? `PKR ${Number(employee.baseSalary).toLocaleString()} / month` : null} />
                       <FieldValue label="Bank Name" value={employee.bankName} />
                       <FieldValue label="Bank Account Number" value={employee.bankAccountNumber} />
+                      {canSeeSalaryHistory && (
+                        <div className="border-t border-border pt-3">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <SalaryHistoryTitle>Salary history</SalaryHistoryTitle>
+                            {canReviseSalary && employee.baseSalary != null && employee.baseSalary !== "" && !showSalaryForm && (
+                              <button
+                                type="button"
+                                onClick={() => setShowSalaryForm(true)}
+                                className="mb-2 rounded-full border border-border-strong bg-surface px-3 py-1 text-xs font-semibold text-ink hover:bg-surface-2"
+                              >
+                                Increment / Decrement
+                              </button>
+                            )}
+                          </div>
+                          {showSalaryForm && canReviseSalary && (
+                            <div className="mb-3 rounded-2xl border border-border bg-surface p-3">
+                              <SalaryRevisionForm employee={employee} onCancel={() => setShowSalaryForm(false)} />
+                            </div>
+                          )}
+                          <div className="max-h-[320px] overflow-y-auto pr-1">
+                            <SalaryHistory employeeId={employee.id} limit={50} />
+                          </div>
+                        </div>
+                      )}
                     </DetailGroup>
                   )}
                   </div>

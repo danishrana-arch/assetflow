@@ -55,8 +55,8 @@ export default function InviteEmployeeSection() {
     enabled: open,
   })
   const { data: managers = [] } = useQuery({
-    queryKey: ["employees", "manager-candidates"],
-    queryFn: () => api.get("/employees", { params: { includeCompanyManagers: true, page: 1, pageSize: 100 } }).then((r) => r.data?.data || r.data || []),
+    queryKey: ["employees", "reporting-managers"],
+    queryFn: () => api.get("/employees", { params: { managersOnly: 1, page: 1, pageSize: 100 } }).then((r) => r.data?.data || r.data || []),
     enabled: open,
   })
 

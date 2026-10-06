@@ -5,6 +5,7 @@ import { BellRing, UserCircle, LogOut, X } from "lucide-react"
 import { useAuth } from "../context/AuthContext"
 import { navGroups } from "../utils/navItems"
 import OrganizationSwitcher from "./OrganizationSwitcher"
+import GlobalSearch from "./GlobalSearch"
 
 function Row({ to, icon: Icon, label, end, onClick, showDot = false }) {
   return (
@@ -54,6 +55,8 @@ export default function MobileNav({ open, onClose }) {
             <X size={18} />
           </button>
         </div>
+        {/* The top bar hides its search box on phones — search lives here. */}
+        <GlobalSearch className="mb-3 sm:hidden" onNavigate={onClose} />
         {["ADMIN", "CEO", "IT_MANAGER"].includes(user?.role) && (
           <div className="mb-3 rounded-2xl border border-border bg-surface-2 p-3">
             <OrganizationSwitcher />

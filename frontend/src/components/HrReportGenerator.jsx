@@ -357,6 +357,7 @@ export default function HrReportGenerator() {
           {extras.includes("leaveType") && (
             <SelectField label="Leave type" value={filters.leaveType} onChange={(e) => set("leaveType", e.target.value)}>
               <option value="">All types</option>
+              <option value="ANNUAL">Annual</option>
               <option value="CASUAL">Casual</option>
               <option value="SICK">Sick</option>
               <option value="UNPAID">Unpaid</option>

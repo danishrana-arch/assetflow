@@ -37,7 +37,6 @@ const Attendance = lazy(() => import("./pages/Attendance"))
 const AttendanceSites = lazy(() => import("./pages/AttendanceSites"))
 const LeaveRequests = lazy(() => import("./pages/LeaveRequests"))
 const LeaveCalendar = lazy(() => import("./pages/LeaveCalendar"))
-const Holidays = lazy(() => import("./pages/Holidays"))
 const AuditLog = lazy(() => import("./pages/AuditLog"))
 const Tickets = lazy(() => import("./pages/Tickets"))
 const Settings = lazy(() => import("./pages/Settings"))
@@ -154,7 +153,8 @@ function ProtectedShell() {
           <Route path="/site-attendance" element={user.role === "SITE_ADMIN" ? <SiteAttendance /> : <Navigate to={isManager ? "/attendance/sites" : home} replace />} />
           <Route path="/leave-requests" element={<RequireModule moduleKey="leave"><LeaveRequests /></RequireModule>} />
           <Route path="/leave-calendar" element={<Navigate to="/calendar" replace />} />
-          <Route path="/holidays" element={<RequireModule moduleKey="leave"><Holidays /></RequireModule>} />
+          {/* Holidays live on the Announcements page now. */}
+          <Route path="/holidays" element={<Navigate to="/announcements?tab=holidays" replace />} />
           <Route path="/audit-log" element={<RequireOwner><AuditLog /></RequireOwner>} />
           <Route path="/payroll" element={<RequirePayrollAccess><Payroll /></RequirePayrollAccess>} />
           {/* Own payslips — every employee, like GET /payroll/me itself. */}

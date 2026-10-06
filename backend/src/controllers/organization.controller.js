@@ -123,7 +123,7 @@ async function updateOrganization(req, res, next) {
     const { organizationId, userId, role } = req.user
     const {
       name, logoUrl, primaryColor, accentColor, theme,
-      sickLeaveAllowance, casualLeaveAllowance,
+      sickLeaveAllowance, casualLeaveAllowance, annualLeaveEntitlement,
       payrollBankName, payrollAccountNumber, lateDeductionAmount,
       workingHoursPerDay, workingDaysPerWeek,
       shiftStartDefault, shiftEndDefault, lateThresholdMinutes,
@@ -158,6 +158,18 @@ async function updateOrganization(req, res, next) {
     }
     if (casualLeaveAllowance !== undefined && (casualLeaveAllowance < 0 || casualLeaveAllowance > 365)) {
       return res.status(400).json({ error: "casualLeaveAllowance must be between 0 and 365" })
+    }
+    if (annualLeaveEntitlement !== undefined && (!Number.isInteger(Number(annualLeaveEntitlement)) || annualLeaveEntitlement < 0 || annualLeaveEntitlement > 365)) {
+      return res.status(400).json({ error: "Total paid leave must be a whole number between 0 and 365" })
+    }
+    // Sick + casual come out of the yearly pool; annual leave is the rest.
+    if (sickLeaveAllowance !== undefined || casualLeaveAllowance !== undefined || annualLeaveEntitlement !== undefined) {
+      const current = await prisma.organization.findUnique({ where: { id: organizationId }, select: { sickLeaveAllowance: true, casualLeaveAllowance: true, annualLeaveEntitlement: true } })
+      const total = Number(annualLeaveEntitlement ?? current.annualLeaveEntitlement)
+      const parts = Number(sickLeaveAllowance ?? current.sickLeaveAllowance) + Number(casualLeaveAllowance ?? current.casualLeaveAllowance)
+      if (parts > total) {
+        return res.status(400).json({ error: `Sick + casual leave (${parts}) can't be more than the total paid leave (${total})` })
+      }
     }
     let lateDeductionUpdate
     let workingHoursUpdate
@@ -254,6 +266,7 @@ async function updateOrganization(req, res, next) {
         ...(theme !== undefined ? { theme } : {}),
         ...(sickLeaveAllowance !== undefined ? { sickLeaveAllowance: parseInt(sickLeaveAllowance, 10) } : {}),
         ...(casualLeaveAllowance !== undefined ? { casualLeaveAllowance: parseInt(casualLeaveAllowance, 10) } : {}),
+        ...(annualLeaveEntitlement !== undefined ? { annualLeaveEntitlement: parseInt(annualLeaveEntitlement, 10) } : {}),
         ...(payrollBankName !== undefined ? { payrollBankName } : {}),
         ...(payrollAccountNumber !== undefined ? { payrollAccountNumber: encryptField(payrollAccountNumber) } : {}),
         ...(lateDeductionUpdate !== undefined ? { lateDeductionAmount: lateDeductionUpdate } : {}),

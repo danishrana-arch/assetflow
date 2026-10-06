@@ -19,6 +19,7 @@ const {
   rejectBatch,
   deleteAllForMonth,
 } = require("../controllers/payroll.controller")
+const { listSalaryRevisions, createSalaryRevision } = require("../controllers/salary-revision.controller")
 const { requireAuth, requireRole, requireModule } = require("../middleware/auth.middleware")
 const { noStore } = require("../middleware/cache.middleware")
 
@@ -29,6 +30,11 @@ router.use(requireAuth)
 // Self-service — any authenticated employee sees only their own payslips.
 router.get("/me", noStore, myPayroll)
 // Own payslip for anyone; others' need the payroll module (checked inside).
+// Salary increments / decrements + history (own history for anyone; the
+// org's for payroll roles — checked in the controller).
+router.get("/salary-revisions", noStore, listSalaryRevisions)
+router.post("/salary-revisions", requireRole("ADMIN", "CEO", "HR"), createSalaryRevision)
+
 router.get("/:id/pdf", noStore, downloadPayslipPdf)
 // Breakdown + attendance days + adjustment history: own payslip, or the
 // payroll module (checked inside).

@@ -5,7 +5,7 @@ import api from "../api/client"
 import PageHeader from "../components/ui/PageHeader"
 import StatusPill from "../components/ui/StatusPill"
 
-const LEAVE_TYPE_TONE = { SICK: "pink", CASUAL: "blue", UNPAID: "slate" }
+const LEAVE_TYPE_TONE = { SICK: "pink", CASUAL: "blue", ANNUAL: "green", UNPAID: "slate" }
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
 
 function localKey(date) {

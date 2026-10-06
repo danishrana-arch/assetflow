@@ -2703,3 +2703,157 @@ actions pinned to the bottom; history date filter is a compact row with a
 site-day count; times use `tabular-nums` instead of `font-mono`. Verified
 read-only as a real Site Admin at 1366 / 820 / 390px — no horizontal
 overflow, no page errors.
+
+## Post-module addition: pages in the global search (2026-10-06)
+
+- `GlobalSearch.jsx` now also finds **pages**: typing (from 1 character)
+  shows a "Pages" group above the server results (employees / assets /
+  projects / tickets / announcements, still from 2 characters via
+  `GET /search`). ↑/↓ move through all results, Enter opens, Esc closes.
+- Pages come from `searchablePages(user)` in `utils/navItems.js` — the same
+  role-gated `navGroups(user)` list the sidebar uses, plus pages reached from
+  elsewhere (My Account, Notifications, My Profile, Tasks, Expense Claims,
+  Attendance Devices; same gates as App.jsx), each with search keywords
+  (`PAGE_KEYWORDS`, e.g. "salary" → Payroll, "biometric" → Attendance
+  Devices). `matchPages()` ranks label-prefix > label-contains > keyword.
+  So a user only ever finds pages they can open. **Add new pages to
+  navGroups (or the extras list) and they become searchable automatically.**
+- Phones: the top bar hides its search box below `sm`, so `MobileNav` now
+  has the search at the top of the menu (`onNavigate` closes the menu).
+- Fixed a doubled focus outline inside the header search pill.
+- Verified 16/16 in Chrome (read-only): CEO finds payroll pages / keyword
+  matches / hidden pages, Enter and ArrowDown+Enter navigate, record search
+  still works; EMPLOYEE gets no Settings / Audit Log / Payroll Reports /
+  Employee Forms; mobile menu search opens a page and closes the menu; no
+  overflow, no page errors.
+
+## Post-module change: Holidays moved into Announcements (2026-10-06)
+
+- `pages/Holidays.jsx` **deleted**; its sidebar/mobile entry removed. The
+  Announcements page is now "Announcements & Holidays" with two tabs
+  (`?tab=holidays`, kept in the URL). `/holidays` redirects there; the
+  Settings "Manage Holidays" button and the global search ("holiday") link
+  there too.
+- `components/HolidaysPanel.jsx`: everyone sees the year's holidays
+  (upcoming highlighted, past dimmed); the `leave` module (ADMIN/CEO/HR/
+  DEPARTMENT_HEAD — same as `POST/DELETE /holidays`) gets the add form and
+  remove buttons (remove now asks to confirm). "Also announce it to everyone"
+  (ticked by default, management only) posts a "Holiday: <name>"
+  announcement via the existing `POST /dashboard/announcements` right after
+  the holiday is saved. The announcements form has an "Add a holiday"
+  shortcut to the tab. No backend change.
+- Verified 19/19 in Chrome (HR + EMPLOYEE): redirect, no sidebar entry, add
+  → DB → remove, announcement payload (intercepted — no real announcement /
+  notifications sent), search, employee read-only, phone layout. Test
+  holiday + its 2 audit rows deleted.
+
+## Post-module change: Reporting Manager = Admin / CEO / Department Head only (2026-10-06)
+
+- `REPORTING_MANAGER_ROLES` + `reportingManagerWhere({organizationId,
+  companyId})` in `backend/src/utils/roles.js` (frontend mirror of the
+  constant in `utils/roles.js`): an ADMIN / DEPARTMENT_HEAD of this org or a
+  CEO of this org / the company root, not LEFT_COMPANY.
+- Enforced (400 "Reporting Manager must be an Admin, CEO or Department
+  Head") in `inviteEmployee` (Add Employee), `createInvitation` (Invite) and
+  `updateEmployee` — the latter **only when managerId changes**, so a profile
+  whose old manager predates the rule can still be saved. Sheet import
+  matches managers only from that pool (and earlier rows only if their role
+  qualifies).
+- `GET /employees?managersOnly=1` returns that pool (ignores role/department
+  filters); used by the Add Employee, Invite and Employee Profile dropdowns
+  (query key `["employees","reporting-managers"]`). The profile dropdown
+  keeps a pre-rule manager visible as "— not a manager role, please change".
+- At the time: 1 of 25 employees with a manager reported to a non-manager
+  role (Ali Sikander → Ali Sher farooqi, EMPLOYEE) — data left unchanged.
+- Verified 11/11 (live DB, rejections only — nothing written): list returns
+  only allowed roles and matches the DB count; EMPLOYEE as manager → 400 on
+  profile edit / invite / add; both dropdowns show only Admin/CEO/Dept Head.
+
+## Post-module addition: salary increment / decrement + history (2026-10-06)
+
+- New `SalaryRevision` model (history of every base-salary change: type
+  INCREMENT / DECREMENT / SET, previous → new, signed `changeAmount`,
+  `changePercent` if entered as %, effective month/year, reason, source
+  PAYROLL / PROFILE_EDIT, `payslipsUpdated`, `createdById` SET NULL, employee
+  CASCADE). Migration `20261006130000_salary_revisions` (additive table) —
+  **not yet deployed** at the time of writing; JS client regenerated.
+- `controllers/salary-revision.controller.js`:
+  `GET /payroll/salary-revisions?employeeId=&limit=` (payroll-module roles see
+  the org; anyone else only their own) and `POST /payroll/salary-revisions`
+  (`requireRole("ADMIN","CEO","HR")`): `{employeeId, direction, mode
+  AMOUNT|PERCENT, value, effectiveMonth, effectiveYear, reason}`. Never your
+  own salary; HR never an ADMIN/CEO; employee needs a base salary already;
+  result ≥ PKR 25,000 (`MIN_BASE_SALARY`, now in `utils/payroll.js`) and
+  ≤ 10M; effective month = this month or up to 12 back (org timezone), never
+  future. Updates `User.baseSalary` and every **DRAFT** payslip from the
+  effective month on (basic pay, tax at that payslip's %, totals), logging a
+  `FIELD_EDIT` / `baseSalary` `PayrollAdjustment` per payslip; submitted/paid
+  payslips untouched (count returned as `payslipsLocked`). Audit
+  `salary.increment|decrement`, employee notified (link `/payroll/me`).
+- `updateEmployee` also records a `PROFILE_EDIT` revision whenever the
+  salary field is edited directly on the profile.
+- UI: `components/SalaryRevision.jsx` (`SalaryRevisionForm`,
+  `SalaryHistory`). Payroll page → "Increment / Decrement" button (ADMIN/HR/
+  CEO) opens the form + org-wide history. Employee Profile → Detailed
+  Information → "Payroll & bank" shows the employee's salary history under
+  Base Salary, with an "Increment / Decrement" button for allowed viewers.
+
+## Incident: live DB wiped and restored (2026-10-06)
+
+`prisma migrate diff --from-migrations … --shadow-database-url <live URL>`
+was run against the live Neon DB; Prisma resets the shadow DB, so every
+table was dropped (~11:29 UTC). Restored via Neon "Restore from history" to
+16:15 PKT (11:15 UTC); verified 42 users / 20 orgs / 397 attendance records,
+migration history back to `20261006120000_user_invitations`. Anything
+written between 11:15 and 11:29 UTC was lost (last audit row 10:24 UTC).
+**Never pass the live DATABASE_URL as a shadow database** — write
+migrations by hand as this project always has.
+
+## Post-module change: pro-rata leave policy (2026-10-06)
+
+**Supersedes the "+1 day per month from the Permanent date" schedule** in
+the 2026-10-05 employee-details/leave section.
+- `utils/leave-policy.js` rewritten. Paid leave is one yearly pool
+  (`Organization.annualLeaveEntitlement`, default 30) shared by the new
+  `ANNUAL` type, `CASUAL` and `SICK`, earned total/12 per month, cumulative
+  (Jan 2.5 … Dec 30), reset every January. Pro-rata from the **joining
+  month** (`joiningDate`, else `startDate`; neither set = counted from
+  January); the joining month counts in full. Per-type yearly limits are
+  pro-rated too: sick = `sickLeaveAllowance`, casual =
+  `casualLeaveAllowance` (rounded down to ½ day), annual = the rest of the
+  year's pool. A request must fit its type limit **and**, by the end of every
+  month from the first one it touches, paid days (pending + approved) ≤
+  earned by then. UNPAID never uses the pool. Still Permanent-only to apply
+  and not before `permanentDate` (probation months still earn).
+- `GET /leaves/balance` adds `annual`, per-type `pending`/`fullYear`,
+  `entitlement`, `earnedToDate`, `availableNow`; `annualTotal` is now the
+  year's pro-rated pool; `schedule.months[]` has `accrued` (`cap` kept as an
+  alias), plus `monthlyRate`, `yearEntitlement`, `remainingThisYear`,
+  `accrualStartMonth`, `types`. Default leave type is ANNUAL.
+- `PATCH /organization` takes `annualLeaveEntitlement` (0–365); sick +
+  casual must not exceed it. Settings → Leave Policy: Total / Sick / Casual,
+  annual shown as the remainder. At the time: 9 orgs 8 sick + 6 casual
+  (→ 16 annual), 11 orgs 8 + 14 (→ 8 annual).
+- UI: My Attendance leave box (earned / used / available, per-type chips,
+  12-month accrual strip), type select shows each type's balance; Leave
+  Requests shows the pro-rata line; Employee Profile Leave Balance card uses
+  the balance endpoint (self + leave-module roles); Annual added to Leave
+  Calendar and HR report filter.
+- Migration `20261006140000_pro_rata_leave` (`LeaveType` + ANNUAL,
+  `Organization.annualLeaveEntitlement`) — **not yet deployed**; the JS
+  client is regenerated, so leave create/balance fail until it is.
+- Verified: accrual math (full year 2.5/5/7.5/15/30, June joiner 17.5 with
+  limits 9.5/3.5/4.5); frontend build passes. Not exercised against the DB.
+
+### Follow-up (same day): Leave Policy moved to Leave Requests; Settings re-laid out
+
+- New `components/LeavePolicyPanel.jsx` at the top of `LeaveRequests.jsx`
+  (collapsible): Total / Annual / Casual / Sick tiles, a 12-month "earned by
+  month" strip and the rules in plain words. ADMIN/CEO get "Edit policy"
+  (same `PATCH /organization`, which stays ADMIN/CEO-only); HR and
+  DEPARTMENT_HEAD see it read-only.
+- Settings: Leave Policy card removed (its state/mutation too). Layout is now
+  Workspace | Payroll Account, Companies & Access (full), Work Schedule |
+  Attendance Geofence, Attendance permission matrix (full), and a full-width
+  "Plan & Shortcuts" card (plan + the Leave Policy / Holidays / Attendance
+  Devices / Audit Log links that used to sit under the leave card).

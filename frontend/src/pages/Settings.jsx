@@ -33,8 +33,6 @@ export default function Settings() {
   const { applyAccent } = useTheme()
   const [name, setName] = useState("")
   const [primaryColor, setPrimaryColor] = useState("#3B82F6")
-  const [sickLeaveAllowance, setSickLeaveAllowance] = useState(8)
-  const [casualLeaveAllowance, setCasualLeaveAllowance] = useState(6)
   const [payrollBankName, setPayrollBankName] = useState("")
   const [payrollAccountNumber, setPayrollAccountNumber] = useState("")
   const [lateDeductionAmount, setLateDeductionAmount] = useState(500)
@@ -54,7 +52,6 @@ export default function Settings() {
   const [geofenceRadiusMeters, setGeofenceRadiusMeters] = useState(200)
   const [locatingOffice, setLocatingOffice] = useState(false)
   const [brandingError, setBrandingError] = useState("")
-  const [policyError, setPolicyError] = useState("")
   const [scheduleError, setScheduleError] = useState("")
   const [geofenceError, setGeofenceError] = useState("")
   const [payrollError, setPayrollError] = useState("")
@@ -71,8 +68,6 @@ export default function Settings() {
     if (organization) {
       setName(organization.name || "")
       setPrimaryColor(organization.primaryColor || "#3B82F6")
-      setSickLeaveAllowance(organization.sickLeaveAllowance ?? 8)
-      setCasualLeaveAllowance(organization.casualLeaveAllowance ?? 6)
       setPayrollBankName(organization.payrollBankName || "")
       setPayrollAccountNumber(organization.payrollAccountNumber || "")
       setLateDeductionAmount(organization.lateDeductionAmount ?? 500)
@@ -91,7 +86,6 @@ export default function Settings() {
       // Clear any error left over from a previous organization — otherwise a
       // stale message from company A stays on screen after switching to B.
       setBrandingError("")
-      setPolicyError("")
       setScheduleError("")
       setGeofenceError("")
       setPayrollError("")
@@ -130,15 +124,6 @@ export default function Settings() {
       applyAccent(res.data.primaryColor)
     },
     onError: (err) => setBrandingError(err.response?.data?.error || "Could not save — please try again"),
-  })
-
-  const savePolicy = useMutation({
-    mutationFn: () => api.patch("/organization", { sickLeaveAllowance, casualLeaveAllowance }),
-    onSuccess: () => {
-      setPolicyError("")
-      queryClient.invalidateQueries({ queryKey: ["organization"] })
-    },
-    onError: (err) => setPolicyError(err.response?.data?.error || "Could not save — please try again"),
   })
 
   const saveWorkSchedule = useMutation({
@@ -295,51 +280,47 @@ export default function Settings() {
             )}
             {brandingError && <p className="text-xs text-chip-pink-fg">{brandingError}</p>}
           </div>
-      </div>
+        </div>
 
         <div className="card min-w-0 p-6">
-          <SectionHeader title="Leave Policy" />
+          <SectionHeader title="Payroll Account" />
           <p className="mb-4 text-xs text-muted">
-            Yearly paid-leave allowance per employee. Unpaid leave has no cap but still needs approval.
+            CEO-only. Every salary is disbursed from this account no one else can see or change it.
           </p>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className="space-y-4">
             <TextField
-              label="Sick days / year"
-              type="number"
-              min={0}
-              max={365}
-              value={sickLeaveAllowance}
-              onChange={(e) => setSickLeaveAllowance(e.target.value)}
+              label="Bank name"
+              value={payrollBankName}
+              onChange={(e) => setPayrollBankName(e.target.value)}
+              placeholder="e.g. HBL, Meezan Bank"
             />
             <TextField
-              label="Casual days / year"
+              label="Account number"
+              value={payrollAccountNumber}
+              onChange={(e) => setPayrollAccountNumber(e.target.value)}
+              hint="Stored encrypted"
+            />
+            <TextField
+              label="Late-arrival deduction (PKR / day)"
               type="number"
-              min={0}
-              max={365}
-              value={casualLeaveAllowance}
-              onChange={(e) => setCasualLeaveAllowance(e.target.value)}
+              min={500}
+              step={100}
+              value={lateDeductionAmount}
+              onChange={(e) => setLateDeductionAmount(e.target.value)}
+              hint="Deducted for every day an employee is marked Late"
             />
           </div>
-          <p className="mt-2 text-xs text-muted-2">
-            Total: {Number(sickLeaveAllowance || 0) + Number(casualLeaveAllowance || 0)} paid days/year
-          </p>
           <button
-            onClick={() => savePolicy.mutate()}
-            disabled={savePolicy.isPending}
+            onClick={() => savePayrollAccount.mutate()}
+            disabled={savePayrollAccount.isPending}
             className="pill-accent mt-4 px-5 py-2.5 text-sm disabled:opacity-60"
           >
-            {savePolicy.isPending ? "Saving…" : "Save policy"}
+            {savePayrollAccount.isPending ? "Saving…" : "Save payroll account"}
           </button>
-          {savePolicy.isSuccess && !savePolicy.isPending && !policyError && (
+          {savePayrollAccount.isSuccess && !savePayrollAccount.isPending && !payrollError && (
             <p className="mt-2 text-xs text-chip-green-fg">Saved.</p>
           )}
-          {policyError && <p className="mt-2 text-xs text-chip-pink-fg">{policyError}</p>}
-
-          <div className="mt-5 flex flex-wrap gap-2 border-t border-border pt-4">
-            <Link to="/holidays" className="pill-secondary px-4 py-2 text-xs">Manage Holidays</Link>
-            <Link to="/settings/attendance-devices" className="pill-secondary px-4 py-2 text-xs">Attendance Devices</Link>
-            <Link to="/audit-log" className="pill-secondary px-4 py-2 text-xs">View Audit Log</Link>
-          </div>
+          {payrollError && <p className="mt-2 text-xs text-chip-pink-fg">{payrollError}</p>}
         </div>
 
         <div className="card min-w-0 p-6 lg:col-span-2">
@@ -631,47 +612,6 @@ export default function Settings() {
           </div>
         )}
 
-          <div className="card min-w-0 p-6">
-            <SectionHeader title="Payroll Account" />
-            <p className="mb-4 text-xs text-muted">
-              CEO-only. Every salary is disbursed from this account no one else can see or change it.
-            </p>
-            <div className="space-y-4">
-              <TextField
-                label="Bank name"
-                value={payrollBankName}
-                onChange={(e) => setPayrollBankName(e.target.value)}
-                placeholder="e.g. HBL, Meezan Bank"
-              />
-              <TextField
-                label="Account number"
-                value={payrollAccountNumber}
-                onChange={(e) => setPayrollAccountNumber(e.target.value)}
-                hint="Stored encrypted"
-              />
-              <TextField
-                label="Late-arrival deduction (PKR / day)"
-                type="number"
-                min={500}
-                step={100}
-                value={lateDeductionAmount}
-                onChange={(e) => setLateDeductionAmount(e.target.value)}
-                hint="Deducted for every day an employee is marked Late"
-              />
-            </div>
-            <button
-              onClick={() => savePayrollAccount.mutate()}
-              disabled={savePayrollAccount.isPending}
-              className="pill-accent mt-4 px-5 py-2.5 text-sm disabled:opacity-60"
-            >
-              {savePayrollAccount.isPending ? "Saving…" : "Save payroll account"}
-            </button>
-            {savePayrollAccount.isSuccess && !savePayrollAccount.isPending && !payrollError && (
-              <p className="mt-2 text-xs text-chip-green-fg">Saved.</p>
-            )}
-            {payrollError && <p className="mt-2 text-xs text-chip-pink-fg">{payrollError}</p>}
-          </div>
-
         {isOwnerTier && (
           <div className="card min-w-0 p-6 lg:col-span-2">
             <SectionHeader title="Attendance permission matrix" />
@@ -726,18 +666,27 @@ export default function Settings() {
           </div>
         )}
 
-        <div className="card min-w-0 p-6">
-          <SectionHeader title="Plan" />
-          <div className="flex items-center justify-between rounded-2xl bg-surface-2 p-4">
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Current plan</p>
-              <p className="mt-0.5 text-lg font-semibold text-ink">Free</p>
+        <div className="card min-w-0 p-6 lg:col-span-2">
+          <SectionHeader title="Plan & Shortcuts" />
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="flex items-center justify-between gap-3 rounded-2xl bg-surface-2 p-4">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Current plan</p>
+                <p className="mt-0.5 text-lg font-semibold text-ink">Free</p>
+                <p className="mt-1 text-xs text-muted">Billing is disabled — every ManagementDock feature is available at no cost.</p>
+              </div>
+              <span className="shrink-0 rounded-full bg-chip-green-bg px-3 py-1.5 text-[11px] font-semibold text-chip-green-fg">All features enabled</span>
             </div>
-            <span className="rounded-full bg-chip-green-bg px-3 py-1.5 text-[11px] font-semibold text-chip-green-fg">All features enabled</span>
+            <div className="rounded-2xl bg-surface-2 p-4">
+              <p className="mb-3 text-[11px] font-semibold uppercase tracking-wide text-muted">Shortcuts</p>
+              <div className="flex flex-wrap gap-2">
+                <Link to="/leave-requests" className="pill-secondary px-4 py-2 text-xs">Leave Policy</Link>
+                <Link to="/announcements?tab=holidays" className="pill-secondary px-4 py-2 text-xs">Manage Holidays</Link>
+                <Link to="/settings/attendance-devices" className="pill-secondary px-4 py-2 text-xs">Attendance Devices</Link>
+                <Link to="/audit-log" className="pill-secondary px-4 py-2 text-xs">View Audit Log</Link>
+              </div>
+            </div>
           </div>
-          <p className="mt-4 text-xs text-muted">
-            Billing is currently disabled. Every ManagementDock feature is available to all organizations at no cost.
-          </p>
         </div>
       </div>
     </div>

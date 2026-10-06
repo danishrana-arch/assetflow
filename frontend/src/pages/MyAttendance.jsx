@@ -24,7 +24,10 @@ import {
 const ATTENDANCE_TONE = { PRESENT: "green", LATE: "yellow", ABSENT: "pink", LEAVE: "yellow" }
 const LEAVE_TONE = { PENDING_HR: "yellow", PENDING_FINAL_APPROVAL: "blue", APPROVED: "green", REJECTED: "pink", CANCELLED: "slate" }
 const LEAVE_STATUS_LABELS = { PENDING_HR: "Waiting for HR", PENDING_FINAL_APPROVAL: "HR approved · waiting for Admin/CEO", APPROVED: "Approved", REJECTED: "Rejected", CANCELLED: "Cancelled" }
-const LEAVE_TYPE_LABELS = { SICK: "Sick", CASUAL: "Casual / Annual", UNPAID: "Unpaid" }
+const LEAVE_TYPE_LABELS = { ANNUAL: "Annual", CASUAL: "Casual", SICK: "Sick", UNPAID: "Unpaid" }
+const LEAVE_BUCKET = { ANNUAL: "annual", CASUAL: "casual", SICK: "sick" }
+const SHORT_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+const fmtLeaveDays = (n) => `${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })} day${Number(n) === 1 ? "" : "s"}`
 
 function fmt(dateStr) {
   if (!dateStr) return "—"
@@ -143,7 +146,7 @@ export default function MyAttendance() {
   const [offlineVerification, setOfflineVerification] = useState(null)
   const [locating, setLocating] = useState(false)
   const [locationError, setLocationError] = useState("")
-  const [leaveForm, setLeaveForm] = useState({ startDate: "", endDate: "", reason: "", type: "CASUAL" })
+  const [leaveForm, setLeaveForm] = useState({ startDate: "", endDate: "", reason: "", type: "ANNUAL" })
   const [leaveError, setLeaveError] = useState("")
   const [locationMode, setLocationMode] = useState("OFFICE")
   // Check-in progress fill: animates toward 90% while the geofence check +
@@ -421,7 +424,7 @@ export default function MyAttendance() {
   const submitLeave = useMutation({
     mutationFn: () => api.post("/leaves", leaveForm),
     onSuccess: () => {
-      setLeaveForm({ startDate: "", endDate: "", reason: "", type: "CASUAL" })
+      setLeaveForm({ startDate: "", endDate: "", reason: "", type: "ANNUAL" })
       setLeaveError("")
       queryClient.invalidateQueries({ queryKey: ["leaves-self"] })
       queryClient.invalidateQueries({ queryKey: ["leave-balance"] })
@@ -584,25 +587,72 @@ export default function MyAttendance() {
             </div>
           ) : (
           <>
-          {balance?.schedule?.currentMonth && (
-            <div className="mb-4 grid gap-2 rounded-2xl bg-surface-2 px-4 py-3 text-xs text-muted sm:grid-cols-2">
-              <p>
-                <span className="font-semibold text-ink">Allowed up to {balance.schedule.currentMonth.name}:</span>{" "}
-                {balance.schedule.currentMonth.cap} day{balance.schedule.currentMonth.cap === 1 ? "" : "s"} in {balance.schedule.year}
-                {" "}({balance.schedule.currentMonth.used} requested or approved, {balance.schedule.currentMonth.remaining} left)
-              </p>
-              <p>
-                <span className="font-semibold text-ink">Annual balance:</span>{" "}
-                {balance.casual?.remaining} of {balance.casual?.total} annual, {balance.sick?.remaining} of {balance.sick?.total} sick days left
-              </p>
-              <p className="sm:col-span-2 text-muted-2">
-                Your allowance grows by one day each month from the month you became Permanent, and resets every January. Requests go to HR, then to an Admin or CEO.
-              </p>
-            </div>
-          )}
+          {balance?.schedule?.currentMonth && (() => {
+            const sch = balance.schedule
+            const cm = sch.currentMonth
+            const joinedThisYear = sch.accrualStartMonth && sch.accrualStartMonth > 1
+            return (
+              <div className="mb-4 space-y-3 rounded-2xl bg-surface-2 px-4 py-3 text-xs text-muted">
+                <div className="grid gap-2 sm:grid-cols-3">
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Earned by end of {cm.name}</p>
+                    <p className="mt-0.5 text-lg font-semibold text-ink">{fmtLeaveDays(cm.accrued)}</p>
+                    <p className="text-muted-2">of {fmtLeaveDays(sch.yearEntitlement)} this year</p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Requested / approved</p>
+                    <p className="mt-0.5 text-lg font-semibold text-ink">{fmtLeaveDays(cm.used)}</p>
+                    <p className="text-muted-2">paid leave in {sch.year}</p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Available now</p>
+                    <p className="mt-0.5 text-lg font-semibold text-chip-green-fg">{fmtLeaveDays(cm.remaining)}</p>
+                    <p className="text-muted-2">{fmtLeaveDays(sch.remainingThisYear)} left for the whole year</p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {["ANNUAL", "CASUAL", "SICK"].map((t) => {
+                    const b = balance[LEAVE_BUCKET[t]]
+                    if (!b) return null
+                    return (
+                      <span key={t} className="rounded-full border border-border bg-surface px-3 py-1">
+                        <span className="font-semibold text-ink">{LEAVE_TYPE_LABELS[t]}</span> {b.remaining} of {b.total} left
+                        {b.pending > 0 ? <span className="text-muted-2"> · {b.pending} pending</span> : null}
+                      </span>
+                    )
+                  })}
+                </div>
+                <div className="grid grid-cols-6 gap-1 sm:grid-cols-12">
+                  {sch.months.map((m) => {
+                    const isNow = m.month === cm.month
+                    const before = !m.accrued
+                    return (
+                      <div
+                        key={m.month}
+                        title={`${m.name}: ${m.accrued} earned, ${m.cumulative} used by then`}
+                        className={`rounded-lg px-1 py-1 text-center ${isNow ? "bg-accent text-on-accent" : before ? "bg-surface text-muted-2 opacity-60" : "bg-surface text-ink"}`}
+                      >
+                        <div className="text-[10px] font-semibold">{SHORT_MONTHS[m.month - 1]}</div>
+                        <div className="font-mono text-[11px]">{m.accrued}</div>
+                      </div>
+                    )
+                  })}
+                </div>
+                <p className="text-muted-2">
+                  Pro-rata leave: you earn {sch.monthlyRate} days of paid leave every month ({sch.entitlement} a year, shared by annual, casual and sick leave)
+                  {joinedThisYear ? `, counted from ${SHORT_MONTHS[sch.accrualStartMonth - 1]} ${sch.year} when you joined` : ""}.
+                  You can only use what you've earned by the month of the leave. Unpaid leave doesn't use your balance. Resets every January.
+                  Requests go to HR, then to an Admin or CEO.
+                </p>
+              </div>
+            )
+          })()}
           <form onSubmit={handleLeaveSubmit} className="grid gap-4 sm:grid-cols-2">
             <SelectField label="Type" value={leaveForm.type} onChange={(e) => setLeaveForm((f) => ({ ...f, type: e.target.value }))} className="sm:col-span-2">
-              {Object.entries(LEAVE_TYPE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              {Object.entries(LEAVE_TYPE_LABELS).map(([v, l]) => {
+                const b = balance?.[LEAVE_BUCKET[v]]
+                return <option key={v} value={v}>{l}{b ? ` — ${b.remaining} of ${b.total} left` : v === "UNPAID" ? " — doesn't use your balance (deducted from pay)" : ""}</option>
+              })}
             </SelectField>
             <TextField label="From" type="date" value={leaveForm.startDate} onChange={(e) => setLeaveForm((f) => ({ ...f, startDate: e.target.value }))} required />
             <TextField label="To" type="date" value={leaveForm.endDate} onChange={(e) => setLeaveForm((f) => ({ ...f, endDate: e.target.value }))} required />

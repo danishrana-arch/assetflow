@@ -1,6 +1,9 @@
 // Shared payslip math, used by both the payroll and expense-claim
 // controllers so a payslip's totals are always derived the same way.
 
+// Org policy: no base salary below this (profile edit, import, increments).
+const MIN_BASE_SALARY = 25000
+
 function toNumber(decimal) {
   return decimal === null || decimal === undefined ? 0 : Number(decimal)
 }
@@ -97,6 +100,7 @@ async function pickPayrollMonthForClaim(db, employeeId, expenseDate) {
 }
 
 module.exports = {
+  MIN_BASE_SALARY,
   toNumber,
   round2,
   computePayrollTotals,

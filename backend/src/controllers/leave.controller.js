@@ -4,7 +4,7 @@ const { logAudit } = require("../utils/audit")
 const { toDateOnly } = require("../utils/date")
 const { notifyManagement, createNotification } = require("../utils/notifications")
 const { dateKeyInTimeZone } = require("../utils/timezone")
-const { validateLeaveRequest, leaveSchedule, NOT_PERMANENT_MESSAGE, PENDING_LEAVE_STATUSES } = require("../utils/leave-policy")
+const { validateLeaveRequest, leaveSchedule, leaveAllowances, NOT_PERMANENT_MESSAGE, PENDING_LEAVE_STATUSES } = require("../utils/leave-policy")
 
 function eachDate(start, end) {
   const days = []
@@ -22,7 +22,7 @@ function dayCount(start, end) {
 }
 
 const MAX_LEAVE_SPAN_DAYS = 60
-const LEAVE_TYPES = ["SICK", "CASUAL", "UNPAID"]
+const LEAVE_TYPES = ["ANNUAL", "CASUAL", "SICK", "UNPAID"]
 
 async function chargeableDays(organizationId, start, end, isHalfDay) {
   if (isHalfDay) return 0.5
@@ -82,7 +82,7 @@ async function createLeave(req, res, next) {
     // be a switched-to org for ADMIN/CEO.
     const employee = await prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, organizationId: true, employmentStatus: true, permanentDate: true, organization: { select: { timezone: true, sickLeaveAllowance: true, casualLeaveAllowance: true } } },
+      select: { id: true, organizationId: true, employmentStatus: true, permanentDate: true, joiningDate: true, startDate: true, organization: { select: { timezone: true, sickLeaveAllowance: true, casualLeaveAllowance: true, annualLeaveEntitlement: true } } },
     })
     if (!employee) return res.status(404).json({ error: "User not found" })
     const organizationId = employee.organizationId
@@ -92,7 +92,7 @@ async function createLeave(req, res, next) {
       return res.status(400).json({ error: "startDate, endDate and reason are required" })
     }
 
-    const leaveType = type || "CASUAL"
+    const leaveType = type || "ANNUAL"
     if (!LEAVE_TYPES.includes(leaveType)) {
       return res.status(400).json({ error: `type must be one of: ${LEAVE_TYPES.join(", ")}` })
     }
@@ -123,7 +123,7 @@ async function createLeave(req, res, next) {
       isHalfDay: halfDay,
       type: leaveType,
       todayKey: dateKeyInTimeZone(new Date(), employee.organization?.timezone || "UTC"),
-      allowance: { SICK: employee.organization?.sickLeaveAllowance, CASUAL: employee.organization?.casualLeaveAllowance },
+      org: employee.organization,
     })
     if (policyError) return res.status(policyError.status).json({ error: policyError.error })
 
@@ -252,11 +252,10 @@ async function getLeaveBalance(req, res, next) {
 
     const employee = await prisma.user.findFirst({
       where: { id: employeeId, ...(employeeId === userId ? {} : { organizationId }) },
-      select: { id: true, organizationId: true, employmentStatus: true, permanentDate: true },
+      select: { id: true, organizationId: true, employmentStatus: true, permanentDate: true, joiningDate: true, startDate: true },
     })
     if (!employee) return res.status(404).json({ error: "Employee not found" })
     const org = await prisma.organization.findUnique({ where: { id: employee.organizationId } })
-    const allowance = { SICK: org.sickLeaveAllowance, CASUAL: org.casualLeaveAllowance }
 
     const todayKey = dateKeyInTimeZone(new Date(), org.timezone || "UTC")
     const year = parseInt(req.query.year, 10) || Number(todayKey.slice(0, 4))
@@ -268,22 +267,35 @@ async function getLeaveBalance(req, res, next) {
       select: { type: true, startDate: true, endDate: true, isHalfDay: true },
     })
 
-    const used = { SICK: 0, CASUAL: 0, UNPAID: 0 }
+    const used = { ANNUAL: 0, CASUAL: 0, SICK: 0, UNPAID: 0 }
     for (const leave of approved) {
       const days = await chargeableDays(employee.organizationId, leave.startDate, leave.endDate, leave.isHalfDay)
       used[leave.type] = (used[leave.type] || 0) + days
     }
 
-    // Annual balance (above, approved only) and the monthly schedule
-    // (approved + pending, cumulative cap) are separate on purpose.
-    const schedule = await leaveSchedule({ organizationId: employee.organizationId, employee, year, todayKey })
+    // Pro-rata picture (approved + pending count against what's earned —
+    // utils/leave-policy.js). Per type: total = this year's pro-rated
+    // limit, used = approved only, remaining also subtracts pending.
+    const schedule = await leaveSchedule({ organizationId: employee.organizationId, employee, org, year, todayKey })
+    const bucket = (type) => ({
+      used: used[type],
+      total: schedule.types[type].total,
+      fullYear: schedule.types[type].fullYear,
+      pending: Math.max(0, schedule.types[type].used - used[type]),
+      remaining: schedule.types[type].remaining,
+    })
+    const allowances = leaveAllowances(org)
 
     res.json({
       year,
-      sick: { used: used.SICK, total: allowance.SICK, remaining: Math.max(0, allowance.SICK - used.SICK) },
-      casual: { used: used.CASUAL, total: allowance.CASUAL, remaining: Math.max(0, allowance.CASUAL - used.CASUAL) },
+      annual: bucket("ANNUAL"),
+      casual: bucket("CASUAL"),
+      sick: bucket("SICK"),
       unpaid: { used: used.UNPAID },
-      annualTotal: allowance.SICK + allowance.CASUAL,
+      entitlement: allowances.total,
+      annualTotal: schedule.yearEntitlement,
+      earnedToDate: schedule.currentMonth?.accrued ?? null,
+      availableNow: schedule.currentMonth?.remaining ?? null,
       schedule,
     })
   } catch (err) {

@@ -85,7 +85,26 @@ function isManagement(role) {
   return MANAGEMENT_ROLES.includes(role)
 }
 
+// Only these roles can be someone's Reporting Manager (mirrored in
+// frontend/src/utils/roles.js).
+const REPORTING_MANAGER_ROLES = ["ADMIN", "CEO", "DEPARTMENT_HEAD"]
+
+// Who may be picked as a Reporting Manager: an ADMIN / DEPARTMENT_HEAD of
+// this organization, or a CEO of this organization or the company root, who
+// hasn't left the company.
+function reportingManagerWhere({ organizationId, companyId }) {
+  return {
+    status: { not: "LEFT_COMPANY" },
+    OR: [
+      { organizationId, role: { in: REPORTING_MANAGER_ROLES } },
+      { organizationId: companyId || organizationId, role: "CEO" },
+    ],
+  }
+}
+
 module.exports = {
+  REPORTING_MANAGER_ROLES,
+  reportingManagerWhere,
   MANAGEMENT_ROLES,
   ASSIGNABLE_ROLES,
   EMPLOYEE_DIRECTORY_ROLES,

@@ -249,8 +249,8 @@ export default function Employees() {
   const totalCount = (counts.ACTIVE || 0) + (counts.ON_LEAVE || 0) + (counts.LEFT_COMPANY || 0)
 
   const { data: managerCandidates = [] } = useQuery({
-    queryKey: ["employees", "manager-candidates"],
-    queryFn: () => api.get("/employees", { params: { includeCompanyManagers: true, page: 1, pageSize: 100 } }).then((r) => r.data?.data || r.data || []),
+    queryKey: ["employees", "reporting-managers"],
+    queryFn: () => api.get("/employees", { params: { managersOnly: 1, page: 1, pageSize: 100 } }).then((r) => r.data?.data || r.data || []),
     enabled: canPickRole && showForm,
   })
   const { data: departments } = useQuery({

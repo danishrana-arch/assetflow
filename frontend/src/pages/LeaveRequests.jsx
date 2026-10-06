@@ -9,13 +9,15 @@ import StatusPill from "../components/ui/StatusPill"
 import { SelectField } from "../components/ui/Field"
 import EmptyState from "../components/ui/EmptyState"
 import useMarkNotificationsRead from "../hooks/useMarkNotificationsRead"
+import LeavePolicyPanel from "../components/LeavePolicyPanel"
+import { useAuth } from "../context/AuthContext"
 
 const LEAVE_TONE = { PENDING_HR: "yellow", PENDING_FINAL_APPROVAL: "blue", APPROVED: "green", REJECTED: "pink", CANCELLED: "slate" }
 const LEAVE_STATUS_LABELS = { PENDING_HR: "Pending HR", PENDING_FINAL_APPROVAL: "Pending final approval", APPROVED: "Approved", REJECTED: "Rejected", CANCELLED: "Cancelled" }
 const isPending = (leave) => leave.status === "PENDING_HR" || leave.status === "PENDING_FINAL_APPROVAL"
 // "PENDING" in the filter = either pending stage.
 const matchesStatus = (leave, filter) => !filter || (filter === "PENDING" ? isPending(leave) : leave.status === filter)
-const LEAVE_TYPE_LABELS = { SICK: "Sick", CASUAL: "Annual", UNPAID: "Unpaid" }
+const LEAVE_TYPE_LABELS = { ANNUAL: "Annual", CASUAL: "Casual", SICK: "Sick", UNPAID: "Unpaid" }
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
 
 function fmt(dateStr) {
@@ -48,7 +50,8 @@ function LeaveImpact({ leave }) {
     staleTime: 60000,
   })
   const days = requestDays(leave)
-  const bucket = leave.type === "SICK" ? balance?.sick : leave.type === "CASUAL" ? balance?.casual : null
+  const bucket = { SICK: balance?.sick, CASUAL: balance?.casual, ANNUAL: balance?.annual }[leave.type] || null
+  const earned = balance?.schedule?.currentMonth
   const exceeds = bucket && days > bucket.remaining
 
   return (
@@ -58,6 +61,7 @@ function LeaveImpact({ leave }) {
       ) : bucket ? (
         <p className={exceeds ? "font-semibold text-chip-pink-fg" : ""}>
           {LEAVE_TYPE_LABELS[leave.type]} balance: {bucket.remaining} of {bucket.total} days left{exceeds ? ` — this request is up to ${days} days` : ""}.
+          {earned ? ` Pro-rata: ${earned.accrued} days earned by ${earned.name}, ${earned.remaining} available now.` : ""}
         </p>
       ) : isPending(leave) ? (
         <p>Checking balance…</p>
@@ -70,6 +74,7 @@ function LeaveImpact({ leave }) {
 }
 
 export default function LeaveRequests() {
+  const { user } = useAuth()
   useMarkNotificationsRead("LEAVE_REQUEST")
   const [statusFilter, setStatusFilter] = useState("MINE")
   const [typeFilter, setTypeFilter] = useState("")
@@ -157,6 +162,8 @@ export default function LeaveRequests() {
           </>
         }
       />
+
+      <LeavePolicyPanel canEdit={["ADMIN", "CEO"].includes(user?.role)} />
 
       <label className="mb-3 flex h-9 w-full items-center gap-2 rounded-xl border border-border bg-surface px-3 text-sm focus-within:border-accent sm:w-72">
         <Search size={14} className="shrink-0 text-muted-2" />

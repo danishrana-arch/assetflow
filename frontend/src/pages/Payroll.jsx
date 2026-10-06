@@ -1,6 +1,6 @@
 import { Fragment, useMemo, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Wallet, Play, Send, CheckCircle2, XCircle, Trash2, ChevronLeft, ChevronRight, UserX, Pencil, Plus, Minus, Receipt, Percent, ClipboardCheck, FileSearch } from "lucide-react"
+import { Wallet, Play, Send, CheckCircle2, XCircle, Trash2, ChevronLeft, ChevronRight, UserX, Pencil, Plus, Minus, Receipt, Percent, ClipboardCheck, FileSearch, TrendingUp } from "lucide-react"
 import { Link } from "react-router-dom"
 import api from "../api/client"
 import { useAuth } from "../context/AuthContext"
@@ -11,6 +11,7 @@ import StatusPill from "../components/ui/StatusPill"
 import EmptyState from "../components/ui/EmptyState"
 import { TextField, SelectField } from "../components/ui/Field"
 import PayrollDetailsDrawer from "../components/PayrollDetailsDrawer"
+import { SalaryRevisionForm, SalaryHistory, SalaryHistoryTitle } from "../components/SalaryRevision"
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
@@ -391,6 +392,9 @@ export default function Payroll() {
   const [taxPercentAll, setTaxPercentAll] = useState(0)
   const [showReview, setShowReview] = useState(false)
   const [detailsId, setDetailsId] = useState(null)
+  const [showSalaryPanel, setShowSalaryPanel] = useState(false)
+  // ADMIN / HR / CEO raise or cut base salaries (history kept).
+  const canReviseSalary = canManagePayroll || isCeo
 
   const { data: records, isLoading } = useQuery({
     queryKey: ["payroll", month, year],
@@ -409,8 +413,13 @@ export default function Payroll() {
   const { data: employees } = useQuery({
     queryKey: ["employees", "payroll-termination-picker"],
     queryFn: () => api.get("/employees").then((r) => r.data),
-    enabled: canManagePayroll && showTerminationPicker,
+    enabled: (canManagePayroll && showTerminationPicker) || (canReviseSalary && showSalaryPanel),
   })
+  // Who the salary form may pick: never yourself; HR never an Admin/CEO.
+  const salaryEmployees = useMemo(
+    () => employees && employees.filter((e) => e.id !== user?.id && e.status !== "LEFT_COMPANY" && !(user?.role === "HR" && ["ADMIN", "CEO"].includes(e.role))),
+    [employees, user]
+  )
   const recordByEmployee = useMemo(() => new Map((records || []).map((r) => [r.employeeId, r])), [records])
 
   const totals = useMemo(() => {
@@ -736,6 +745,16 @@ export default function Payroll() {
               </>
             )}
 
+            {canReviseSalary && (
+              <button
+                onClick={() => { setShowSalaryPanel((v) => !v); setShowTaxPanel(false); setShowTerminationPicker(false) }}
+                title="Raise or cut an employee's base salary — every change is kept in the history"
+                className="flex items-center gap-1.5 rounded-full border border-border-strong bg-surface px-4 py-2 text-sm font-semibold text-ink hover:bg-surface-2"
+              >
+                <TrendingUp size={14} /> Increment / Decrement
+              </button>
+            )}
+
             {canManagePayroll && (
               <button
                 onClick={() => { setShowTerminationPicker((v) => !v); setShowTaxPanel(false); createTerminationPayslip.reset() }}
@@ -791,6 +810,24 @@ export default function Payroll() {
               {applyTax.data.taxPercent}% tax applied to {applyTax.data.updated} payslip{applyTax.data.updated === 1 ? "" : "s"}.
             </p>
           )}
+        </div>
+      )}
+
+      {showSalaryPanel && canReviseSalary && (
+        <div className="mb-4 rounded-card bg-surface p-4 shadow-card">
+          <div className="text-sm font-semibold text-ink">Salary increment / decrement</div>
+          <p className="mt-0.5 text-xs text-muted">
+            Changes the employee's base salary from the month you pick. Every change is recorded below and on the employee's profile.
+          </p>
+          <div className="mt-3 grid gap-5 lg:grid-cols-2">
+            <SalaryRevisionForm employees={salaryEmployees} onCancel={() => setShowSalaryPanel(false)} />
+            <div className="min-w-0">
+              <SalaryHistoryTitle>Salary history</SalaryHistoryTitle>
+              <div className="max-h-[420px] overflow-y-auto pr-1">
+                <SalaryHistory showEmployee limit={100} />
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

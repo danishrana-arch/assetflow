@@ -60,6 +60,10 @@ export function isManagement(role) {
   return MANAGEMENT_ROLES.includes(role)
 }
 
+// Only these roles can be someone’s Reporting Manager (mirrors the
+// backend’s REPORTING_MANAGER_ROLES / ?managersOnly=1 list).
+export const REPORTING_MANAGER_ROLES = ["ADMIN", "CEO", "DEPARTMENT_HEAD"]
+
 export function roleLabel(role) {
   return ROLE_LABELS[role] || role
 }

@@ -1,6 +1,6 @@
 const bcrypt = require("bcrypt")
 const prisma = require("../lib/prisma")
-const { MANAGEMENT_ROLES, ASSIGNABLE_ROLES, MAX_CEO_COUNT, EMPLOYEE_DIRECTORY_ROLES, hasModuleAccess } = require("../utils/roles")
+const { MANAGEMENT_ROLES, ASSIGNABLE_ROLES, MAX_CEO_COUNT, EMPLOYEE_DIRECTORY_ROLES, hasModuleAccess, reportingManagerWhere, REPORTING_MANAGER_ROLES } = require("../utils/roles")
 const { encryptField, decryptField } = require("../utils/crypto")
 const { logAudit } = require("../utils/audit")
 const { dateKeyInTimeZone } = require("../utils/timezone")
@@ -57,7 +57,11 @@ async function listEmployees(req, res, next) {
       requesterRole === "DEPARTMENT_HEAD" ? requesterDepartmentId || "__none__" : department
 
     const useCompanyManagerPool = includeCompanyManagers === "true" || includeCompanyManagers === "1"
-    const where = useCompanyManagerPool
+    // Reporting Manager dropdowns: only Admin / CEO / Department Head.
+    const managersOnly = req.query.managersOnly === "true" || req.query.managersOnly === "1"
+    const where = managersOnly
+      ? reportingManagerWhere({ organizationId, companyId })
+      : useCompanyManagerPool
       ? {
           OR: [
             { organizationId },
@@ -89,8 +93,8 @@ async function listEmployees(req, res, next) {
         }
 
     // Directory page filters/sorting (all optional; unknown values ignored).
-    if (where.status && !["ACTIVE", "ON_LEAVE", "LEFT_COMPANY"].includes(where.status)) delete where.status
-    if (req.query.role && ASSIGNABLE_ROLES.includes(req.query.role)) where.role = req.query.role
+    if (typeof where.status === "string" && !["ACTIVE", "ON_LEAVE", "LEFT_COMPANY"].includes(where.status)) delete where.status
+    if (!managersOnly && req.query.role && ASSIGNABLE_ROLES.includes(req.query.role)) where.role = req.query.role
     if (req.query.workLocationType && ["OFFICE", "FIELD"].includes(req.query.workLocationType)) {
       where.workLocationType = req.query.workLocationType
     }
@@ -194,7 +198,7 @@ async function getEmployee(req, res, next) {
         leaveApplications: {
           where: { status: "APPROVED" },
           orderBy: { startDate: "desc" },
-          select: { id: true, startDate: true, endDate: true, type: true, status: true },
+          select: { id: true, startDate: true, endDate: true, type: true, status: true, isHalfDay: true },
         },
         payrollRecords: {
           orderBy: [{ year: "desc" }, { month: "desc" }],
@@ -406,10 +410,10 @@ const MANAGEMENT_EDITABLE_FIELDS = [
 // Employment status decides leave eligibility, so only these roles set it.
 const EMPLOYMENT_STATUS_EDITORS = ["ADMIN", "CEO", "HR"]
 
-// Org policy: no salary below this. "further on" from here is just
-// whatever management sets per employee/level — this is the floor, not a
+// Org policy: no salary below this (utils/payroll.js) — the floor, not a
 // fixed scale.
-const MIN_BASE_SALARY = 25000
+const { MIN_BASE_SALARY } = require("../utils/payroll")
+const { recordProfileSalaryEdit } = require("./salary-revision.controller")
 
 // Fields a non-management user may change on THEMSELVES ONLY.
 const SELF_EDITABLE_FIELDS = ["phone", "email"]
@@ -587,22 +591,24 @@ async function updateEmployee(req, res, next) {
       data.role = req.body.role
     }
 
-    if (data.managerId) {
+    // Only checked when the manager actually changes, so re-saving a profile
+    // whose existing manager predates the role rule still works.
+    if (data.managerId && data.managerId !== existing.managerId) {
       if (data.managerId === id) return res.status(400).json({ error: "An employee cannot report to themselves" })
       const manager = await prisma.user.findFirst({
-        where: {
-          id: data.managerId,
-          OR: [
-            { organizationId },
-            { organizationId: companyId || organizationId, role: "CEO" },
-          ],
-        },
-        select: { id: true, organizationId: true, role: true },
+        where: { id: data.managerId, ...reportingManagerWhere({ organizationId, companyId }) },
+        select: { id: true },
       })
-      if (!manager) return res.status(400).json({ error: "Reporting Manager must belong to the current organization or be the company CEO" })
+      if (!manager) return res.status(400).json({ error: "Reporting Manager must be an Admin, CEO or Department Head" })
     }
 
     const updated = await prisma.user.update({ where: { id }, data })
+
+    // Keep the salary history complete when the field is edited directly.
+    if (data.baseSalary !== undefined) {
+      const org = await prisma.organization.findUnique({ where: { id: existing.organizationId }, select: { timezone: true } })
+      await recordProfileSalaryEdit({ organizationId: existing.organizationId, employeeId: id, previousSalary: existing.baseSalary, newSalary: data.baseSalary, userId, timeZone: org?.timezone })
+    }
 
     if (data.employmentStatus && data.employmentStatus !== existing.employmentStatus) {
       logAudit({
@@ -787,11 +793,12 @@ async function importEmployees(req, res, next) {
 
     const [departments, managerPool] = await Promise.all([
       prisma.department.findMany({ where: { organizationId } }),
-      // Same pool the Reporting Manager dropdown offers: this org + company CEOs.
+      // Same pool the Reporting Manager dropdown offers: Admin / CEO /
+      // Department Head (utils/roles.js reportingManagerWhere).
       headerMap.reportingManager === undefined
         ? []
         : prisma.user.findMany({
-            where: { OR: [{ organizationId }, { organizationId: companyId || organizationId, role: "CEO" }] },
+            where: reportingManagerWhere({ organizationId, companyId }),
             select: { id: true, name: true, email: true },
           }),
     ])
@@ -895,7 +902,7 @@ async function importEmployees(req, res, next) {
         const key = managerRaw.toLowerCase()
         const matches = managers.filter((m) => m.email.toLowerCase() === key || m.name.toLowerCase() === key)
         if (matches.length === 1) managerId = matches[0].id
-        else warn(matches.length ? `Reporting manager "${managerRaw}" matches several people — use their email; left blank` : `Reporting manager "${managerRaw}" not found — left blank`)
+        else warn(matches.length ? `Reporting manager "${managerRaw}" matches several people — use their email; left blank` : `Reporting manager "${managerRaw}" not found among Admins, CEOs and Department Heads — left blank`)
       }
 
       let baseSalary = null
@@ -959,7 +966,7 @@ async function importEmployees(req, res, next) {
             ...employmentData({ employmentStatus, permanentDate }),
           },
         })
-        managers.push({ id: user.id, name: user.name, email: user.email })
+        if (REPORTING_MANAGER_ROLES.includes(user.role)) managers.push({ id: user.id, name: user.name, email: user.email })
         created.push({ row: rowNumber, name: user.name, email: user.email, tempPassword })
       } catch (err) {
         skipped.push({ row: rowNumber, reason: "Could not create row (check for duplicate/invalid data)" })

@@ -1,7 +1,7 @@
 const bcrypt = require("bcrypt")
 const crypto = require("crypto")
 const prisma = require("../lib/prisma")
-const { ASSIGNABLE_ROLES, MAX_CEO_COUNT } = require("../utils/roles")
+const { ASSIGNABLE_ROLES, MAX_CEO_COUNT, reportingManagerWhere } = require("../utils/roles")
 const { parseDateInput, employmentData, EMPLOYMENT_STATUSES } = require("../utils/employee-fields")
 const { sendEmail, appUrl, escapeHtml } = require("../utils/mailer")
 const { logAudit } = require("../utils/audit")
@@ -167,10 +167,10 @@ async function createInvitation(req, res, next) {
     }
     if (managerId) {
       const manager = await prisma.user.findFirst({
-        where: { id: managerId, OR: [{ organizationId }, { organizationId: companyId, role: "CEO" }] },
+        where: { id: managerId, ...reportingManagerWhere({ organizationId, companyId }) },
         select: { id: true },
       })
-      if (!manager) return res.status(400).json({ error: "Reporting Manager must belong to the current organization or be the company CEO" })
+      if (!manager) return res.status(400).json({ error: "Reporting Manager must be an Admin, CEO or Department Head" })
     }
 
     // User.email is globally unique — check case-insensitively so "Ali@x.com"
