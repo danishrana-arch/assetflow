@@ -98,8 +98,9 @@ export default function AcceptInvite() {
 
   return (
     <AuthCard
+      brandName={invite.organizationName}
       title={`Join ${invite.organizationName}`}
-      subtitle={`${invite.invitedBy || "Your HR team"} invited you. Choose a password to finish setting up your account.`}
+      subtitle={`${invite.organizationName} has invited you to join the team. Choose a password to finish setting up your account.`}
     >
       <dl className="mb-5 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 rounded-2xl border border-border bg-surface-2 p-4 text-sm">
         {details.map(([k, v]) => (
@@ -112,7 +113,7 @@ export default function AcceptInvite() {
       {invite.message && (
         <p className="mb-5 whitespace-pre-line rounded-2xl bg-surface-2 p-4 text-sm italic text-ink">
           “{invite.message}”
-          <span className="mt-1 block text-xs not-italic text-muted">— {invite.invitedBy || "HR"}</span>
+          <span className="mt-1 block text-xs not-italic text-muted">— {invite.organizationName}</span>
         </p>
       )}
 

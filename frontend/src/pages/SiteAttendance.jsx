@@ -197,8 +197,8 @@ function EmployeeCard({ employee, site, timeZone, pending, busy, onAction, onCor
   const canAbsent = !queued && employee.state === "NOT_CHECKED_IN"
 
   return (
-    <div className="card min-w-0 p-4">
-      <div className="flex items-start gap-3">
+    <div className="card flex h-full min-w-0 flex-col p-4">
+      <div className="flex items-center gap-3">
         <Avatar name={employee.name} size="sm" />
         <div className="min-w-0 flex-1">
           <p className="truncate text-base font-semibold text-ink">{employee.name}</p>
@@ -212,12 +212,12 @@ function EmployeeCard({ employee, site, timeZone, pending, busy, onAction, onCor
       <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
         <div className="rounded-2xl bg-surface-2 px-3 py-2">
           <p className="text-muted">Check-in</p>
-          <p className="mt-0.5 font-mono text-sm font-semibold text-ink">{inAt ? formatTime(inAt, { timeZone }) : "--"}</p>
+          <p className="mt-0.5 text-sm font-semibold tabular-nums text-ink">{inAt ? formatTime(inAt, { timeZone }) : "--"}</p>
           {employee.atOtherSite && employee.checkInSiteName && <p className="mt-0.5 truncate text-[10px] text-muted-2">at {employee.checkInSiteName}</p>}
         </div>
         <div className="rounded-2xl bg-surface-2 px-3 py-2">
           <p className="text-muted">Check-out</p>
-          <p className="mt-0.5 font-mono text-sm font-semibold text-ink">{outAt ? formatTime(outAt, { timeZone }) : "--"}</p>
+          <p className="mt-0.5 text-sm font-semibold tabular-nums text-ink">{outAt ? formatTime(outAt, { timeZone }) : "--"}</p>
           {employee.checkOutSiteName && <p className="mt-0.5 truncate text-[10px] text-muted-2">at {employee.checkOutSiteName}</p>}
         </div>
       </div>
@@ -235,7 +235,7 @@ function EmployeeCard({ employee, site, timeZone, pending, busy, onAction, onCor
       {employee.markedByName && !queued && <p className="mt-1.5 text-[11px] text-muted-2">Last marked by {employee.markedByName}</p>}
       {employee.pendingCorrection && <p className="mt-1 text-[11px] text-chip-blue-fg">Correction request waiting for HR</p>}
 
-      <div className="mt-3 flex flex-col gap-2">
+      <div className="mt-auto flex flex-col gap-2 pt-3">
         {canCheckIn && (
           <button type="button" disabled={busy} onClick={() => onAction(employee, "CHECK_IN")} className="pill-accent flex w-full items-center justify-center gap-2 px-4 py-3.5 text-base disabled:opacity-50">
             <LogIn size={18} /> Check In
@@ -285,15 +285,16 @@ function HistoryTab({ todayKey }) {
 
   return (
     <div>
-      <div className="card mb-3 grid grid-cols-2 gap-2 p-3 sm:flex sm:items-end">
-        <label className="text-xs font-semibold text-muted">
+      <div className="card mb-4 grid grid-cols-2 gap-3 p-4 sm:flex sm:items-end">
+        <label className="block text-xs font-semibold uppercase tracking-wide text-muted sm:w-48">
           From
-          <input type="date" value={range.from} max={range.to} onChange={(e) => setRange((r) => ({ ...r, from: e.target.value }))} className="field mt-1 py-2.5" />
+          <input type="date" value={range.from} max={range.to} onChange={(e) => setRange((r) => ({ ...r, from: e.target.value }))} className="field mt-1.5 py-2.5 normal-case tracking-normal" />
         </label>
-        <label className="text-xs font-semibold text-muted">
+        <label className="block text-xs font-semibold uppercase tracking-wide text-muted sm:w-48">
           To
-          <input type="date" value={range.to} min={range.from} max={todayKey} onChange={(e) => setRange((r) => ({ ...r, to: e.target.value }))} className="field mt-1 py-2.5" />
+          <input type="date" value={range.to} min={range.from} max={todayKey} onChange={(e) => setRange((r) => ({ ...r, to: e.target.value }))} className="field mt-1.5 py-2.5 normal-case tracking-normal" />
         </label>
+        {data?.rows && <p className="col-span-2 text-xs text-muted sm:ml-auto sm:pb-3">{data.rows.length} site-day{data.rows.length === 1 ? "" : "s"}</p>}
       </div>
       {data?.fromCache && <p className="mb-2 text-xs text-chip-yellow-fg">Offline — showing the copy saved on this device.</p>}
       {isLoading && <p className="text-sm text-muted">Loading history…</p>}
@@ -308,10 +309,10 @@ function HistoryTab({ todayKey }) {
                 <div key={`${row.date}-${row.siteId || row.siteName}`} className="card p-4">
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div className="min-w-0">
-                      <p className="flex items-center gap-1.5 truncate text-sm font-semibold text-ink"><Building2 size={14} /> {row.siteName}</p>
+                      <p className="flex min-w-0 items-center gap-1.5 text-sm font-semibold text-ink"><Building2 size={14} className="shrink-0 text-muted" /> <span className="truncate">{row.siteName}</span></p>
                       {row.projectName && <p className="mt-0.5 flex items-center gap-1 text-xs text-muted"><FolderKanban size={11} /> {row.projectName}</p>}
                     </div>
-                    <p className="flex items-center gap-1 font-mono text-sm font-semibold text-ink"><Clock size={13} /> {row.firstLabel} – {row.lastLabel}</p>
+                    <p className="flex shrink-0 items-center gap-1.5 text-sm font-semibold tabular-nums text-ink"><Clock size={13} className="text-muted" /> {row.firstLabel} – {row.lastLabel}</p>
                   </div>
                   <div className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
                     <span className="rounded-full bg-surface-2 px-2.5 py-1 font-semibold text-ink"><Users size={11} className="mr-1 inline" />{row.employeesManaged} employee{row.employeesManaged === 1 ? "" : "s"}</span>
@@ -532,10 +533,10 @@ export default function SiteAttendance() {
       )}
 
       {/* Tabs */}
-      <div className="mb-3 flex rounded-2xl border border-border bg-surface p-1" role="tablist">
+      <div className="mb-4 flex rounded-2xl border border-border bg-surface p-1 sm:max-w-md" role="tablist">
         {[["attendance", ClipboardList, "Attendance"], ["history", History, "Site history"]].map(([key, Icon, label]) => (
           <button key={key} type="button" role="tab" aria-selected={tab === key} onClick={() => setTab(key)}
-            className={`flex flex-1 items-center justify-center gap-1.5 rounded-xl px-3 py-2.5 text-sm font-semibold ${tab === key ? "bg-surface-2 text-ink" : "text-muted hover:text-ink"}`}>
+            className={`flex flex-1 items-center justify-center gap-1.5 rounded-xl px-3 py-2.5 text-sm font-semibold transition-colors ${tab === key ? "bg-accent text-on-accent shadow-sm" : "text-muted hover:text-ink"}`}>
             <Icon size={15} /> {label}
           </button>
         ))}
@@ -552,20 +553,20 @@ export default function SiteAttendance() {
           )}
 
           {sites.length > 0 && (
-            <div className="card mb-3 space-y-3 p-4">
-              <div className={`grid gap-3 ${projects.length > 1 ? "sm:grid-cols-2" : ""}`}>
+            <div className="card mb-4 space-y-3 p-4">
+              <div className={`grid items-end gap-3 ${projects.length > 1 ? "md:grid-cols-3" : "md:grid-cols-2"}`}>
                 {projects.length > 1 && (
-                  <label className="text-xs font-semibold text-muted">
+                  <label className="block text-xs font-semibold uppercase tracking-wide text-muted">
                     Project
-                    <select value={projectFilter} onChange={(e) => setProjectFilter(e.target.value)} className="field mt-1 py-3 text-base">
+                    <select value={projectFilter} onChange={(e) => setProjectFilter(e.target.value)} className="field mt-1.5 h-12 py-0 text-sm normal-case tracking-normal">
                       <option value="">All projects</option>
                       {projects.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
                     </select>
                   </label>
                 )}
-                <label className="text-xs font-semibold text-muted">
+                <label className="block text-xs font-semibold uppercase tracking-wide text-muted">
                   Site
-                  <select value={site?.id || ""} onChange={(e) => { setSiteId(e.target.value); setLocationInfo(null); setStateFilter("") }} className="field mt-1 py-3 text-base font-semibold text-ink">
+                  <select value={site?.id || ""} onChange={(e) => { setSiteId(e.target.value); setLocationInfo(null); setStateFilter("") }} className="field mt-1.5 h-12 py-0 text-sm font-semibold normal-case tracking-normal text-ink">
                     {visibleSites.map((s) => (
                       <option key={s.id} value={s.id} disabled={!s.usable}>
                         {s.name}{s.projectName ? ` · ${s.projectName}` : ""}{!s.usable ? " (closed)" : ` · ${s.employeeCount}`}
@@ -573,13 +574,23 @@ export default function SiteAttendance() {
                     ))}
                   </select>
                 </label>
+                {site?.usable && (
+                  <label className="block text-xs font-semibold uppercase tracking-wide text-muted">
+                    Employee
+                    <span className="mt-1.5 flex h-12 items-center gap-2 rounded-2xl border border-border bg-surface-2 px-4 normal-case tracking-normal focus-within:border-accent">
+                      <Search size={16} className="shrink-0 text-muted-2" />
+                      <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by name or project" className="min-w-0 flex-1 bg-transparent text-sm font-normal text-ink outline-none placeholder:text-muted-2" aria-label="Search employee" />
+                      {search && <button type="button" onClick={() => setSearch("")} className="text-muted-2" aria-label="Clear search"><X size={15} /></button>}
+                    </span>
+                  </label>
+                )}
               </div>
               {site && (
-                <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
-                  <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                    <span className="flex items-center gap-1"><MapPin size={12} /> {site.address || "No address"}</span>
-                    <span>Geofence: {site.geofenceMode === "STRICT" ? "strict (on-site only)" : site.geofenceMode === "DISABLED" ? "off" : "warning"}</span>
-                    <span>{timeZone}</span>
+                <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3 text-xs text-muted">
+                  <span className="flex flex-wrap items-center gap-2">
+                    <span className="flex items-center gap-1 rounded-full bg-surface-2 px-2.5 py-1"><MapPin size={12} /> {site.address || "No address"}</span>
+                    <span className="rounded-full bg-surface-2 px-2.5 py-1">Geofence: {site.geofenceMode === "STRICT" ? "strict (on-site only)" : site.geofenceMode === "DISABLED" ? "off" : "warning"}</span>
+                    <span className="flex items-center gap-1 rounded-full bg-surface-2 px-2.5 py-1"><Clock size={12} /> {timeZone}</span>
                   </span>
                   {site.geofenceMode !== "DISABLED" && (
                     <button type="button" onClick={checkLocation} className="inline-flex items-center gap-1 font-semibold text-accent">
@@ -600,18 +611,12 @@ export default function SiteAttendance() {
 
           {site?.usable && (
             <>
-              <label className="mb-3 flex h-12 items-center gap-2 rounded-2xl border border-border bg-surface px-4 focus-within:border-accent">
-                <Search size={17} className="shrink-0 text-muted-2" />
-                <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search employee" className="min-w-0 flex-1 bg-transparent text-base text-ink outline-none placeholder:text-muted-2" aria-label="Search employee" />
-                {search && <button type="button" onClick={() => setSearch("")} className="text-muted-2" aria-label="Clear search"><X size={16} /></button>}
-              </label>
-
-              <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                {[["NOT_CHECKED_IN", "Not checked in"], ["CHECKED_IN", "Checked in"], ["CHECKED_OUT", "Checked out"], ["ABSENT", "Absent"]].map(([key, label]) => (
+              <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+                {[["NOT_CHECKED_IN", "Not checked in", "bg-muted-2"], ["CHECKED_IN", "Checked in", "bg-success"], ["CHECKED_OUT", "Checked out", "bg-info"], ["ABSENT", "Absent", "bg-danger"]].map(([key, label, dot]) => (
                   <button key={key} type="button" onClick={() => setStateFilter((v) => (v === key ? "" : key))} aria-pressed={stateFilter === key}
-                    className={`rounded-2xl border px-3 py-2 text-left ${stateFilter === key ? "border-accent bg-accent-soft" : "border-border bg-surface"}`}>
-                    <p className="text-[11px] text-muted">{label}</p>
-                    <p className="text-xl font-semibold text-ink">{counts[key]}</p>
+                    className={`flex min-h-[84px] flex-col justify-between rounded-2xl border p-4 text-left transition-colors ${stateFilter === key ? "border-accent bg-accent-soft" : "border-border bg-surface hover:bg-surface-2"}`}>
+                    <span className="flex items-center gap-2 text-xs font-semibold text-muted"><span className={`h-2 w-2 shrink-0 rounded-full ${dot}`} />{label}</span>
+                    <span className="text-2xl font-semibold tabular-nums text-ink">{counts[key]}</span>
                   </button>
                 ))}
               </div>
@@ -630,7 +635,7 @@ export default function SiteAttendance() {
                 <EmptyState icon={Users} title="No employees on this site" description="An Admin assigns workers to the site directly or through its project." />
               )}
 
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+              <div className="grid grid-cols-1 items-stretch gap-3 md:grid-cols-2 xl:grid-cols-3">
                 {filtered.map((e) => (
                   <EmployeeCard
                     key={e.id}

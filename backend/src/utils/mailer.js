@@ -17,10 +17,19 @@ function isEmailConfigured() {
   return Boolean(getTransporter())
 }
 
-async function sendEmail({ to, subject, text, html }) {
+// `fromName` replaces SMTP_FROM's display name (same address), e.g. so an
+// invitation shows as sent by the company.
+function fromAddress(fromName) {
+  const configured = process.env.SMTP_FROM
+  if (!fromName) return configured
+  const match = /<([^>]+)>/.exec(configured)
+  return { name: String(fromName).replace(/[\r\n<>"]/g, "").trim(), address: (match ? match[1] : configured).trim() }
+}
+
+async function sendEmail({ to, subject, text, html, fromName }) {
   const transporter = getTransporter()
   if (!transporter || !to) return false
-  await transporter.sendMail({ from: process.env.SMTP_FROM, to, subject, text, html })
+  await transporter.sendMail({ from: fromAddress(fromName), to, subject, text, html })
   return true
 }
 

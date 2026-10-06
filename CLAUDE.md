@@ -2681,3 +2681,25 @@ non-GET request aborted) and fixed what wasn't readable:
   kills old link, single-use accept, login after accept, cancel + re-invite)
   + Playwright (HR invites from the page, list updates, accept on 390px →
   /profile, no overflow, no page errors). All test users/audit rows deleted.
+- Follow-up (same day): the invitation is branded **only with the sending
+  company's name** (the org the inviter had selected = the org the account
+  is created in). Email subject "You're invited to join <Company>", body
+  "<Company> has invited you to join the team", message signed "— <Company>",
+  sender display name = company name (`sendEmail({ fromName })` in
+  `utils/mailer.js` keeps the SMTP_FROM address). No inviter name and no
+  "ManagementDock" in the email or on `/accept-invite` (`AuthCard brandName`
+  shows the company initial + name instead of the app logo); the public
+  `GET /auth/invitation/:token` no longer returns `invitedBy`. The HR-side
+  invitations list still shows "by <inviter>" (internal).
+
+## Post-module change: Site Attendance (Site Admin) layout tidy (2026-10-06)
+
+`SiteAttendance.jsx`, layout only (no behaviour change): Site (+ Project
+when >1) and employee search sit in one aligned toolbar row with uppercase
+field labels; site address / geofence / timezone as chips under a divider;
+segmented tabs capped at `max-w-md` with an accent active state; status
+tiles equal height with a coloured dot; employee cards equal height with
+actions pinned to the bottom; history date filter is a compact row with a
+site-day count; times use `tabular-nums` instead of `font-mono`. Verified
+read-only as a real Site Admin at 1366 / 820 / 390px — no horizontal
+overflow, no page errors.

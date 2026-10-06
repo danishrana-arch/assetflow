@@ -4,7 +4,8 @@ import logoFull from "../assets/logo1.png"
 
 // Minimal centered card for the public auth pages (forgot/reset password),
 // matching the Login page's light/dark palette.
-export default function AuthCard({ title, subtitle, children }) {
+// `brandName` swaps the app logo for a company name (invitation page).
+export default function AuthCard({ title, subtitle, brandName, children }) {
   const { mode } = useTheme()
   const isDark = mode === "dark"
 
@@ -13,10 +14,19 @@ export default function AuthCard({ title, subtitle, children }) {
       <div
         className={`w-full max-w-md rounded-[28px] p-8 shadow-xl ${isDark ? "bg-[#151a19] border border-white/5" : "bg-white"}`}
       >
-        <Link to="/login" className="mb-6 flex items-center gap-2.5">
-          <img src={logoFull} alt="ManagementDock" className="h-9 w-9 rounded-xl object-contain" />
-          <span className={`text-base font-bold tracking-tight ${isDark ? "text-white" : "text-[#202525]"}`}>ManagementDock</span>
-        </Link>
+        {brandName ? (
+          <div className="mb-6 flex items-center gap-2.5">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent text-base font-bold text-on-accent">
+              {brandName.trim().charAt(0).toUpperCase()}
+            </span>
+            <span className={`min-w-0 truncate text-base font-bold tracking-tight ${isDark ? "text-white" : "text-[#202525]"}`}>{brandName}</span>
+          </div>
+        ) : (
+          <Link to="/login" className="mb-6 flex items-center gap-2.5">
+            <img src={logoFull} alt="ManagementDock" className="h-9 w-9 rounded-xl object-contain" />
+            <span className={`text-base font-bold tracking-tight ${isDark ? "text-white" : "text-[#202525]"}`}>ManagementDock</span>
+          </Link>
+        )}
         <h1 className={`text-2xl font-semibold ${isDark ? "text-white" : "text-[#202525]"}`} style={{ letterSpacing: "-0.02em" }}>
           {title}
         </h1>

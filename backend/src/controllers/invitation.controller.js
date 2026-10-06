@@ -72,7 +72,9 @@ function serialize(inv) {
   }
 }
 
-async function sendInvitationEmail({ user, organizationName, inviterName, departmentName, message, raw }) {
+// Presented as coming from the company that sent it — its name only (no
+// inviter's name, no product branding), including the sender display name.
+async function sendInvitationEmail({ user, organizationName, departmentName, message, raw }) {
   const link = inviteLink(raw)
   const role = ROLE_LABELS[user.role] || user.role
   const details = [
@@ -87,22 +89,23 @@ async function sendInvitationEmail({ user, organizationName, inviterName, depart
   try {
     sent = await sendEmail({
       to: user.email,
-      subject: `You're invited to join ${organizationName} on ManagementDock`,
+      fromName: organizationName,
+      subject: `You're invited to join ${organizationName}`,
       text:
-        `Hi ${user.name},\n\n${inviterName || "Your HR team"} has invited you to join ${organizationName} on ManagementDock.\n\n` +
+        `Hi ${user.name},\n\n${organizationName} has invited you to join the team.\n\n` +
         details.map(([k, v]) => `${k}: ${v}`).join("\n") +
-        (message ? `\n\nMessage from ${inviterName || "HR"}:\n${message}` : "") +
+        (message ? `\n\nMessage from ${organizationName}:\n${message}` : "") +
         `\n\nAccept the invitation and set your password here (valid for ${INVITE_TTL_DAYS} days, one use):\n${link}\n\n` +
         `If you weren't expecting this, you can ignore this email.\n`,
       html:
         `<div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;color:#1f2937;line-height:1.6">` +
         `<h2>You're invited to join ${escapeHtml(organizationName)}</h2>` +
         `<p>Hi ${escapeHtml(user.name)},</p>` +
-        `<p>${escapeHtml(inviterName || "Your HR team")} has invited you to join <strong>${escapeHtml(organizationName)}</strong> on ManagementDock.</p>` +
+        `<p><strong>${escapeHtml(organizationName)}</strong> has invited you to join the team.</p>` +
         `<table style="border-collapse:collapse;margin:12px 0">` +
         details.map(([k, v]) => `<tr><td style="padding:4px 16px 4px 0;color:#6b7280">${escapeHtml(k)}</td><td style="padding:4px 0"><strong>${escapeHtml(v)}</strong></td></tr>`).join("") +
         `</table>` +
-        (message ? `<p style="background:#f3f4f6;border-radius:12px;padding:12px 14px;white-space:pre-line"><em>${escapeHtml(message)}</em><br><span style="color:#6b7280;font-size:13px">— ${escapeHtml(inviterName || "HR")}</span></p>` : "") +
+        (message ? `<p style="background:#f3f4f6;border-radius:12px;padding:12px 14px;white-space:pre-line"><em>${escapeHtml(message)}</em><br><span style="color:#6b7280;font-size:13px">— ${escapeHtml(organizationName)}</span></p>` : "") +
         `<p><a href="${link}" style="display:inline-block;background:#111827;color:#fff;padding:10px 18px;border-radius:999px;text-decoration:none">Accept invitation</a></p>` +
         `<p style="color:#6b7280;font-size:13px">You'll choose your own password, then go straight to your profile. This link is valid for ${INVITE_TTL_DAYS} days and can be used once. If you weren't expecting this, you can ignore this email.</p>` +
         `</div>`,
@@ -116,13 +119,12 @@ async function sendInvitationEmail({ user, organizationName, inviterName, depart
   return { sent, link }
 }
 
-async function emailContext(organizationId, inviterId, departmentId) {
-  const [organization, inviter, department] = await Promise.all([
+async function emailContext(organizationId, departmentId) {
+  const [organization, department] = await Promise.all([
     prisma.organization.findUnique({ where: { id: organizationId }, select: { name: true } }),
-    inviterId ? prisma.user.findUnique({ where: { id: inviterId }, select: { name: true } }) : null,
     departmentId ? prisma.department.findUnique({ where: { id: departmentId }, select: { name: true } }) : null,
   ])
-  return { organizationName: organization?.name || "your company", inviterName: inviter?.name || null, departmentName: department?.name || null }
+  return { organizationName: organization?.name || "your company", departmentName: department?.name || null }
 }
 
 // POST /invitations — ADMIN/CEO/HR. Creates the account + invitation and
@@ -207,7 +209,7 @@ async function createInvitation(req, res, next) {
       include: { invitation: { include: INVITATION_INCLUDE } },
     })
 
-    const ctx = await emailContext(organizationId, inviterId, departmentId)
+    const ctx = await emailContext(organizationId, departmentId)
     const { sent, link } = await sendInvitationEmail({ user, ...ctx, message, raw })
 
     logAudit({ organizationId, actorId: inviterId, action: "employee.invited", targetType: "User", targetId: user.id, note: `${name} <${email}> as ${role}${sent ? "" : " (email not sent)"}` })
@@ -266,7 +268,7 @@ async function resendInvitation(req, res, next) {
       include: INVITATION_INCLUDE,
     })
     const user = await prisma.user.findUnique({ where: { id: inv.userId }, select: { name: true, email: true, role: true, designation: true, departmentId: true } })
-    const ctx = await emailContext(req.user.organizationId, inv.invitedById || req.user.userId, user.departmentId)
+    const ctx = await emailContext(inv.organizationId, user.departmentId)
     const { sent, link } = await sendInvitationEmail({ user, ...ctx, message: inv.message, raw })
 
     logAudit({ organizationId: req.user.organizationId, actorId: req.user.userId, action: "employee.invitation_resent", targetType: "User", targetId: inv.userId, note: `${user.email}${sent ? "" : " (email not sent)"}` })
@@ -299,7 +301,6 @@ async function findByToken(token) {
     include: {
       user: { select: { id: true, name: true, email: true, role: true, designation: true, status: true, department: { select: { name: true } } } },
       organization: { select: { name: true, archivedAt: true } },
-      invitedBy: { select: { name: true } },
     },
   })
 }
@@ -325,7 +326,6 @@ async function getInvitationByToken(req, res, next) {
       designation: inv.user.designation,
       department: inv.user.department?.name || null,
       organizationName: inv.organization.name,
-      invitedBy: inv.invitedBy?.name || null,
       message: inv.message,
       expiresAt: inv.expiresAt,
     })
