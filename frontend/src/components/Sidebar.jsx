@@ -76,7 +76,12 @@ function useDock(onHover) {
       const shiftY = before + m.extra / 2 - anchor
       const shiftX = maxScale > 1 ? ((m.scale - 1) / (maxScale - 1)) * DOCK_FORWARD : 0
       before += m.extra
-      m.el.style.transform = `translate(${shiftX}px, ${shiftY}px) scale(${m.scale})`
+      // Whole-pixel moves and a 2-decimal scale: fractional offsets put the
+      // icon strokes between pixels and make them look soft.
+      const x = Math.round(shiftX)
+      const yShift = Math.round(shiftY)
+      m.el.style.transform =
+        m.scale === 1 && x === 0 && yShift === 0 ? "" : `translate(${x}px, ${yShift}px) scale(${m.scale.toFixed(2)})`
       m.el.style.zIndex = m.scale > 1 ? String(Math.round(m.scale * 10)) : ""
       // Nearest icon, not "icon strictly under the cursor", so the label
       // doesn't blink off in the gaps between icons.
@@ -131,10 +136,12 @@ function useDock(onHover) {
 const dockHoveredClass =
   "[&[data-dock-hovered]_svg]:[stroke-width:2.75]"
 
+// No will-change: it makes the browser cache each icon as a bitmap at 1x,
+// which is then stretched (blurry) when the dock magnifies it. Without it
+// the icon is redrawn sharp at its magnified size.
 const dockItemStyle = {
   transformOrigin: "center center",
   transition: "transform 140ms cubic-bezier(0.2, 0.8, 0.2, 1), background-color 200ms, color 200ms",
-  willChange: "transform",
 }
 
 // The Dock's name bubble, beside the magnified icon. Portaled to <body>:
@@ -186,8 +193,8 @@ function RailItem({ to, label, icon: Icon, end, isDark }) {
           isActive
             ? "text-[var(--on-primary-container)]"
             : isDark
-              ? `text-black/55 hover:bg-black/10 hover:text-black data-[dock-hovered]:text-black ${dockHoveredClass}`
-              : `text-white/60 hover:bg-white/10 hover:text-white data-[dock-hovered]:text-white ${dockHoveredClass}`
+              ? `text-black/65 hover:bg-black/10 hover:text-black data-[dock-hovered]:text-black ${dockHoveredClass}`
+              : `text-white/75 hover:bg-white/10 hover:text-white data-[dock-hovered]:text-white ${dockHoveredClass}`
         }`
       }
     >
@@ -366,8 +373,8 @@ export default function Sidebar() {
             transition-colors duration-200
             ${
               isDark
-                ? `text-black/55 hover:bg-pink-100 hover:text-pink-600 ${dockHoveredClass}`
-                : `text-white/60 hover:bg-chip-pink-bg hover:text-chip-pink-fg ${dockHoveredClass}`
+                ? `text-black/65 hover:bg-pink-100 hover:text-pink-600 ${dockHoveredClass}`
+                : `text-white/75 hover:bg-chip-pink-bg hover:text-chip-pink-fg ${dockHoveredClass}`
             }
           `}
         >

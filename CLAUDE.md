@@ -2607,3 +2607,9 @@ UI-only rows.
   `designation` (it only had id/name/email/role/…), so the header badge shows
   the picture right after sign-in instead of only after a full page reload
   (the app doesn't call `/auth/me` again after login).
+- Sidebar dock sharpness fix (`Sidebar.jsx`): removed `will-change: transform`
+  from `dockItemStyle` (it cached each icon as a 1x bitmap that was then
+  stretched — blurry — when magnified) and `useDock` now applies whole-pixel
+  translates with a 2-decimal scale (clearing the transform when at rest).
+  Resting icon contrast raised slightly (white/60 → white/75, black/55 →
+  black/65) for crisper strokes on the glass rail.
