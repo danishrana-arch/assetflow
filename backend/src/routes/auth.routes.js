@@ -1,6 +1,7 @@
 const express = require("express")
 const rateLimit = require("express-rate-limit")
 const { registerOrganization, login, inviteEmployee, me, changePassword, forgotPassword, resetPasswordWithToken } = require("../controllers/auth.controller")
+const { getInvitationByToken, acceptInvitation } = require("../controllers/invitation.controller")
 const { requireAuth, requireRole } = require("../middleware/auth.middleware")
 
 const router = express.Router()
@@ -18,6 +19,9 @@ router.post("/login", authLimiter, login)
 // Public, self-service password reset via an emailed one-time link.
 router.post("/forgot-password", authLimiter, forgotPassword)
 router.post("/reset-password", authLimiter, resetPasswordWithToken)
+// Public: the page an emailed employee invitation opens (invitation.controller.js).
+router.get("/invitation/:token", authLimiter, getInvitationByToken)
+router.post("/accept-invitation", authLimiter, acceptInvitation)
 router.get("/me", requireAuth, me)
 // Adding employees is ADMIN/CEO/HR only (HR limited to non-owner roles inside inviteEmployee).
 router.post("/invite", requireAuth, requireRole("ADMIN", "CEO", "HR"), inviteEmployee)

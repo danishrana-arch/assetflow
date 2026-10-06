@@ -133,9 +133,10 @@ export function AuthProvider({ children }) {
       .finally(() => setLoading(false))
   }, [refreshUser])
 
-  async function login(email, password) {
-    const res = await api.post("/auth/login", { email, password })
-    localStorage.setItem(TOKEN_KEY, res.data.token)
+  // Starts a session from a login-shaped payload ({ token, user,
+  // organization, organizations }) — /auth/login or an accepted invitation.
+  function startSession(data) {
+    localStorage.setItem(TOKEN_KEY, data.token)
     localStorage.setItem(LAST_ACTIVITY_KEY, String(Date.now()))
     lastActivityWriteRef.current = Date.now()
 
@@ -144,8 +145,13 @@ export function AuthProvider({ children }) {
     localStorage.removeItem(ORG_KEY)
     // Nothing from a previous login in this tab may be shown to this user.
     queryClient.clear()
-    applyAuthData(normalizeAuthPayload(res.data))
-    return res.data
+    applyAuthData(normalizeAuthPayload(data))
+    return data
+  }
+
+  async function login(email, password) {
+    const res = await api.post("/auth/login", { email, password })
+    return startSession(res.data)
   }
 
   async function switchOrganization(organizationId) {
@@ -225,6 +231,7 @@ export function AuthProvider({ children }) {
       organizations,
       loading,
       login,
+      startSession,
       logout,
       refreshUser,
       switchOrganization,

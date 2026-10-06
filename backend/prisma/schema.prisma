@@ -64,6 +64,7 @@ model Organization {
   remoteOfflineGraceMinutes Int                       @default(30)
   announcements             Announcement[]
   accessGrants              OrganizationAccessGrant[]
+  userInvitations           UserInvitation[]
   assets                    Asset[]
   AttendanceAnomaly         AttendanceAnomaly[]
   AttendanceCorrection      AttendanceCorrection[]
@@ -228,6 +229,8 @@ model User {
   lastFailedLoginAt                                            DateTime?
   securityAlertSentAt                                          DateTime?
   passwordResetTokens                                          PasswordResetToken[]
+  invitation                                                   UserInvitation?           @relation("InvitationUser")
+  invitationsSent                                              UserInvitation[]          @relation("InvitationInviter")
   accessGrants                                                 OrganizationAccessGrant[] @relation("AccessGrantUser")
   accessGrantsGiven                                            OrganizationAccessGrant[] @relation("AccessGrantGrantedBy")
   announcementsCreated                                         Announcement[]            @relation("AnnouncementCreator")
@@ -314,6 +317,30 @@ model PasswordResetToken {
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+}
+
+// Email invitation for a new employee: the account is created up front (role,
+// department, manager… set by ADMIN/CEO/HR) and the emailed one-time link lets
+// the person set their own password and sign straight in. Only a SHA-256 hash
+// of the link token is stored.
+model UserInvitation {
+  id             String       @id @default(cuid())
+  organizationId String
+  userId         String       @unique
+  invitedById    String?
+  tokenHash      String       @unique
+  expiresAt      DateTime
+  acceptedAt     DateTime?
+  message        String?
+  lastSentAt     DateTime     @default(now())
+  sendCount      Int          @default(1)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User         @relation("InvitationUser", fields: [userId], references: [id], onDelete: Cascade)
+  invitedBy      User?        @relation("InvitationInviter", fields: [invitedById], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, createdAt])
 }
 
 model Notification {

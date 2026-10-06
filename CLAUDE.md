@@ -2646,3 +2646,38 @@ non-GET request aborted) and fixed what wasn't readable:
   is already correct.
 - Not changed (intentional): the Welcome page's dim "Login to Your
   Workplace" until the lamp is switched on.
+
+## Post-module addition: invite new employees by email (2026-10-06)
+
+- **Employee Forms → "Invite new employee"** (`components/InviteEmployeeSection.jsx`,
+  top of `EmployeeForms.jsx`): full name, email, role, designation,
+  department, reporting manager, joining date, employment status, optional
+  personal message. Creates the account right away (random unknown
+  password) and emails a one-time link `/accept-invite?token=…` (7 days).
+  Invitations list: Pending / Joined / Expired, Profile, Resend (new link,
+  old one stops working), Cancel (deletes the never-used account so the
+  email can be reused). The link is also shown to the inviter to share
+  manually — needed while **SMTP is not configured** (the banner says so).
+- Public `pages/AcceptInvite.jsx`: shows company / role / designation /
+  department / inviter + message; the person confirms their name, sets a
+  password (≥ 8) and is signed straight in (`startSession` in AuthContext)
+  and sent to `/profile`.
+- Backend: `controllers/invitation.controller.js`; `/api/invitations`
+  (GET, POST, `POST /:id/resend`, `DELETE /:id`) — `requireRole("ADMIN",
+  "CEO","HR")` + `noStore`, scoped to the active org; HR can't invite or
+  manage ADMIN/CEO invitations; CEO cap, department/manager checks, global
+  case-insensitive email uniqueness (stored lowercased). Public
+  `GET /auth/invitation/:token`, `POST /auth/accept-invitation` (authLimiter;
+  single-use via a conditional `acceptedAt` update). Login payload moved to
+  `sessionResponse()` in auth.controller (login unchanged). A "Forgot
+  password" reset also marks a pending invitation accepted.
+- New `UserInvitation` model (userId unique, SHA-256 tokenHash, CASCADE
+  with user/org, inviter SET NULL). Migration `20261006120000_user_invitations`
+  — **deployed**; `prisma generate` hit the usual engine-DLL EPERM, JS
+  client verified. **Restart the backend.**
+- Invited accounts are ACTIVE from creation (same as Add Employee), so set a
+  joining date or the auto-absent job counts from the invite date.
+- Verified: 30/30 API checks (permissions, validation, duplicate/409, resend
+  kills old link, single-use accept, login after accept, cancel + re-invite)
+  + Playwright (HR invites from the page, list updates, accept on 390px →
+  /profile, no overflow, no page errors). All test users/audit rows deleted.

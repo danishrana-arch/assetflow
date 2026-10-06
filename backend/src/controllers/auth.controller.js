@@ -182,29 +182,34 @@ async function login(req, res, next) {
       await prisma.user.update({ where: { id: user.id }, data: { failedLoginAttempts: 0, lastFailedLoginAt: null } })
     }
 
-    const token = signToken({ userId: user.id, organizationId: user.organizationId, companyId: user.organization.companyId, role: user.role })
-    const organizations = await getSelectableOrganizations(user)
-
-    res.json({
-      token,
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        status: user.status,
-        // Header profile badge / avatars — same fields /auth/me returns.
-        photoUrl: user.photoUrl || null,
-        designation: user.designation || null,
-        canManageAttendance: user.canManageAttendance,
-        homeOrganizationId: user.organizationId,
-        canManageCompanies: canManageCompanies(user.role),
-      },
-      organization: organizationSummary(user.organization),
-      organizations,
-    })
+    res.json(await sessionResponse(user))
   } catch (err) {
     next(err)
+  }
+}
+
+// Login payload (token + session user + organizations). `user` must include
+// its organization. Also used when an emailed invitation is accepted.
+async function sessionResponse(user) {
+  const token = signToken({ userId: user.id, organizationId: user.organizationId, companyId: user.organization.companyId, role: user.role })
+  const organizations = await getSelectableOrganizations(user)
+  return {
+    token,
+    user: {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      status: user.status,
+      // Header profile badge / avatars — same fields /auth/me returns.
+      photoUrl: user.photoUrl || null,
+      designation: user.designation || null,
+      canManageAttendance: user.canManageAttendance,
+      homeOrganizationId: user.organizationId,
+      canManageCompanies: canManageCompanies(user.role),
+    },
+    organization: organizationSummary(user.organization),
+    organizations,
   }
 }
 
@@ -480,6 +485,9 @@ async function resetPasswordWithToken(req, res, next) {
       prisma.user.update({ where: { id: record.userId }, data: { password: hashed, failedLoginAttempts: 0, lastFailedLoginAt: null } }),
       prisma.passwordResetToken.update({ where: { id: record.id }, data: { usedAt: new Date() } }),
       prisma.passwordResetToken.deleteMany({ where: { userId: record.userId, usedAt: null } }),
+      // Someone invited by email who set a password via "Forgot password"
+      // instead of the invitation link has still joined.
+      prisma.userInvitation.updateMany({ where: { userId: record.userId, acceptedAt: null }, data: { acceptedAt: new Date() } }),
     ])
 
     logAudit({ organizationId: record.user.organizationId, actorId: record.userId, action: "auth.password_reset_completed", targetType: "User", targetId: record.userId, note: "via emailed reset link" })
@@ -489,4 +497,4 @@ async function resetPasswordWithToken(req, res, next) {
   }
 }
 
-module.exports = { registerOrganization, login, inviteEmployee, me, changePassword, resetPassword, forgotPassword, resetPasswordWithToken }
+module.exports = { registerOrganization, login, sessionResponse, inviteEmployee, me, changePassword, resetPassword, forgotPassword, resetPasswordWithToken }

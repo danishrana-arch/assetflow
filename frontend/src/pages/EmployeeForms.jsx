@@ -7,6 +7,7 @@ import { hasModuleAccess } from "../utils/roles"
 import PageHeader from "../components/ui/PageHeader"
 import SectionHeader from "../components/ui/SectionHeader"
 import { TextField, SelectField } from "../components/ui/Field"
+import InviteEmployeeSection from "../components/InviteEmployeeSection"
 
 const CONDITION_LABEL = { GOOD: "Good", NEEDS_REPAIR: "Needs repair", DAMAGED: "Damaged" }
 const CONDITION_TONE = {
@@ -225,7 +226,7 @@ export default function EmployeeForms() {
       <PageHeader
         backTo="/"
         title="Employee Forms"
-        subtitle="Create a secure public form link and collect employee information before adding their account."
+        subtitle="Invite new employees by email, or create a secure public form link to collect employee information."
         actions={(
           <button
             onClick={() => { setShowCreate((value) => !value); setError("") }}
@@ -236,6 +237,8 @@ export default function EmployeeForms() {
           </button>
         )}
       />
+
+      <InviteEmployeeSection />
 
       {error && !showCreate && (
         <p className="mb-4 text-sm text-danger">{error}</p>
