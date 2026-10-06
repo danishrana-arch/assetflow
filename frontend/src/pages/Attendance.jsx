@@ -1125,7 +1125,7 @@ export default function Attendance() {
         <div className="relative" ref={filterPop.ref}>
           <button type="button" onClick={() => filterPop.setOpen((v) => !v)} aria-expanded={filterPop.open} className="flex h-9 items-center gap-1.5 rounded-xl border border-border bg-surface px-3 text-sm font-semibold text-ink hover:bg-surface-2">
             <SlidersHorizontal size={14} /> Advance Filter
-            {activeFilterCount > 0 && <span className="rounded-full bg-accent px-1.5 text-[10px] font-bold text-white">{activeFilterCount}</span>}
+            {activeFilterCount > 0 && <span className="rounded-full bg-accent px-1.5 text-[10px] font-bold text-on-accent">{activeFilterCount}</span>}
           </button>
           {filterPop.open && (
             <div className="absolute left-0 z-30 mt-2 w-64 space-y-3 rounded-2xl border border-border bg-surface p-4 shadow-pop">

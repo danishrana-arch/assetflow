@@ -48,15 +48,15 @@ const STAT_TILES = [
   { key: "", label: "Total Employees", dot: "bg-ink", tile: "bg-surface-2 border-border" },
   {
     key: "ACTIVE", label: "Active", dot: "bg-success",
-    tile: "bg-chip-green-bg/40 border-chip-green-bg dark:bg-chip-green-bg/[0.06] dark:border-chip-green-bg/10",
+    tile: "bg-chip-green-bg/40 border-chip-green-bg dark:bg-chip-green-tint/[0.06] dark:border-chip-green-tint/10",
   },
   {
-    key: "ON_LEAVE", label: "On Leave", dot: "bg-chip-blue-fg dark:bg-chip-blue-bg",
-    tile: "bg-chip-blue-bg/35 border-chip-blue-bg/80 dark:bg-chip-blue-bg/[0.06] dark:border-chip-blue-bg/10",
+    key: "ON_LEAVE", label: "On Leave", dot: "bg-chip-blue-fg dark:bg-chip-blue-tint",
+    tile: "bg-chip-blue-bg/35 border-chip-blue-bg/80 dark:bg-chip-blue-tint/[0.06] dark:border-chip-blue-tint/10",
   },
   {
     key: "LEFT_COMPANY", label: "Left Company", dot: "bg-danger",
-    tile: "bg-chip-pink-bg/35 border-chip-pink-bg/80 dark:bg-chip-pink-bg/[0.06] dark:border-chip-pink-bg/10",
+    tile: "bg-chip-pink-bg/35 border-chip-pink-bg/80 dark:bg-chip-pink-tint/[0.06] dark:border-chip-pink-tint/10",
   },
 ]
 

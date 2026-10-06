@@ -2613,3 +2613,36 @@ UI-only rows.
   translates with a 2-decimal scale (clearing the transform when at rest).
   Resting icon contrast raised slightly (white/60 → white/75, black/55 →
   black/65) for crisper strokes on the glass rail.
+
+## Post-module fix: dark-mode visibility pass (2026-10-06)
+
+Screenshotted all 44 routes in dark mode (public pages logged out, app pages
+as the real CEO and an EMPLOYEE via locally signed tokens, read-only — every
+non-GET request aborted) and fixed what wasn't readable:
+- **Status + chip palette are theme tokens now**: `success/danger/warning/info`
+  and every `chip-*-bg/fg` in `tailwind.config.js` are
+  `rgb(var(--x) / <alpha-value>)`, with light values (unchanged) in `:root`
+  and dark values in `.dark` (`styles/index.css`) — dark tinted fills + light
+  text. Before, e.g. payroll's red deductions (`#93000A`) and green
+  adjustments, red Remove/Delete buttons, "On site" labels were near-invisible
+  on dark cards, and Register's left panel was a light pastel behind white
+  text. New static `chip-*-tint` colours (the old pastels) replace the
+  existing `dark:*-chip-*-bg` classes (AttendanceSnapshot, Employees,
+  Inventory), so those look exactly as before.
+- **`--on-accent`**: text colour on solid accent fills. White in light mode;
+  dark ink in dark mode (default accent there is pale teal `#9FCFCF`, so
+  "Sign in"/"Create account"/"Update password" were white-on-pale);
+  `applyAccent()` (ThemeContext) sets it from the org colour's luminance.
+  Used by `.pill-accent`, `.glass-btn-accent` and every
+  `bg-accent … text-white` (now `text-on-accent`, 22 places).
+- Raw Tailwind `text-red-600/700`, `text-emerald-600/700`, `text-blue-*`,
+  `text-amber-600`, `bg-*-100`, `border-red-200`, `hover:bg-red-50`
+  (Projects, Tasks, Settings, Performance, AttendanceDevices, …) got
+  `dark:` counterparts.
+- `AttendanceDevices.jsx` used an undefined `.input` class (browser-default
+  white fields) → `.field`.
+- **The Vite dev server must be restarted** to pick up the
+  `tailwind.config.js` change (it caches the config); the production build
+  is already correct.
+- Not changed (intentional): the Welcome page's dim "Login to Your
+  Workplace" until the lamp is switched on.

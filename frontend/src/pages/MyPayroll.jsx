@@ -171,7 +171,7 @@ export default function MyPayroll() {
             onClick={downloadPdf}
             disabled={!record || downloading}
             title={record ? `Download the ${MONTHS[month - 1]} ${year} payslip as PDF` : "No payslip for this month"}
-            className="flex items-center gap-1.5 rounded-full bg-accent px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-40"
+            className="flex items-center gap-1.5 rounded-full bg-accent px-4 py-2 text-sm font-semibold text-on-accent transition-opacity hover:opacity-90 disabled:opacity-40"
           >
             <Download size={14} />
             {downloading ? "Preparing…" : "Download PDF"}
@@ -416,7 +416,7 @@ export default function MyPayroll() {
                     <button
                       type="submit"
                       disabled={submitClaim.isPending}
-                      className="rounded-full bg-accent px-3.5 py-1.5 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-60"
+                      className="rounded-full bg-accent px-3.5 py-1.5 text-xs font-semibold text-on-accent hover:opacity-90 disabled:opacity-60"
                     >
                       {submitClaim.isPending ? "Sending…" : "Send to HR"}
                     </button>

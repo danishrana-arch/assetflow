@@ -113,7 +113,7 @@ export default function ProfilePhoto({ employeeId, name, src, size = "2xl", canE
             disabled={pending}
             aria-label={src ? "Change profile picture" : "Add profile picture"}
             title={src ? "Change profile picture" : "Add profile picture"}
-            className={`absolute -bottom-0.5 -right-0.5 flex items-center justify-center rounded-full border-2 bg-accent text-white shadow-card transition-transform hover:scale-105 disabled:opacity-60 ${buttonClassName || "h-8 w-8 border-surface"}`}
+            className={`absolute -bottom-0.5 -right-0.5 flex items-center justify-center rounded-full border-2 bg-accent text-on-accent shadow-card transition-transform hover:scale-105 disabled:opacity-60 ${buttonClassName || "h-8 w-8 border-surface"}`}
           >
             <Camera size={buttonClassName ? 12 : 14} />
           </button>

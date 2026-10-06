@@ -75,7 +75,7 @@ function DeviceForm({ initial, submitLabel, submitting, error, onSubmit, onCance
         <TextField label="Device name" value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="Main Office Door" />
         <div>
           <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-muted">Vendor</label>
-          <select className="input w-full" value={form.vendor} onChange={(e) => set("vendor", e.target.value)}>
+          <select className="field w-full" value={form.vendor} onChange={(e) => set("vendor", e.target.value)}>
             {VENDORS.map((v) => <option key={v}>{v}</option>)}
           </select>
         </div>
@@ -85,7 +85,7 @@ function DeviceForm({ initial, submitLabel, submitting, error, onSubmit, onCance
         <TextField label="Port" type="number" value={form.port ?? ""} onChange={(e) => set("port", e.target.value)} />
         <div>
           <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-muted">Connection</label>
-          <select className="input w-full" value={form.connectionMode} onChange={(e) => set("connectionMode", e.target.value)}>
+          <select className="field w-full" value={form.connectionMode} onChange={(e) => set("connectionMode", e.target.value)}>
             {MODES.map((m) => <option key={m}>{m}</option>)}
           </select>
         </div>
@@ -135,7 +135,7 @@ function MappingRow({ deviceId, mapping, onChanged }) {
       <span className="min-w-[140px] flex-1 text-sm text-ink">{mapping.employee?.name || "Unknown employee"}</span>
       {editing ? (
         <>
-          <input className="input w-28 text-xs" value={externalUserId} onChange={(e) => setExternalUserId(e.target.value)} />
+          <input className="field w-28 text-xs" value={externalUserId} onChange={(e) => setExternalUserId(e.target.value)} />
           <button className="pill-secondary px-2 py-1.5 text-xs" disabled={save.isPending || !externalUserId.trim()} onClick={() => save.mutate()} aria-label="Save device user ID">
             <Check size={13} />
           </button>
@@ -150,7 +150,7 @@ function MappingRow({ deviceId, mapping, onChanged }) {
             <Pencil size={13} />
           </button>
           <button
-            className="rounded-xl px-2 py-1.5 text-xs text-red-600 hover:bg-red-50"
+            className="rounded-xl px-2 py-1.5 text-xs text-red-600 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-500/10"
             disabled={remove.isPending}
             onClick={() => { if (confirm(`Remove ${mapping.employee?.name || "this employee"} from this device?`)) remove.mutate() }}
             aria-label="Remove mapping"
@@ -200,11 +200,11 @@ function MappingsSection({ device, employees }) {
         <p className="mb-3 text-xs text-muted">No employees mapped yet — punches from this device won't count for anyone until they are.</p>
       )}
       <div className="flex flex-wrap items-center gap-2">
-        <select className="input min-w-[180px]" value={draft.employeeId} onChange={(e) => setDraft((d) => ({ ...d, employeeId: e.target.value }))}>
+        <select className="field min-w-[180px]" value={draft.employeeId} onChange={(e) => setDraft((d) => ({ ...d, employeeId: e.target.value }))}>
           <option value="">Select employee</option>
           {available.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
         </select>
-        <input className="input min-w-[140px]" placeholder="Device User ID" value={draft.externalUserId} onChange={(e) => setDraft((d) => ({ ...d, externalUserId: e.target.value }))} />
+        <input className="field min-w-[140px]" placeholder="Device User ID" value={draft.externalUserId} onChange={(e) => setDraft((d) => ({ ...d, externalUserId: e.target.value }))} />
         <button
           className="pill-secondary px-3 py-2 text-xs disabled:opacity-60"
           disabled={!draft.employeeId || !draft.externalUserId.trim() || add.isPending}
@@ -281,7 +281,7 @@ function DeviceCard({ device, employees, onToken }) {
         <CopyButton value={device.id} label="Copy device ID" />
         {device.doorEnabled && <span className="pill-secondary flex items-center gap-1 px-3 py-2 text-xs"><DoorOpen size={13} /> Door enabled</span>}
         <button
-          className="ml-auto rounded-xl px-3 py-2 text-xs text-red-600 hover:bg-red-50"
+          className="ml-auto rounded-xl px-3 py-2 text-xs text-red-600 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-500/10"
           disabled={remove.isPending}
           onClick={() => { if (confirm(`Delete ${device.name}? Its mappings and stored punches are deleted too.`)) remove.mutate() }}
           aria-label="Delete device"
@@ -335,7 +335,7 @@ export default function AttendanceDevices() {
             Only use this on a device that belongs to this organization alone — a device can push to one link only.
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
-            <input readOnly value={serverAddress} className="input min-w-[260px] flex-1 font-mono text-xs" />
+            <input readOnly value={serverAddress} className="field min-w-[260px] flex-1 font-mono text-xs" />
             <CopyButton value={serverAddress} />
           </div>
         </div>
@@ -350,7 +350,7 @@ export default function AttendanceDevices() {
           <SectionHeader title="Connector token" />
           <p className="text-xs text-muted">Copy this token into the connector's .env (CONNECTOR_TOKEN). It is shown only once.</p>
           <div className="mt-3 flex gap-2">
-            <input readOnly value={token} className="input flex-1 font-mono text-xs" />
+            <input readOnly value={token} className="field flex-1 font-mono text-xs" />
             <CopyButton value={token} />
           </div>
         </div>

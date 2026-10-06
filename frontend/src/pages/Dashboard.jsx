@@ -1083,7 +1083,7 @@ export default function Dashboard() {
             <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
               <div className="flex rounded-full border border-border-strong p-0.5">
                 {[['week','This week'],['month','This month']].map(([value,label]) => (
-                  <button key={value} type="button" onClick={() => setEventRange(value)} className={`rounded-full px-3 py-1.5 text-[11px] font-semibold ${eventRange === value ? 'bg-accent text-white' : 'text-muted hover:text-ink'}`}>{label}</button>
+                  <button key={value} type="button" onClick={() => setEventRange(value)} className={`rounded-full px-3 py-1.5 text-[11px] font-semibold ${eventRange === value ? 'bg-accent text-on-accent' : 'text-muted hover:text-ink'}`}>{label}</button>
                 ))}
               </div>
               {isManager && (

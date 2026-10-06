@@ -94,7 +94,7 @@ export default function ExpenseClaims() {
             key={t.key || "all"}
             onClick={() => { setStatus(t.key); setMessage(null) }}
             className={`rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors ${
-              status === t.key ? "bg-accent text-white" : "border border-border-strong bg-surface text-ink hover:bg-surface-2"
+              status === t.key ? "bg-accent text-on-accent" : "border border-border-strong bg-surface text-ink hover:bg-surface-2"
             }`}
           >
             {t.label}
@@ -152,7 +152,7 @@ export default function ExpenseClaims() {
                     <button
                       onClick={() => approve.mutate(c.id)}
                       disabled={busy}
-                      className="flex items-center gap-1 rounded-full bg-accent px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-60"
+                      className="flex items-center gap-1 rounded-full bg-accent px-3 py-1.5 text-xs font-semibold text-on-accent hover:opacity-90 disabled:opacity-60"
                     >
                       <Check size={13} /> Approve
                     </button>

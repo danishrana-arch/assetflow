@@ -1636,7 +1636,7 @@ export default function EmployeeProfile() {
                                   type="button"
                                   onClick={() => saveCertification.mutate({ certificateId: certificate.id, data: certificate, index })}
                                   disabled={saveCertification.isPending || !certificate.name.trim() || !certificate.institute.trim()}
-                                  className="flex items-center gap-1.5 rounded-full bg-accent px-3 py-1.5 text-[11px] font-semibold text-white disabled:opacity-50"
+                                  className="flex items-center gap-1.5 rounded-full bg-accent px-3 py-1.5 text-[11px] font-semibold text-on-accent disabled:opacity-50"
                                 >
                                   <Save size={12} /> Save
                                 </button>

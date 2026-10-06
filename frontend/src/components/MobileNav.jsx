@@ -14,7 +14,7 @@ function Row({ to, icon: Icon, label, end, onClick, showDot = false }) {
       onClick={onClick}
       className={({ isActive }) =>
         `flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm transition-colors ${
-          isActive ? "bg-accent text-white" : "text-muted hover:bg-surface-2 hover:text-ink"
+          isActive ? "bg-accent text-on-accent" : "text-muted hover:bg-surface-2 hover:text-ink"
         }`
       }
     >

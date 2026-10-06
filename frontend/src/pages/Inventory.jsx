@@ -111,23 +111,23 @@ const TONE_CHIP = {
 const STAT_TILES = [
   {
     key: "total", label: "Total Assets", status: "", icon: Package, stroke: "#16A34A",
-    tile: "bg-chip-green-bg/25 border-chip-green-bg/70 dark:bg-chip-green-bg/[0.05] dark:border-chip-green-bg/10",
-    iconCls: "bg-chip-green-bg text-chip-green-fg dark:bg-chip-green-bg/15 dark:text-chip-green-bg",
+    tile: "bg-chip-green-bg/25 border-chip-green-bg/70 dark:bg-chip-green-tint/[0.05] dark:border-chip-green-tint/10",
+    iconCls: "bg-chip-green-bg text-chip-green-fg dark:bg-chip-green-tint/15 dark:text-chip-green-tint",
   },
   {
     key: "inUse", label: "In Use", status: "ASSIGNED", icon: Laptop, stroke: "#2563EB",
-    tile: "bg-chip-blue-bg/30 border-chip-blue-bg/80 dark:bg-chip-blue-bg/[0.06] dark:border-chip-blue-bg/10",
-    iconCls: "bg-chip-blue-bg text-chip-blue-fg dark:bg-chip-blue-bg/15 dark:text-chip-blue-bg",
+    tile: "bg-chip-blue-bg/30 border-chip-blue-bg/80 dark:bg-chip-blue-tint/[0.06] dark:border-chip-blue-tint/10",
+    iconCls: "bg-chip-blue-bg text-chip-blue-fg dark:bg-chip-blue-tint/15 dark:text-chip-blue-tint",
   },
   {
     key: "repair", label: "Under Maintenance", status: "REPAIR", icon: Wrench, stroke: "#F59E0B",
-    tile: "bg-chip-orange-bg/35 border-chip-orange-bg dark:bg-chip-orange-bg/[0.06] dark:border-chip-orange-bg/10",
-    iconCls: "bg-chip-orange-bg text-chip-orange-fg dark:bg-chip-orange-bg/15 dark:text-chip-orange-bg",
+    tile: "bg-chip-orange-bg/35 border-chip-orange-bg dark:bg-chip-orange-tint/[0.06] dark:border-chip-orange-tint/10",
+    iconCls: "bg-chip-orange-bg text-chip-orange-fg dark:bg-chip-orange-tint/15 dark:text-chip-orange-tint",
   },
   {
     key: "lost", label: "Lost / Disposed", status: "LOST,DISPOSED", icon: TriangleAlert, stroke: "#DC2626",
-    tile: "bg-chip-pink-bg/30 border-chip-pink-bg/80 dark:bg-chip-pink-bg/[0.06] dark:border-chip-pink-bg/10",
-    iconCls: "bg-chip-pink-bg text-chip-pink-fg dark:bg-chip-pink-bg/15 dark:text-chip-pink-bg",
+    tile: "bg-chip-pink-bg/30 border-chip-pink-bg/80 dark:bg-chip-pink-tint/[0.06] dark:border-chip-pink-tint/10",
+    iconCls: "bg-chip-pink-bg text-chip-pink-fg dark:bg-chip-pink-tint/15 dark:text-chip-pink-tint",
   },
 ]
 
@@ -605,7 +605,7 @@ export default function Inventory() {
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-4">
           <BackButton />
-          <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-chip-green-bg text-chip-green-fg dark:bg-chip-green-bg/15 dark:text-chip-green-bg">
+          <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-chip-green-bg text-chip-green-fg dark:bg-chip-green-tint/15 dark:text-chip-green-tint">
             <Package size={26} />
           </div>
           <div>
@@ -1221,7 +1221,7 @@ function PageNumbers({ page, totalPages, onPageChange }) {
             type="button"
             onClick={() => onPageChange(p)}
             aria-current={p === page ? "page" : undefined}
-            className={`${btn} ${p === page ? "bg-accent text-white" : "text-ink hover:bg-surface-2"}`}
+            className={`${btn} ${p === page ? "bg-accent text-on-accent" : "text-ink hover:bg-surface-2"}`}
           >
             {p}
           </button>

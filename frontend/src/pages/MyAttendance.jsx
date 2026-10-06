@@ -511,7 +511,7 @@ export default function MyAttendance() {
                         type="button"
                         onClick={() => setLocationMode(opt.value)}
                         className={`rounded-full px-3 py-1.5 text-xs font-semibold transition-colors ${
-                          locationMode === opt.value ? "bg-accent text-white" : "bg-surface-2 text-muted hover:text-ink"
+                          locationMode === opt.value ? "bg-accent text-on-accent" : "bg-surface-2 text-muted hover:text-ink"
                         }`}
                       >
                         {opt.label}

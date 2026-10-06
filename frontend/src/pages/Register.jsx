@@ -51,7 +51,7 @@ export default function Register() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-canvas p-4">
       <div className="grid w-full max-w-4xl overflow-hidden rounded-[28px] bg-surface shadow-card-lg lg:grid-cols-2">
-        <div className="relative hidden flex-col justify-between bg-gradient-to-br from-chip-blue-bg via-chip-purple-bg to-chip-cyan-bg p-10 lg:flex">
+        <div className="relative hidden flex-col justify-between bg-gradient-to-br from-chip-blue-bg via-chip-purple-bg to-chip-cyan-bg p-10 dark:from-[#1F2F4E] dark:via-[#33284F] dark:to-[#173F3B] lg:flex">
           <div className="flex items-center gap-2.5">
             <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/80 p-1.5">
   <img

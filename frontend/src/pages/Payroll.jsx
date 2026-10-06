@@ -147,7 +147,7 @@ function PayslipEditor({ record, state, setState, onSave, onCancel, saving, erro
         <button onClick={onCancel} className="rounded-full border border-border-strong px-3.5 py-1.5 text-xs font-semibold text-ink hover:bg-surface-2">
           Cancel
         </button>
-        <button onClick={onSave} disabled={saving || bonusTooLow} className="rounded-full bg-accent px-3.5 py-1.5 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-60">
+        <button onClick={onSave} disabled={saving || bonusTooLow} className="rounded-full bg-accent px-3.5 py-1.5 text-xs font-semibold text-on-accent hover:opacity-90 disabled:opacity-60">
           {saving ? "Saving…" : "Save payslip"}
         </button>
       </div>
@@ -363,7 +363,7 @@ function PayrollReview({ month, year, canGenerate, onGenerate, generating, onClo
               <button
                 onClick={onGenerate}
                 disabled={generating || toWrite === 0}
-                className="flex items-center gap-1.5 rounded-full bg-accent px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50"
+                className="flex items-center gap-1.5 rounded-full bg-accent px-4 py-2 text-sm font-semibold text-on-accent hover:opacity-90 disabled:opacity-50"
               >
                 <Play size={14} /> {generating ? "Generating…" : "Generate payroll"}
               </button>
@@ -682,7 +682,7 @@ export default function Payroll() {
                 <button
                   onClick={() => { setShowReview((v) => !v); setShowTaxPanel(false); setShowTerminationPicker(false) }}
                   title="Review the month's attendance, leave and deductions, then generate"
-                  className="flex items-center gap-1.5 rounded-full bg-accent px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-60"
+                  className="flex items-center gap-1.5 rounded-full bg-accent px-4 py-2 text-sm font-semibold text-on-accent transition-opacity hover:opacity-90 disabled:opacity-60"
                 >
                   <Play size={14} />
                   {generate.isPending ? "Generating…" : "Review & Generate"}
@@ -713,7 +713,7 @@ export default function Payroll() {
                   onClick={() => approveAll.mutate()}
                   disabled={approveAll.isPending || totals.pending === 0}
                   title={totals.pending === 0 ? "Nothing pending approval" : "Approve and pay everyone at once, from your account"}
-                  className="flex items-center gap-1.5 rounded-full bg-accent px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-40"
+                  className="flex items-center gap-1.5 rounded-full bg-accent px-4 py-2 text-sm font-semibold text-on-accent transition-opacity hover:opacity-90 disabled:opacity-40"
                 >
                   <CheckCircle2 size={14} />
                   {approveAll.isPending ? "Paying…" : "Approve & Pay All"}
@@ -774,7 +774,7 @@ export default function Payroll() {
             <button
               onClick={() => applyTax.mutate()}
               disabled={applyTax.isPending || taxPercentAll === ""}
-              className="rounded-full bg-accent px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50"
+              className="rounded-full bg-accent px-4 py-2 text-sm font-semibold text-on-accent hover:opacity-90 disabled:opacity-50"
             >
               {applyTax.isPending ? "Applying…" : "Apply to all drafts"}
             </button>
@@ -819,7 +819,7 @@ export default function Payroll() {
             <button
               onClick={startTermination}
               disabled={!terminationEmployeeId || createTerminationPayslip.isPending}
-              className="rounded-full bg-accent px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50"
+              className="rounded-full bg-accent px-4 py-2 text-sm font-semibold text-on-accent hover:opacity-90 disabled:opacity-50"
             >
               {createTerminationPayslip.isPending ? "Creating…" : "Continue"}
             </button>

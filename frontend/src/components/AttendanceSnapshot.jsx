@@ -31,20 +31,20 @@ const longFmt = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "lo
 // Soft tinted tiles; light tints in light mode, faint glows in dark mode.
 const TILE_TONES = {
   blue: {
-    tile: "bg-chip-blue-bg/35 border-chip-blue-bg/80 dark:bg-chip-blue-bg/[0.06] dark:border-chip-blue-bg/10",
-    icon: "bg-chip-blue-bg text-chip-blue-fg dark:bg-chip-blue-bg/15 dark:text-chip-blue-bg",
+    tile: "bg-chip-blue-bg/35 border-chip-blue-bg/80 dark:bg-chip-blue-tint/[0.06] dark:border-chip-blue-tint/10",
+    icon: "bg-chip-blue-bg text-chip-blue-fg dark:bg-chip-blue-tint/15 dark:text-chip-blue-tint",
   },
   green: {
-    tile: "bg-chip-green-bg/40 border-chip-green-bg dark:bg-chip-green-bg/[0.06] dark:border-chip-green-bg/10",
-    icon: "bg-chip-green-bg text-chip-green-fg dark:bg-chip-green-bg/15 dark:text-chip-green-bg",
+    tile: "bg-chip-green-bg/40 border-chip-green-bg dark:bg-chip-green-tint/[0.06] dark:border-chip-green-tint/10",
+    icon: "bg-chip-green-bg text-chip-green-fg dark:bg-chip-green-tint/15 dark:text-chip-green-tint",
   },
   yellow: {
-    tile: "bg-chip-yellow-bg/20 border-chip-yellow-bg/50 dark:bg-chip-yellow-bg/[0.06] dark:border-chip-yellow-bg/10",
-    icon: "bg-chip-yellow-bg/80 text-chip-yellow-fg dark:bg-chip-yellow-bg/15 dark:text-chip-yellow-bg",
+    tile: "bg-chip-yellow-bg/20 border-chip-yellow-bg/50 dark:bg-chip-yellow-tint/[0.06] dark:border-chip-yellow-tint/10",
+    icon: "bg-chip-yellow-bg/80 text-chip-yellow-fg dark:bg-chip-yellow-tint/15 dark:text-chip-yellow-tint",
   },
   pink: {
-    tile: "bg-chip-pink-bg/35 border-chip-pink-bg/80 dark:bg-chip-pink-bg/[0.06] dark:border-chip-pink-bg/10",
-    icon: "bg-chip-pink-bg text-chip-pink-fg dark:bg-chip-pink-bg/15 dark:text-chip-pink-bg",
+    tile: "bg-chip-pink-bg/35 border-chip-pink-bg/80 dark:bg-chip-pink-tint/[0.06] dark:border-chip-pink-tint/10",
+    icon: "bg-chip-pink-bg text-chip-pink-fg dark:bg-chip-pink-tint/15 dark:text-chip-pink-tint",
   },
 }
 
@@ -69,8 +69,8 @@ function StatTile({ label, value, icon: Icon, tone, loading, to }) {
 }
 
 const STATUS_PILL = {
-  PRESENT: { label: "Present", dot: "bg-success", pill: "bg-chip-green-bg text-chip-green-fg dark:bg-chip-green-bg/15 dark:text-chip-green-bg" },
-  LATE: { label: "Late", dot: "bg-[#E5A000]", pill: "bg-chip-yellow-bg/70 text-chip-yellow-fg dark:bg-chip-yellow-bg/15 dark:text-chip-yellow-bg" },
+  PRESENT: { label: "Present", dot: "bg-success", pill: "bg-chip-green-bg text-chip-green-fg dark:bg-chip-green-tint/15 dark:text-chip-green-tint" },
+  LATE: { label: "Late", dot: "bg-[#E5A000]", pill: "bg-chip-yellow-bg/70 text-chip-yellow-fg dark:bg-chip-yellow-tint/15 dark:text-chip-yellow-tint" },
 }
 
 // "+12m", or "+1h 05m" once it passes an hour.
@@ -100,7 +100,7 @@ function AttendanceList({ rows, timeZone, isToday, isFuture, selected, loading }
                 {r.name}
               </Link>
               {r.status === "LATE" && r.lateMinutes > 0 && (
-                <span className="shrink-0 text-[11px] font-semibold text-[#C98A00] dark:text-chip-yellow-bg">{formatLate(r.lateMinutes)}</span>
+                <span className="shrink-0 text-[11px] font-semibold text-[#C98A00] dark:text-chip-yellow-tint">{formatLate(r.lateMinutes)}</span>
               )}
               <span className="ml-auto shrink-0 text-xs tabular-nums text-muted">
                 {r.checkInAt ? formatTime(r.checkInAt, { timeZone }) : "—"}

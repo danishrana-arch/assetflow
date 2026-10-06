@@ -6,6 +6,7 @@
   --accent: #0058BE;          /* secondary blue — CTAs, active links, focus rings */
   --accent-soft: #D8E2FF;
   --accent-ink: #004395;
+  --on-accent: #FFFFFF;       /* text/icons on a solid accent fill (set from the org colour in ThemeContext) */
 
   --primary-container: #4D7C7C;   /* teal primary — sidebar active icon only */
   --on-primary-container: #EFFFFE;
@@ -26,12 +27,35 @@
   --muted-2: #707978;
 
   --shadow-card: 0px 10px 30px rgba(26, 26, 26, 0.05);
+
+  /* Status + chip palette as RGB channels (tailwind.config.js wraps them in rgb()). */
+  --chip-blue-bg: 216 226 255;
+  --chip-blue-fg: 0 67 149;
+  --chip-purple-bg: 235 227 251;
+  --chip-purple-fg: 91 63 168;
+  --chip-cyan-bg: 220 243 241;
+  --chip-cyan-fg: 28 111 104;
+  --chip-orange-bg: 255 232 199;
+  --chip-orange-fg: 122 74 0;
+  --chip-green-bg: 220 252 231;
+  --chip-green-fg: 22 101 52;
+  --chip-pink-bg: 255 218 214;
+  --chip-pink-fg: 147 0 10;
+  --chip-yellow-bg: 255 223 159;
+  --chip-yellow-fg: 92 67 0;
+  --chip-slate-bg: 234 231 231;
+  --chip-slate-fg: 64 72 72;
+  --success: 22 163 74;
+  --danger: 186 26 26;
+  --warning: 148 110 0;
+  --info: 0 88 190;
 }
 
 .dark {
   --accent: #9FCFCF;
   --accent-soft: #1C4E4E;
   --accent-ink: #EFFFFE;
+  --on-accent: #062626;       /* pale teal accent needs dark text */
 
   --primary-container: #9FCFCF;
   --on-primary-container: #002020;
@@ -52,6 +76,28 @@
   --muted-2: #7C8783;
 
   --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.3);
+
+  /* Status + chip palette as RGB channels (tailwind.config.js wraps them in rgb()). */
+  --chip-blue-bg: 31 47 78;
+  --chip-blue-fg: 180 200 255;
+  --chip-purple-bg: 51 40 79;
+  --chip-purple-fg: 210 194 255;
+  --chip-cyan-bg: 23 63 59;
+  --chip-cyan-fg: 147 221 211;
+  --chip-orange-bg: 74 52 22;
+  --chip-orange-fg: 255 203 142;
+  --chip-green-bg: 22 63 40;
+  --chip-green-fg: 143 231 174;
+  --chip-pink-bg: 82 31 34;
+  --chip-pink-fg: 255 180 171;
+  --chip-yellow-bg: 69 56 15;
+  --chip-yellow-fg: 242 210 122;
+  --chip-slate-bg: 47 54 52;
+  --chip-slate-fg: 203 210 207;
+  --success: 95 217 141;
+  --danger: 255 138 128;
+  --warning: 232 194 90;
+  --info: 143 182 255;
 }
 
 * {
@@ -123,7 +169,7 @@ h1, h2, h3, h4 {
 
   .pill-accent {
     background-color: var(--accent);
-    color: #ffffff;
+    color: var(--on-accent);
     border-radius: 999px;
     font-weight: 600;
     transition: opacity 0.15s ease;
@@ -457,7 +503,7 @@ h1, h2, h3, h4 {
 
   /* Accent-tinted glass (primary action) — follows the org brand colour. */
   .glass-btn-accent {
-    color: #fff;
+    color: var(--on-accent);
     background: linear-gradient(180deg,
       color-mix(in srgb, var(--accent) 62%, white 38%) 0%,
       color-mix(in srgb, var(--accent) 88%, transparent) 100%);
@@ -495,7 +541,7 @@ h1, h2, h3, h4 {
     background: linear-gradient(180deg, rgba(255, 255, 255, 0.22) 0%, rgba(255, 255, 255, 0.08) 100%);
   }
   .dark .glass-btn-accent {
-    color: #fff;
+    color: var(--on-accent);
     background: linear-gradient(180deg,
       color-mix(in srgb, var(--accent) 75%, white 25%) 0%,
       color-mix(in srgb, var(--accent) 70%, transparent) 100%);

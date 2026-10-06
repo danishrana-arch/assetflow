@@ -371,7 +371,7 @@ export default function Login() {
                   </p>
                   <Link
                     to={`/forgot-password${email ? `?email=${encodeURIComponent(email)}` : ""}`}
-                    className="mt-2 inline-block rounded-full bg-accent px-3.5 py-1.5 text-xs font-semibold text-white hover:opacity-90"
+                    className="mt-2 inline-block rounded-full bg-accent px-3.5 py-1.5 text-xs font-semibold text-on-accent hover:opacity-90"
                   >
                     Reset my password
                   </Link>

@@ -111,7 +111,7 @@ export default function LeaveCalendar() {
                 key={key}
                 className={`min-h-[92px] rounded-xl p-1.5 ${inMonth ? "bg-surface-2" : "bg-transparent opacity-40"}`}
               >
-                <p className={`mb-1 text-xs font-semibold ${isToday ? "inline-flex h-5 w-5 items-center justify-center rounded-full bg-accent text-white" : "text-muted"}`}>
+                <p className={`mb-1 text-xs font-semibold ${isToday ? "inline-flex h-5 w-5 items-center justify-center rounded-full bg-accent text-on-accent" : "text-muted"}`}>
                   {day.getDate()}
                 </p>
                 <div className="space-y-1">

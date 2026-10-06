@@ -26,9 +26,9 @@ import Tasks from "./Tasks"
 const TASK_STATUS = { TODO: "To do", IN_PROGRESS: "In progress", BLOCKED: "Blocked", DONE: "Done" }
 
 const STATUS = {
-  NOT_STARTED: { label: "Not Started", icon: Clock3, tone: "text-amber-600", bg: "bg-amber-500/10", border: "border-amber-500/20" },
-  IN_PROGRESS: { label: "In Progress", icon: FolderKanban, tone: "text-blue-600", bg: "bg-blue-500/10", border: "border-blue-500/20" },
-  COMPLETED: { label: "Completed", icon: CheckCircle2, tone: "text-emerald-600", bg: "bg-emerald-500/10", border: "border-emerald-500/20" },
+  NOT_STARTED: { label: "Not Started", icon: Clock3, tone: "text-amber-600 dark:text-amber-300", bg: "bg-amber-500/10", border: "border-amber-500/20" },
+  IN_PROGRESS: { label: "In Progress", icon: FolderKanban, tone: "text-blue-600 dark:text-blue-300", bg: "bg-blue-500/10", border: "border-blue-500/20" },
+  COMPLETED: { label: "Completed", icon: CheckCircle2, tone: "text-emerald-600 dark:text-emerald-300", bg: "bg-emerald-500/10", border: "border-emerald-500/20" },
 }
 
 
@@ -56,7 +56,7 @@ function EmployeeOption({ employee, selected, onToggle }) {
       onClick={() => onToggle(employee)}
       className={`flex w-full items-center gap-3 border-b border-border px-3 py-3 text-left last:border-0 hover:bg-surface-2 ${selected ? "bg-accent/5" : ""}`}
     >
-      <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${selected ? "border-accent bg-accent text-white" : "border-border"}`}>
+      <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${selected ? "border-accent bg-accent text-on-accent" : "border-border"}`}>
         {selected ? "✓" : ""}
       </span>
       <Avatar name={employee.name} src={employee.photoUrl} size="xs" />
@@ -112,7 +112,7 @@ function ProjectCard({ project, onOpen }) {
       <div className="mt-4 grid grid-cols-2 gap-3">
         <div className="rounded-2xl bg-surface-2 p-3">
           <p className="text-[10px] uppercase tracking-wide text-muted">Deadline</p>
-          <p className={`mt-1 text-xs font-semibold ${expired ? "text-red-600" : "text-ink"}`}>{expired ? "Overdue" : formatDate(project.deadline)}</p>
+          <p className={`mt-1 text-xs font-semibold ${expired ? "text-red-600 dark:text-red-300" : "text-ink"}`}>{expired ? "Overdue" : formatDate(project.deadline)}</p>
         </div>
         <div className="rounded-2xl bg-surface-2 p-3">
           <p className="text-[10px] uppercase tracking-wide text-muted">Time spent</p>
@@ -193,18 +193,18 @@ function ProjectDetails({ project, onClose, onRefresh, onDeleted, canEdit = true
             {canEdit && project.status === "COMPLETED" && (
               confirmDelete ? (
                 <div className="flex items-center gap-2 rounded-2xl bg-red-500/10 p-1.5 pl-3">
-                  <span className="text-[11px] font-medium text-red-700">Delete this project?</span>
+                  <span className="text-[11px] font-medium text-red-700 dark:text-red-300">Delete this project?</span>
                   <button onClick={() => removeProject.mutate()} disabled={removeProject.isPending} className="rounded-xl bg-red-600 px-2.5 py-1.5 text-[11px] font-semibold text-white disabled:opacity-50">{removeProject.isPending ? "Deleting…" : "Yes, delete"}</button>
                   <button onClick={() => setConfirmDelete(false)} className="rounded-xl px-2.5 py-1.5 text-[11px] font-medium text-muted hover:bg-surface-2">Cancel</button>
                 </div>
               ) : (
-                <button onClick={() => setConfirmDelete(true)} title="Delete project" className="rounded-full p-2 text-muted hover:bg-red-500/10 hover:text-red-600"><Trash2 size={18} /></button>
+                <button onClick={() => setConfirmDelete(true)} title="Delete project" className="rounded-full p-2 text-muted hover:bg-red-500/10 hover:text-red-600 dark:hover:text-red-300"><Trash2 size={18} /></button>
               )
             )}
             <button onClick={onClose} className="rounded-full p-2 text-muted hover:bg-surface-2 hover:text-ink"><X size={18} /></button>
           </div>
         </div>
-        {removeProject.isError && <p className="px-6 pt-3 text-right text-xs font-medium text-red-600">{removeProject.error?.response?.data?.error || "Unable to delete the project."}</p>}
+        {removeProject.isError && <p className="px-6 pt-3 text-right text-xs font-medium text-red-600 dark:text-red-300">{removeProject.error?.response?.data?.error || "Unable to delete the project."}</p>}
 
         <div className="grid gap-5 p-6 lg:grid-cols-3">
           <div className="card p-4 lg:col-span-2">
@@ -230,12 +230,12 @@ function ProjectDetails({ project, onClose, onRefresh, onDeleted, canEdit = true
               <div className="mt-2 flex flex-wrap gap-2">
                 {(selectedCategory?.technologies || []).map(tech => {
                   const active = technologies.includes(tech)
-                  return <button disabled={!canEdit} type="button" key={tech} onClick={() => setTechnologies(prev => active ? prev.filter(item => item !== tech) : [...prev, tech])} className={`rounded-full px-3 py-1.5 text-[10px] font-semibold ${active ? "bg-accent text-white" : "bg-surface-2 text-muted hover:text-ink"}`}>{tech}</button>
+                  return <button disabled={!canEdit} type="button" key={tech} onClick={() => setTechnologies(prev => active ? prev.filter(item => item !== tech) : [...prev, tech])} className={`rounded-full px-3 py-1.5 text-[10px] font-semibold ${active ? "bg-accent text-on-accent" : "bg-surface-2 text-muted hover:text-ink"}`}>{tech}</button>
                 })}
               </div>
             </div>
 
-            {completedNeedsLink && <p className="mt-3 text-xs font-medium text-red-600">A project link is required before this project can be marked completed.</p>}
+            {completedNeedsLink && <p className="mt-3 text-xs font-medium text-red-600 dark:text-red-300">A project link is required before this project can be marked completed.</p>}
             <button onClick={saveProject} disabled={!canEdit || update.isPending || completedNeedsLink} className="pill-accent mt-5 px-4 py-2.5 text-xs disabled:opacity-50">{update.isPending ? "Saving…" : "Save project changes"}</button>
           </div>
         </div>
@@ -263,7 +263,7 @@ function ProjectDetails({ project, onClose, onRefresh, onDeleted, canEdit = true
                 </div>
 
                 <button onClick={() => addEmployees.mutate()} disabled={!selectedNewEmployees.length || addEmployees.isPending} className="pill-accent mt-3 px-4 py-2.5 text-xs disabled:opacity-50">{addEmployees.isPending ? "Adding…" : `Add ${selectedNewEmployees.length || ""} employee${selectedNewEmployees.length === 1 ? "" : "s"}`.trim()}</button>
-                {addEmployees.isError && <p className="mt-2 text-xs font-medium text-red-600">{addEmployees.error?.response?.data?.error || "Unable to add employees."}</p>}
+                {addEmployees.isError && <p className="mt-2 text-xs font-medium text-red-600 dark:text-red-300">{addEmployees.error?.response?.data?.error || "Unable to add employees."}</p>}
               </div>
             )}
 
@@ -290,7 +290,7 @@ function ProjectDetails({ project, onClose, onRefresh, onDeleted, canEdit = true
               {tasksQuery.isLoading ? <div className="p-5 text-center text-xs text-muted">Loading tasks…</div> : (tasksQuery.data || []).map(task => (
                 <div key={task.id} className="flex items-center gap-3 p-4">
                   <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-ink">{task.title}</p><p className="truncate text-[11px] text-muted">{task.assignedTo?.name || "Unassigned"}{task.dueDate ? ` · Due ${formatDate(task.dueDate)}` : ""}</p></div>
-                  <span className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-semibold ${task.status === "DONE" ? "bg-emerald-500/10 text-emerald-700" : task.status === "BLOCKED" ? "bg-red-500/10 text-red-700" : task.status === "IN_PROGRESS" ? "bg-blue-500/10 text-blue-700" : "bg-surface-2 text-muted"}`}>{TASK_STATUS[task.status] || task.status}</span>
+                  <span className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-semibold ${task.status === "DONE" ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" : task.status === "BLOCKED" ? "bg-red-500/10 text-red-700 dark:text-red-300" : task.status === "IN_PROGRESS" ? "bg-blue-500/10 text-blue-700 dark:text-blue-300" : "bg-surface-2 text-muted"}`}>{TASK_STATUS[task.status] || task.status}</span>
                 </div>
               ))}
               {!tasksQuery.isLoading && !tasksQuery.data?.length && <div className="p-6 text-sm text-muted">No tasks in this project yet.</div>}
@@ -315,13 +315,13 @@ function DeadlineModal({ project, onClose, onCompleted, onExtended }) {
   return createPortal(
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
       <div className="w-full max-w-md rounded-3xl bg-surface p-6 shadow-2xl">
-        <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-red-500/10 text-red-600"><CalendarClock size={20} /></div>
+        <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-red-500/10 text-red-600 dark:text-red-300"><CalendarClock size={20} /></div>
         <h3 className="mt-5 text-lg font-semibold text-ink">Project deadline reached</h3>
         <p className="mt-2 text-sm leading-6 text-muted"><strong className="text-ink">{project.name}</strong> has reached its deadline. Mark it completed or extend the deadline.</p>
         <label className="mt-5 block"><span className="text-xs font-medium text-muted">Project link {project.projectUrl ? "" : "(required to complete)"}</span><input value={link} onChange={e => setLink(e.target.value)} className="field mt-1 w-full" placeholder="https://..." /></label>
         <div className="mt-4"><label className="text-xs font-medium text-muted">New deadline</label><input type="date" value={date} min={new Date().toISOString().slice(0, 10)} onChange={e => setDate(e.target.value)} className="field mt-1 w-full" /></div>
         <div className="mt-6 grid grid-cols-2 gap-3">
-          <button onClick={() => canComplete && mutation.mutate({ status: "COMPLETED", deadline: project.deadline, projectUrl: link.trim() })} disabled={!canComplete || mutation.isPending} className="rounded-2xl bg-emerald-500/10 px-4 py-2.5 text-xs font-semibold text-emerald-700 disabled:opacity-50">Yes, complete it</button>
+          <button onClick={() => canComplete && mutation.mutate({ status: "COMPLETED", deadline: project.deadline, projectUrl: link.trim() })} disabled={!canComplete || mutation.isPending} className="rounded-2xl bg-emerald-500/10 px-4 py-2.5 text-xs font-semibold text-emerald-700 dark:text-emerald-300 disabled:opacity-50">Yes, complete it</button>
           <button onClick={() => date && mutation.mutate({ status: project.status, deadline: date, projectUrl: link.trim() || null })} disabled={!date || mutation.isPending} className="pill-accent px-4 py-2.5 text-xs disabled:opacity-50">Increase deadline</button>
         </div>
         <button onClick={onClose} className="mt-3 w-full rounded-2xl px-4 py-2.5 text-xs font-medium text-muted hover:bg-surface-2">Decide later</button>
@@ -388,7 +388,7 @@ function CreateProjectModal({ onClose, onCreated }) {
               <div className="mt-4">
                 <p className="text-xs font-medium text-muted">Technologies / tools</p>
                 <p className="mt-1 text-[10px] text-muted">Options change according to the selected field of work.</p>
-                <div className="mt-2 flex flex-wrap gap-2">{((categoriesQuery.data || []).find(c => c.id === form.workCategoryId)?.technologies || []).map(tech => <button type="button" key={tech} onClick={() => toggleTechnology(tech)} className={`rounded-full px-3 py-1.5 text-[10px] font-semibold ${form.technologies.includes(tech) ? "bg-accent text-white" : "bg-surface-2 text-muted hover:text-ink"}`}>{tech}</button>)}</div>
+                <div className="mt-2 flex flex-wrap gap-2">{((categoriesQuery.data || []).find(c => c.id === form.workCategoryId)?.technologies || []).map(tech => <button type="button" key={tech} onClick={() => toggleTechnology(tech)} className={`rounded-full px-3 py-1.5 text-[10px] font-semibold ${form.technologies.includes(tech) ? "bg-accent text-on-accent" : "bg-surface-2 text-muted hover:text-ink"}`}>{tech}</button>)}</div>
               </div>
             </div>
 
@@ -415,8 +415,8 @@ function CreateProjectModal({ onClose, onCreated }) {
         </div>
 
         <div className="sticky bottom-0 z-10 border-t border-border bg-surface/95 p-5 backdrop-blur">
-          {completedNeedsLink && <p className="mb-3 text-xs font-medium text-red-600">A project link is required when the project status is Completed.</p>}
-          {mutation.isError && <p className="mb-3 text-xs font-medium text-red-600">{mutation.error?.response?.data?.error || "Unable to create the project."}</p>}
+          {completedNeedsLink && <p className="mb-3 text-xs font-medium text-red-600 dark:text-red-300">A project link is required when the project status is Completed.</p>}
+          {mutation.isError && <p className="mb-3 text-xs font-medium text-red-600 dark:text-red-300">{mutation.error?.response?.data?.error || "Unable to create the project."}</p>}
           <div className="flex justify-end gap-2"><button onClick={onClose} className="rounded-2xl px-4 py-2.5 text-xs font-semibold text-muted hover:bg-surface-2">Cancel</button><button onClick={() => mutation.mutate()} disabled={!form.name.trim() || completedNeedsLink || mutation.isPending} className="pill-accent inline-flex items-center gap-2 px-4 py-2.5 text-xs disabled:opacity-50"><Plus size={14} />{mutation.isPending ? "Adding…" : "Add project"}</button></div>
         </div>
       </div>

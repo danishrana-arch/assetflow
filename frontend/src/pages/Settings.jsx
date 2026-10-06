@@ -373,7 +373,7 @@ export default function Settings() {
                                   type="button"
                                   onClick={() => setCompanyAccess.mutate({ orgId: org.id, userId: u.id, enabled: false })}
                                   disabled={setCompanyAccess.isPending}
-                                  className="text-muted hover:text-red-600"
+                                  className="text-muted hover:text-red-600 dark:hover:text-red-300"
                                   aria-label={`Remove ${u.name}'s access to ${org.name}`}
                                 >
                                   ×
@@ -418,7 +418,7 @@ export default function Settings() {
                               }
                             }}
                             disabled={removeSubOrganization.isPending}
-                            className="rounded-xl border border-red-200 px-3 py-1.5 text-[11px] font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50"
+                            className="rounded-xl border border-red-200 dark:border-red-400/30 px-3 py-1.5 text-[11px] font-semibold text-red-600 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-500/10 disabled:opacity-50"
                           >
                             Remove
                           </button>
