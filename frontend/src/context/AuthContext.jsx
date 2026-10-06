@@ -44,6 +44,9 @@ function normalizeAuthPayload(data) {
     email: data.email,
     role: data.role,
     status: data.status,
+    // Shown in the sidebar / top bar avatar and on My Profile.
+    photoUrl: data.photoUrl || null,
+    designation: data.designation || null,
     canManageAttendance: data.canManageAttendance,
     // Decided by the backend: the user's own company, and whether they may add
     // companies / give others access (CEO only).

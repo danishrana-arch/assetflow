@@ -16,13 +16,13 @@ export default function NotificationBell({ className = "" }) {
   return (
     <Link
       to="/notifications"
-      className={`relative flex h-9 w-9 items-center justify-center rounded-full text-muted hover:bg-surface-2 ${className}`}
+      className={`relative flex items-center justify-center rounded-full ${className.includes("glass-chip") ? "" : "h-9 w-9 text-muted hover:bg-surface-2"} ${className}`}
       aria-label={hasUnread ? `Notifications (${data.count} unread)` : "Notifications"}
       title="Notifications"
     >
       <Bell size={18} />
       {hasUnread && (
-        <span className="absolute right-1.5 top-1 h-2 w-2 rounded-full bg-danger ring-2 ring-surface" />
+        <span className="absolute right-2.5 top-2 h-2 w-2 rounded-full bg-danger ring-2 ring-surface" />
       )}
     </Link>
   )

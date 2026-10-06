@@ -17,7 +17,7 @@ import StatusBadge from "../components/StatusBadge"
 import ParticleText from "../components/ParticleText"
 import StatusPill from "../components/ui/StatusPill"
 import PageHeader from "../components/ui/PageHeader"
-import Avatar from "../components/ui/Avatar"
+import ProfilePhoto from "../components/ProfilePhoto"
 import IconChip from "../components/ui/IconChip"
 import SectionHeader from "../components/ui/SectionHeader"
 import { FieldValue, TextField, SelectField } from "../components/ui/Field"
@@ -228,6 +228,8 @@ export default function EmployeeProfile() {
   const canManageCertifications = (hasModuleAccess(user?.role, "certifications") || isSelf) && canTouchThisProfile
   // Employment status decides leave eligibility — ADMIN/CEO/HR only (backend: updateEmployee).
   const canEditEmploymentStatus = ["ADMIN", "CEO", "HR"].includes(user?.role)
+  // Profile picture: yourself, or ADMIN/CEO/HR (an ADMIN/CEO's only by ADMIN/CEO) — backend: updateEmployeePhoto.
+  const canChangePhoto = isSelf || (["ADMIN", "CEO", "HR"].includes(user?.role) && canTouchThisProfile)
   // Document pictures: the employee views their own; ADMIN/CEO/HR manage
   // (an ADMIN/CEO's only by ADMIN/CEO) — backend: employee-document.controller.
   const canManageDocuments = ["ADMIN", "CEO", "HR"].includes(user?.role) && canTouchThisProfile
@@ -739,7 +741,14 @@ export default function EmployeeProfile() {
       <div className="mb-5 grid grid-cols-1 gap-5 lg:grid-cols-3">
         <section className={`card min-w-0 p-5 sm:p-6 ${isIT ? "lg:col-span-3" : "lg:col-span-2"}`}>
           <div className="flex flex-col gap-5 sm:flex-row sm:items-start">
-            <Avatar name={employee.name} size="2xl" className="self-center shadow-card ring-4 ring-surface-2 sm:self-start" />
+            <ProfilePhoto
+              employeeId={employee.id}
+              name={employee.name}
+              src={employee.photoUrl}
+              size="2xl"
+              canEdit={canChangePhoto}
+              className="self-center rounded-full shadow-card ring-4 ring-surface-2 sm:self-start"
+            />
 
             <div className="min-w-0 flex-1">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">

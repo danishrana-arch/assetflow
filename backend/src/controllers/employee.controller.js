@@ -389,7 +389,6 @@ const MANAGEMENT_EDITABLE_FIELDS = [
   "departmentId",
   "managerId",
   "status",
-  "photoUrl",
   "cnic",
   "dob",
   "address",
@@ -453,7 +452,7 @@ async function updateEmployee(req, res, next) {
 
     // Free-text fields: trimmed, and a blank value clears the field (null)
     // rather than storing "" — so a cleared field reads back as empty.
-    const TEXT_FIELDS = ["name", "email", "education", "currentUniversity", "linkedinUrl", "skill", "bankName", "designation", "photoUrl"]
+    const TEXT_FIELDS = ["name", "email", "education", "currentUniversity", "linkedinUrl", "skill", "bankName", "designation"]
     const clean = (value) => {
       if (value === null || value === undefined) return value
       const s = String(value).trim()
@@ -1005,6 +1004,69 @@ async function importTemplate(req, res, next) {
   }
 }
 
+// Profile picture. Stored inline in User.photoUrl as a small data URL (the
+// browser crops/resizes it to a square JPEG before upload), so every list
+// that already returns photoUrl shows it with no extra request. Anyone may
+// set their own; ADMIN/CEO/HR may set someone else's in their org, but an
+// ADMIN/CEO's picture only by an ADMIN/CEO (same rule as editing them).
+const PHOTO_MAX_BYTES = 200 * 1024
+const PHOTO_EDITORS = ["ADMIN", "CEO", "HR"]
+const PHOTO_PATTERN = /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/]+={0,2})$/
+
+function photoBytesMatch(kind, buf) {
+  if (kind === "jpeg") return buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff
+  if (kind === "png") return buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+  if (kind === "webp") return buf.subarray(0, 4).toString("ascii") === "RIFF" && buf.subarray(8, 12).toString("ascii") === "WEBP"
+  return false
+}
+
+async function updateEmployeePhoto(req, res, next) {
+  try {
+    const { organizationId, userId, role: requesterRole } = req.user
+    const { id } = req.params
+    const isSelf = userId === id
+
+    // Your own picture lives on your home record, even while viewing another company.
+    const select = { id: true, role: true, organizationId: true }
+    const existing = isSelf
+      ? await prisma.user.findUnique({ where: { id }, select })
+      : await prisma.user.findFirst({ where: { id, organizationId }, select })
+    if (!existing) return res.status(404).json({ error: "Employee not found" })
+
+    if (!isSelf) {
+      if (!PHOTO_EDITORS.includes(requesterRole)) {
+        return res.status(403).json({ error: "You can only change your own profile picture" })
+      }
+      if (["ADMIN", "CEO"].includes(existing.role) && !["ADMIN", "CEO"].includes(requesterRole)) {
+        return res.status(403).json({ error: "Only an Admin or CEO can change an Admin or CEO's picture" })
+      }
+    }
+
+    let photoUrl = null
+    const { photo } = req.body || {}
+    if (photo !== null && photo !== undefined && photo !== "") {
+      const match = typeof photo === "string" ? PHOTO_PATTERN.exec(photo) : null
+      if (!match) return res.status(400).json({ error: "Picture must be a JPG, PNG or WEBP image" })
+      const buf = Buffer.from(match[2], "base64")
+      if (buf.length > PHOTO_MAX_BYTES) return res.status(400).json({ error: "Picture is too large (max 200 KB after resizing)" })
+      if (!photoBytesMatch(match[1], buf)) return res.status(400).json({ error: "That file isn't a valid image" })
+      photoUrl = photo
+    }
+
+    await prisma.user.update({ where: { id }, data: { photoUrl } })
+    logAudit({
+      organizationId: existing.organizationId,
+      actorId: userId,
+      action: photoUrl ? "employee.photo_updated" : "employee.photo_removed",
+      targetType: "User",
+      targetId: id,
+    })
+    res.json({ id, photoUrl })
+  } catch (err) {
+    next(err)
+  }
+}
+
 module.exports = {
   listEmployees,
   getEmployee,
@@ -1013,4 +1075,5 @@ module.exports = {
   deleteEmployee,
   importEmployees,
   importTemplate,
+  updateEmployeePhoto,
 }

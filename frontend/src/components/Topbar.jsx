@@ -31,7 +31,7 @@ export default function Topbar({ onMenuClick }) {
         <RoleBadge className="hidden border border-border bg-surface-2 sm:inline-flex" />
         <NotificationBell />
         <Link to="/profile" aria-label="Open profile">
-          <Avatar name={user?.name || "?"} size="sm" />
+          <Avatar name={user?.name || "?"} src={user?.photoUrl} size="sm" />
         </Link>
       </div>
     </header>

@@ -2508,3 +2508,102 @@ UI-only rows.
   its list. Verified 72/72 (8 tiles × 9 companies) on a temp backend, plus
   a Playwright click-through as the CEO. The endpoint takes ~6 s for 9
   companies (≈90 queries to Neon) — tiles show "—" until then.
+
+## Post-module change: macOS Dock-style sidebar (2026-10-05)
+
+- `Sidebar.jsx`: the desktop rail no longer expands into a wide labelled
+  panel on hover. It stays 72px and acts like the macOS Dock instead — the
+  icon under the cursor grows to 1.6× and slides forward (right), neighbours
+  within 110px grow less (cosine falloff) and are pushed apart, and a
+  name bubble shows beside the hovered icon (portaled to `<body>` — the
+  aside's `backdrop-filter` would trap a `fixed` child). `useDock()` writes
+  transforms straight to `[data-dock-item]` elements in a rAF, measured
+  from untransformed `offsetTop`; group dividers (`data-dock-fixed`) move
+  but don't scale. The nav box extends 56px past the rail
+  (`-mr-14`, pointer-events-none except the icon column) so magnified icons
+  aren't clipped by the scroll container. Logout + My Account are a second
+  little dock. Magnification is off under `prefers-reduced-motion` (label
+  still shows). Group titles are gone (they only showed when expanded).
+- `DashboardLayout.jsx`: removed the hover-expand state/timer and the
+  `<main>` `translate-x` nudge — `<main>` no longer has a transform.
+- Verified with Playwright (system Chrome) as the real CEO: 26 dock items,
+  magnification + labels on nav and footer, no page errors.
+- Follow-up (same day): the rail stays still (a hover-widening variant was
+  tried and dropped). Magnification is 1.4× from the icon centre with a 3px
+  forward nudge, so a magnified icon fits inside the 72px glass; the nav no
+  longer extends past the rail. Only the icon under the cursor (the one
+  the label points at, marked `data-dock-hovered` by `useDock`) is drawn
+  bold + full colour (stroke 2.75); the rest keep the normal look
+  (stroke 2, white/60 or black/55).
+
+## Post-module change: "My Profile" page (2026-10-05)
+
+- `pages/Profile.jsx` (`/profile` — the sidebar/topbar avatar and mobile
+  "My Account") rewritten as the signed-in user's own page: main
+  information only (avatar, name, designation, role label, email, phone,
+  home company, department, joined, employment status) + Logout, and a
+  Change Password card (show/hide toggles, live checklist: ≥ 8 chars,
+  differs from current, confirmation matches; button disabled until all
+  pass; same `PATCH /auth/password`). The old "Contact Info" edit form
+  (phone/email via `PATCH /employees/:id`) was removed — HR/Admin edit
+  those on `/employees/:id`.
+- `/auth/me`'s session object only carries id/name/email/role, so the
+  details come from the user's own `GET /employees/:id` (allowed for
+  self; same `["employee", id]` query key as EmployeeProfile). Company is
+  the home org (`homeOrganizationId`), not the one selected in the switcher.
+- Verified read-only in Chrome as the real CEO (desktop + 390px, no
+  overflow, no page errors). The password change itself was not submitted.
+- Follow-up (same day): **Company was blank for employees** — the page read
+  `user.organizations`, which isn't on the `user` object (AuthContext keeps
+  `organization`/`organizations` separately). Company now comes from the
+  employee record's `organization.name` (home company), falling back to
+  the auth context; if a CEO/Admin/IT has switched to another company, a
+  "Currently viewing" tile shows it too. Layout reworked: full-width
+  identity card (avatar, name, designation · department · company, role
+  badge, Logout on the right), then two equal-height cards side by side —
+  "Main information" (bordered tiles; Email and Company full-width so rows
+  always pair up; email wraps instead of truncating) and "Change password"
+  (button pinned to the card bottom). Verified as a real EMPLOYEE and the
+  CEO at 1366 / 820 / 390px, no overflow, no page errors.
+
+## Post-module addition: profile pictures + header profile badge (2026-10-06)
+
+- **Profile pictures**: new `PUT /employees/:id/photo { photo: dataURL | null }`
+  (`updateEmployeePhoto`). Yourself (any role), or ADMIN/CEO/HR for someone
+  in their org — an ADMIN/CEO's picture only by ADMIN/CEO. Stored in the
+  existing `User.photoUrl` as a data URL: the browser centre-crops and
+  resizes to a 256px JPEG (`components/ProfilePhoto.jsx` `resizeImage`), the
+  backend accepts only `data:image/(jpeg|png|webp);base64,` with matching
+  magic bytes, ≤ 200 KB. Audit rows `employee.photo_updated/removed`.
+  `photoUrl` was removed from `PATCH /employees/:id`'s editable fields, so
+  every write goes through this validation. No schema change.
+- `Avatar` now actually renders `src` (it ignored it before, so existing
+  `src={…photoUrl}` props on Projects/Tasks never showed anything); falls back
+  to the initial if the image fails. Photos show on the mobile topbar avatar
+  (`photoUrl` kept in the session user), header profile badge, Employees list, Employee Profile
+  (camera button for self / ADMIN/CEO/HR) and My Profile.
+- **Header profile badge** (`components/ProfileBadge.jsx`): replaces the plain
+  `RoleBadge` at the top right of the desktop header (next to the company
+  selector) — soft frosted-glass pill (`.glass-btn`, follows light/dark
+  mode) with name, accent role tag and picture/initial; click →
+  `/profile`. The avatar / "My Account" link was removed from the sidebar
+  dock. A bell + big pill hero on My Profile was tried and reverted at the
+  user's request; My Profile keeps its original identity card, with a camera
+  button on the avatar to add/change/remove the picture.
+- Verified: frontend build passes; backend loads; validator rejects SVG /
+  non-data URLs. Upload not exercised against the live DB (it writes).
+  Restart the backend to pick up the new route.
+- Dashboard `QuickAttendance` "Check out" button is now light-red glass
+  (new `.glass-btn-danger` in `styles/index.css`, light + dark variants),
+  pairing with the accent-blue "Check in".
+- Desktop header row is now one soft-glass set: new `.glass-chip` surface in
+  `styles/index.css` (frosted gradient, blur/saturate, top sheen, inner
+  highlight, soft drop shadow, accent focus ring; dark variant) used by the
+  compact `GlobalSearch`, `NotificationBell`, the Settings gear,
+  `OrganizationSwitcher glass` (new prop — select itself is the glass pill;
+  read-only variant too) and `ProfileBadge`. All 44px tall. Mobile topbar /
+  MobileNav unchanged.
+- Fix: `POST /auth/login`'s `user` payload now includes `photoUrl` and
+  `designation` (it only had id/name/email/role/…), so the header badge shows
+  the picture right after sign-in instead of only after a full page reload
+  (the app doesn't call `/auth/me` again after login).

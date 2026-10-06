@@ -139,7 +139,7 @@ export default function QuickAttendance({ className = "" }) {
             type="button"
             onClick={checkOut}
             disabled={!!busy}
-            className="glass-btn"
+            className="glass-btn glass-btn-danger"
           >
             {busy === "out" ? <Loader2 size={14} className="animate-spin" /> : <LogOut size={14} />}
             {busy === "out" ? "Checking out…" : "Check out"}

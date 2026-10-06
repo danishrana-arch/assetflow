@@ -8,6 +8,7 @@ const {
   deleteEmployee,
   importEmployees,
   importTemplate,
+  updateEmployeePhoto,
 } = require("../controllers/employee.controller")
 const { resetPassword } = require("../controllers/auth.controller")
 const { listDocuments, uploadDocument, downloadDocument, deleteDocument } = require("../controllers/employee-document.controller")
@@ -56,6 +57,8 @@ router.delete("/:id/documents/:docId", requireRole("ADMIN", "CEO", "HR"), delete
 // A role with the "employees" module can edit anyone; anyone else can only
 // edit their own phone/email (enforced field-by-field in the controller).
 router.patch("/:id", requireModuleOrSelf("employees"), updateEmployee)
+// Profile picture: self, or ADMIN/CEO/HR (checked in the controller).
+router.put("/:id/photo", updateEmployeePhoto)
 // Admin-assisted "forgot password" — resets to a known temp password since
 // there's no email-reset flow. ADMIN/CEO can reset anyone; HR can reset
 // anyone except an ADMIN/CEO (enforced inside the controller, since that

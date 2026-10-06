@@ -507,6 +507,103 @@ h1, h2, h3, h4 {
   }
   .dark .glass-btn-accent::before { background: linear-gradient(180deg, rgba(255, 255, 255, 0.35), rgba(255, 255, 255, 0)); }
 
+  /* Soft frosted-glass surface for header controls of any shape (search,
+     bell, settings, company selector). Same material as .glass-btn, minus
+     its pill layout; no overflow:hidden so dropdowns aren't clipped. */
+  .glass-chip {
+    position: relative;
+    isolation: isolate;
+    color: var(--ink);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.74) 0%, rgba(255, 255, 255, 0.40) 100%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.85);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 1),
+      inset 0 -1px 2px rgba(20, 24, 32, 0.07),
+      0 10px 24px -10px rgba(20, 24, 32, 0.26),
+      0 1px 2px rgba(20, 24, 32, 0.05);
+    transition: transform 0.18s ease, box-shadow 0.2s ease, background 0.2s ease, border-color 0.2s ease;
+  }
+  .glass-chip::before {
+    content: "";
+    position: absolute;
+    inset: 1px 1px 52% 1px;
+    z-index: -1;
+    border-radius: inherit;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.8), rgba(255, 255, 255, 0));
+    pointer-events: none;
+  }
+  a.glass-chip:hover, button.glass-chip:hover:not(:disabled), select.glass-chip:hover:not(:disabled) {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.9) 0%, rgba(255, 255, 255, 0.52) 100%);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 1),
+      inset 0 -1px 2px rgba(20, 24, 32, 0.08),
+      0 14px 28px -10px rgba(20, 24, 32, 0.32),
+      0 1px 2px rgba(20, 24, 32, 0.06);
+  }
+  a.glass-chip:active, button.glass-chip:active:not(:disabled) { transform: scale(0.96); }
+  .glass-chip:focus-within, select.glass-chip:focus {
+    outline: none;
+    border-color: color-mix(in srgb, var(--accent) 45%, white 55%);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 1),
+      0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent),
+      0 10px 24px -10px rgba(20, 24, 32, 0.26);
+  }
+  .dark .glass-chip {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.14) 0%, rgba(255, 255, 255, 0.05) 100%);
+    border-color: rgba(255, 255, 255, 0.14);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.24),
+      inset 0 -1px 2px rgba(0, 0, 0, 0.35),
+      0 10px 24px -10px rgba(0, 0, 0, 0.7);
+  }
+  .dark .glass-chip::before { background: linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0)); }
+  .dark a.glass-chip:hover, .dark button.glass-chip:hover:not(:disabled), .dark select.glass-chip:hover:not(:disabled) {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.2) 0%, rgba(255, 255, 255, 0.08) 100%);
+  }
+  .dark .glass-chip:focus-within, .dark select.glass-chip:focus {
+    border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.24),
+      0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent),
+      0 10px 24px -10px rgba(0, 0, 0, 0.7);
+  }
+  .dark select.glass-chip option { background: var(--surface); color: var(--ink); }
+
+  /* Light-red glass (secondary "stop" action, e.g. Check out). */
+  .glass-btn-danger {
+    color: #c0352b;
+    background: linear-gradient(180deg, rgba(255, 228, 226, 0.92) 0%, rgba(254, 202, 198, 0.62) 100%);
+    border-color: rgba(248, 160, 152, 0.7);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.9),
+      inset 0 -1px 3px rgba(220, 60, 50, 0.14),
+      0 10px 22px -10px rgba(220, 60, 50, 0.45),
+      0 1px 2px rgba(20, 24, 32, 0.06);
+  }
+  button.glass-btn-danger:hover:not(:disabled) {
+    background: linear-gradient(180deg, rgba(255, 220, 217, 1) 0%, rgba(252, 186, 180, 0.8) 100%);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.95),
+      inset 0 -1px 3px rgba(220, 60, 50, 0.18),
+      0 14px 26px -10px rgba(220, 60, 50, 0.55),
+      0 1px 2px rgba(20, 24, 32, 0.06);
+  }
+  .dark .glass-btn-danger {
+    color: #ffb4ad;
+    background: linear-gradient(180deg, rgba(255, 110, 100, 0.26) 0%, rgba(255, 90, 80, 0.12) 100%);
+    border-color: rgba(255, 140, 130, 0.32);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.22),
+      inset 0 -1px 2px rgba(0, 0, 0, 0.35),
+      0 10px 22px -10px rgba(255, 80, 70, 0.4);
+  }
+  .dark button.glass-btn-danger:hover:not(:disabled) {
+    background: linear-gradient(180deg, rgba(255, 110, 100, 0.34) 0%, rgba(255, 90, 80, 0.18) 100%);
+  }
+
   /* ── Sliding light/dark switch (components/ThemeToggle.jsx) ─────────── */
   .theme-switch {
     position: relative;

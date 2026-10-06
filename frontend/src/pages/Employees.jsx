@@ -675,7 +675,7 @@ export default function Employees() {
       <div className="space-y-3 md:hidden">
         {employees.map((emp) => (
           <div key={emp.id} className="card flex items-center gap-3 p-4">
-            <Avatar name={emp.name} size="md" />
+            <Avatar name={emp.name} src={emp.photoUrl} size="md" />
             <Link to={`/employees/${emp.id}`} className="min-w-0 flex-1">
               <p className="truncate text-sm font-semibold text-ink">{emp.name}</p>
               <p className="truncate text-xs text-muted">{emp.designation || ROLE_LABELS[emp.role] || emp.role}</p>
@@ -743,7 +743,7 @@ export default function Employees() {
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-3">
-                      <Avatar name={emp.name} size="sm" />
+                      <Avatar name={emp.name} src={emp.photoUrl} size="sm" />
                       <div className="min-w-0">
                         <Link to={`/employees/${emp.id}`} className="block truncate font-semibold text-ink hover:text-accent">
                           {emp.name}

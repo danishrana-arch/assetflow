@@ -1,3 +1,5 @@
+import { useEffect, useState } from "react"
+
 const PALETTE = [
   "bg-chip-blue-bg text-chip-blue-fg",
   "bg-chip-purple-bg text-chip-purple-fg",
@@ -23,7 +25,24 @@ const SIZE = {
   "2xl": "h-24 w-24 text-3xl",
 }
 
-export default function Avatar({ name = "?", size = "md", className = "" }) {
+// Shows the person's picture when they have one (src = User.photoUrl), else
+// their initial on a colour picked from their name. A broken picture falls
+// back to the initial.
+export default function Avatar({ name = "?", src, size = "md", className = "" }) {
+  const [failed, setFailed] = useState(false)
+  useEffect(() => setFailed(false), [src])
+
+  if (src && !failed) {
+    return (
+      <img
+        src={src}
+        alt={name || ""}
+        onError={() => setFailed(true)}
+        className={`shrink-0 rounded-full object-cover ${SIZE[size]} ${className}`}
+      />
+    )
+  }
+
   const initial = (name?.[0] || "?").toUpperCase()
   const tone = PALETTE[hash(name) % PALETTE.length]
   return (

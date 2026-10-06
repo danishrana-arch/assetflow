@@ -193,6 +193,9 @@ async function login(req, res, next) {
         email: user.email,
         role: user.role,
         status: user.status,
+        // Header profile badge / avatars — same fields /auth/me returns.
+        photoUrl: user.photoUrl || null,
+        designation: user.designation || null,
         canManageAttendance: user.canManageAttendance,
         homeOrganizationId: user.organizationId,
         canManageCompanies: canManageCompanies(user.role),
