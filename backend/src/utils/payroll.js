@@ -21,6 +21,7 @@ function computePayrollTotals(r) {
       toNumber(r.absentDeduction) +
       toNumber(r.lateDeduction) +
       toNumber(r.halfDayDeduction) +
+      toNumber(r.latePenaltyDeduction) +
       toNumber(r.earlyGoingFine) +
       toNumber(r.fineDeduction) +
       toNumber(r.otherDeduction) +

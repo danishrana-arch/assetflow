@@ -6,6 +6,7 @@ import { Save, Download, CheckCircle2, MapPin, AlertTriangle, ShieldAlert, X, Ch
 import api from "../api/client"
 import { PresentIcon, AbsentIcon, OnLeaveIcon } from "../components/ui/StatusIcons"
 import BackButton from "../components/ui/BackButton"
+import LateRulesSection from "../components/LateRulesSection"
 import { useAuth } from "../context/AuthContext"
 import Avatar from "../components/ui/Avatar"
 import StatusPill from "../components/ui/StatusPill"
@@ -391,49 +392,53 @@ const POLICY_FIELDS = [
   ["earlyGoingFineAmount", "Early-going fine", "PKR", "Added on top of the half-day deduction for an Early-going day. 0 = no fine."],
 ]
 
-// "Policy & fines" header panel (HR/ADMIN/CEO): the late and absent fine per
-// day plus the half-day / early-going policy, for the whole organization
-// (PUT /attendance/fine-settings). Payroll applies them; draft payslips are
-// refreshed on save. Shows what today's rows add up to. Set any hours to 0
-// to turn that rule off.
-function FineSettings({ settings, lateCount, absentCount, halfDayCount, dayTotal, onSaved }) {
-  const pop = usePopover()
-  const [form, setForm] = useState({})
+// "Policy & fines" (HR/ADMIN/CEO): everything that turns attendance into
+// payroll deductions, in one panel under the page header —
+//   1. fines per day (late / absent = the day rate),
+//   2. the half-day / early-going policy (services/attendance-engine.js),
+//      both saved with PUT /attendance/fine-settings (draft payslips are
+//      refreshed on save; hours set to 0 turn a rule off),
+//   3. the company's late-arrival rules (e.g. 3 lates = half day) — their
+//      own CRUD in components/LateRulesSection.jsx (/api/late-rules).
+function PolicyButton({ open, onToggle, dayTotal }) {
+  return (
+    <button type="button" onClick={onToggle} className="pill-secondary flex items-center gap-1.5 px-4 py-2.5 text-sm" aria-expanded={open} title="Fines, half-day policy and late-arrival rules">
+      <Wallet size={15} /> Policy &amp; fines
+      {dayTotal > 0 && <span className="rounded-full bg-chip-pink-bg px-2 py-0.5 text-[10px] font-semibold text-chip-pink-fg">{pkr(dayTotal)}</span>}
+    </button>
+  )
+}
+
+function PolicyPanel({ settings, lateCount, absentCount, halfDayCount, dayTotal, onSaved, onClose, canManageRules }) {
   const fromSettings = () => ({
     lateFine: String(settings.lateFine ?? ""),
     absentFine: settings.absentFine == null ? "" : String(settings.absentFine),
     ...Object.fromEntries(POLICY_FIELDS.map(([key]) => [key, settings[key] == null ? "" : String(settings[key])])),
   })
+  const [form, setForm] = useState(fromSettings)
   const save = useMutation({
     mutationFn: () => api.put("/attendance/fine-settings", form).then((r) => r.data),
     onSuccess: (res) => onSaved(res),
   })
-  function toggle() {
-    if (!pop.open) {
-      setForm(fromSettings())
-      save.reset()
-    }
-    pop.setOpen((v) => !v)
-  }
   const initial = fromSettings()
   const unchanged = Object.keys(initial).every((k) => String(form[k] ?? "") === initial[k])
   const dayRate = Number(form.absentFine) || 0
   const halfDayAmount = (dayRate * (Number(form.halfDayDeductionPercent) || 0)) / 100
 
   return (
-    <div className="relative" ref={pop.ref}>
-      <button type="button" onClick={toggle} className="pill-secondary flex items-center gap-1.5 px-4 py-2.5 text-sm" aria-expanded={pop.open} title="Fines and the half-day / early-going policy">
-        <Wallet size={15} /> Policy &amp; fines
-        {dayTotal > 0 && <span className="rounded-full bg-chip-pink-bg px-2 py-0.5 text-[10px] font-semibold text-chip-pink-fg">{pkr(dayTotal)}</span>}
-      </button>
-      {pop.open && (
-        <form
-          onSubmit={(e) => { e.preventDefault(); save.mutate() }}
-          className="absolute right-0 z-30 mt-2 max-h-[80vh] w-[min(24rem,calc(100vw-2rem))] overflow-y-auto rounded-2xl border border-border bg-surface p-4 shadow-pop"
-        >
-          <p className="text-sm font-semibold text-ink">Attendance &amp; payroll policy</p>
-          <p className="mt-0.5 text-xs text-muted">Deducted in payroll for late, absent, half and very short days.</p>
+    <section className="card mb-5 p-5">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <p className="text-base font-semibold text-ink">Attendance &amp; payroll policy</p>
+          <p className="mt-0.5 text-xs text-muted">Everything that turns attendance into payslip deductions, for the whole company. Changes refresh draft payslips; submitted or paid payslips keep their amounts.</p>
+        </div>
+        <button type="button" onClick={onClose} className="pill-secondary px-3 py-1.5 text-xs">Close</button>
+      </div>
 
+      <form onSubmit={(e) => { e.preventDefault(); save.mutate() }} className="mt-4 grid gap-4 lg:grid-cols-2">
+        {/* 1. Fines per day */}
+        <div className="rounded-2xl border border-border p-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted">1 · Fines per day</p>
           <div className="mt-3 grid grid-cols-2 gap-2">
             <label className="text-[11px] font-medium text-muted">
               Late fine / day
@@ -443,24 +448,33 @@ function FineSettings({ settings, lateCount, absentCount, halfDayCount, dayTotal
               </div>
             </label>
             <label className="text-[11px] font-medium text-muted">
-              Absent fine / day
+              Absent fine / day (day rate)
               <div className="relative mt-1">
                 <input type="number" min="1000" step="any" value={form.absentFine} placeholder="Not set" onChange={(e) => setForm((f) => ({ ...f, absentFine: e.target.value }))} className="field py-2 pr-10 text-xs" />
                 <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-muted-2">PKR</span>
               </div>
             </label>
           </div>
-          <p className="mt-1.5 text-[10px] leading-4 text-muted-2">
-            The absent fine is also charged per unpaid-leave day (half for a half day) and is the day rate the half-day deduction uses. Leave it empty for no absent fine.
+          <p className="mt-2 text-[11px] leading-4 text-muted-2">
+            The absent fine is also charged per unpaid-leave day (half for a half day), and it's the day rate half days and late-arrival rules use. Empty = no absent fine.
           </p>
+          <div className="mt-3 rounded-xl bg-surface-2 px-3 py-2 text-xs text-ink">
+            <p className="font-semibold">This day</p>
+            <p className="mt-0.5 text-muted">
+              {lateCount} late · {absentCount} absent · {halfDayCount} half / short — <span className="font-semibold text-chip-pink-fg">{pkr(dayTotal)}</span> in deductions
+            </p>
+          </div>
+        </div>
 
-          <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-muted">Half day &amp; early going</p>
-          <div className="mt-2 space-y-2.5">
+        {/* 2. Half day & early going */}
+        <div className="rounded-2xl border border-border p-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted">2 · Half day &amp; early going</p>
+          <div className="mt-3 space-y-2.5">
             {POLICY_FIELDS.map(([key, label, unit, help]) => (
               <label key={key} className="block text-[11px] font-medium text-muted">
                 <span className="flex items-center justify-between gap-2">
                   <span className="text-ink">{label}</span>
-                  <span className="relative w-32">
+                  <span className="relative w-32 shrink-0">
                     <input
                       type="number" min="0" step="any" required value={form[key] ?? ""}
                       onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
@@ -479,30 +493,28 @@ function FineSettings({ settings, lateCount, absentCount, halfDayCount, dayTotal
               : <>No absent fine / day is set, so half days are recorded but deduct nothing{Number(form.earlyGoingFineAmount) > 0 ? " (the early-going fine still applies)" : ""}.</>}
           </p>
           <p className="mt-1.5 text-[10px] leading-4 text-muted-2">Policy changes apply to attendance recorded from now on; days already recorded keep their result.</p>
+        </div>
 
-          <div className="mt-3 rounded-xl bg-surface-2 px-3 py-2 text-xs text-ink">
-            <p className="font-semibold">This day</p>
-            <p className="mt-0.5 text-muted">
-              {lateCount} late · {absentCount} absent · {halfDayCount} half / short — <span className="font-semibold text-chip-pink-fg">{pkr(dayTotal)}</span> in deductions
-            </p>
-          </div>
-
-          {save.isError && <p className="mt-2 text-xs text-danger">{save.error?.response?.data?.error || "Couldn't save the fines."}</p>}
+        <div className="flex flex-wrap items-center justify-end gap-2 lg:col-span-2">
+          {save.isError && <p className="mr-auto text-xs text-danger">{save.error?.response?.data?.error || "Couldn't save the policy."}</p>}
           {save.isSuccess && (
-            <p className="mt-2 text-xs text-chip-green-fg">
+            <p className="mr-auto text-xs text-chip-green-fg">
               Saved{save.data.refreshedDrafts ? ` — ${save.data.refreshedDrafts} draft payslip${save.data.refreshedDrafts === 1 ? "" : "s"} updated` : ""}.
             </p>
           )}
-          <div className="mt-3 flex justify-end gap-2">
-            <button type="button" onClick={() => pop.setOpen(false)} className="pill-secondary px-3 py-1.5 text-xs">Close</button>
-            <button type="submit" disabled={save.isPending || unchanged || form.lateFine === ""} className="pill-accent px-3 py-1.5 text-xs disabled:opacity-50">
-              {save.isPending ? "Saving…" : "Save policy"}
-            </button>
-          </div>
-          <p className="mt-2 text-[10px] text-muted-2">Submitted or paid payslips keep the amounts they were issued with.</p>
-        </form>
-      )}
-    </div>
+          <button type="button" onClick={() => setForm(fromSettings())} disabled={unchanged || save.isPending} className="pill-secondary px-3 py-1.5 text-xs disabled:opacity-50">Reset</button>
+          <button type="submit" disabled={save.isPending || unchanged || form.lateFine === ""} className="pill-accent px-4 py-1.5 text-xs disabled:opacity-50">
+            {save.isPending ? "Saving…" : "Save fines & policy"}
+          </button>
+        </div>
+      </form>
+
+      {/* 3. Late-arrival rules */}
+      <div className="mt-4 rounded-2xl border border-border p-4">
+        <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted">3 · Late-arrival rules</p>
+        <LateRulesSection canManage={canManageRules} plain />
+      </div>
+    </section>
   )
 }
 
@@ -585,6 +597,7 @@ function readView() {
 
 export default function Attendance() {
   const { user, organization } = useAuth()
+  const [showPolicy, setShowPolicy] = useState(false)
   const queryClient = useQueryClient()
 
   const { data: permission, isLoading: permissionLoading } = useQuery({
@@ -906,16 +919,7 @@ export default function Attendance() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {fineSettings && (
-            <FineSettings
-              settings={fineSettings}
-              lateCount={rows.filter((r) => r.fine?.autoType === "LATE").length}
-              absentCount={rows.filter((r) => r.fine?.autoType === "ABSENT").length}
-              halfDayCount={rows.filter((r) => r.fine?.autoType === "HALF_DAY" || r.fine?.autoType === "EARLY_GOING").length}
-              dayTotal={dayFineTotal}
-              onSaved={onFineSaved}
-            />
-          )}
+          {fineSettings && <PolicyButton open={showPolicy} onToggle={() => setShowPolicy((v) => !v)} dayTotal={dayFineTotal} />}
           <div className="relative" ref={report.ref}>
             <button type="button" onClick={() => report.setOpen((v) => !v)} className="pill-secondary flex items-center gap-1.5 px-4 py-2.5 text-sm" aria-expanded={report.open}>
               <FileBarChart size={15} /> Attendance Report
@@ -962,6 +966,20 @@ export default function Attendance() {
 
       {saveDay.isError && <div className="mb-4 rounded-2xl bg-chip-pink-bg px-4 py-2.5 text-sm text-chip-pink-fg">Couldn't save attendance: {saveDay.error?.response?.data?.error || "please try again."}</div>}
       {isError && <div className="mb-4 rounded-2xl bg-chip-pink-bg px-4 py-2.5 text-sm text-chip-pink-fg">Couldn't load attendance for this day.</div>}
+
+      {/* ── Policy & fines (opened from the header) ── */}
+      {fineSettings && showPolicy && (
+        <PolicyPanel
+          settings={fineSettings}
+          lateCount={rows.filter((r) => r.fine?.autoType === "LATE").length}
+          absentCount={rows.filter((r) => r.fine?.autoType === "ABSENT").length}
+          halfDayCount={rows.filter((r) => r.fine?.autoType === "HALF_DAY" || r.fine?.autoType === "EARLY_GOING").length}
+          dayTotal={dayFineTotal}
+          onSaved={onFineSaved}
+          onClose={() => setShowPolicy(false)}
+          canManageRules={["ADMIN", "CEO", "HR"].includes(user?.role)}
+        />
+      )}
 
       {/* ── Summary cards (each number filters the table) ── */}
       <div className="mb-5 grid grid-cols-1 gap-3 md:grid-cols-[3fr_3fr_2fr]">

@@ -1,6 +1,7 @@
 const bcrypt = require("bcrypt")
 const crypto = require("crypto")
 const prisma = require("../lib/prisma")
+const { DEFAULT_LATE_RULE } = require("../utils/late-rules")
 const { signToken } = require("../utils/jwt")
 const { ASSIGNABLE_ROLES, MAX_CEO_COUNT, reportingManagerWhere } = require("../utils/roles")
 const { encryptField } = require("../utils/crypto")
@@ -108,6 +109,7 @@ async function registerOrganization(req, res, next) {
         slug: `${slug}-${Math.random().toString(36).slice(2, 6)}`,
         companyId: rootId,
         timezone: selectedTimeZone,
+        latePolicyRules: { create: [DEFAULT_LATE_RULE] },
         users: {
           create: {
             name,

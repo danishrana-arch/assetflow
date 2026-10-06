@@ -269,6 +269,9 @@ export default function MyPayroll() {
                 {Number(record.halfDayDeduction) > 0 && (
                   <Line label="Half days" detail={plural(record.halfDays, "day")} amount={record.halfDayDeduction} tone="deduct" />
                 )}
+                {Number(record.latePenaltyDeduction) > 0 && (
+                  <Line label="Late-arrival rule" detail={`${Number(record.latePenaltyDays)} day`} amount={record.latePenaltyDeduction} tone="deduct" />
+                )}
                 {Number(record.earlyGoingFine) > 0 && (
                   <Line label="Early going" detail={plural(record.earlyGoingDays, "day")} amount={record.earlyGoingFine} tone="deduct" />
                 )}

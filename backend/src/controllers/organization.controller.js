@@ -1,4 +1,5 @@
 const prisma = require("../lib/prisma")
+const { DEFAULT_LATE_RULE } = require("../utils/late-rules")
 const { logAudit } = require("../utils/audit")
 const { encryptField, decryptField } = require("../utils/crypto")
 const { isValidTimeZone } = require("../utils/timezone")
@@ -72,6 +73,7 @@ async function createSubOrganization(req, res, next) {
         slug,
         companyId,
         timezone: timezone || "Asia/Karachi",
+        latePolicyRules: { create: [DEFAULT_LATE_RULE] },
       },
     })
 

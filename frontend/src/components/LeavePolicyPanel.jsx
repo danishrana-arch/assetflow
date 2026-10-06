@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { CalendarCheck, ChevronDown, ChevronUp } from "lucide-react"
 import api from "../api/client"
 import { TextField } from "./ui/Field"
+import { Link } from "react-router-dom"
 
 // Pro-rata leave policy (Organization.annualLeaveEntitlement / sick / casual
 // — see backend utils/leave-policy.js). Shown on the Leave Requests page:
@@ -128,6 +129,11 @@ export default function LeavePolicyPanel({ canEdit }) {
             <li>• Unpaid leave doesn't use the balance; it's deducted from that month's payslip.</li>
             <li>• Only Permanent employees can apply. Balances reset every January (no carry forward).</li>
           </ul>
+
+          <p className="rounded-2xl bg-surface-2 px-4 py-3 text-xs text-muted">
+            Late-arrival rules (e.g. 3 late arrivals = half day, taken from leave), fines and the half-day policy are all set in one place:{" "}
+            <Link to="/attendance" className="font-semibold text-accent hover:underline">Attendance → Policy &amp; fines</Link>.
+          </p>
 
           {editing && (
             <div className="flex flex-wrap items-center gap-2 border-t border-border pt-4">

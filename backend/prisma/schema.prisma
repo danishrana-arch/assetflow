@@ -86,6 +86,7 @@ model Organization {
   EmployeeFormInvitation    EmployeeFormInvitation[]
   formSubmissions           EmployeeFormSubmission[]
   holidays                  Holiday[]
+  latePolicyRules           LatePolicyRule[]
   notifications             Notification[]
   company                   Organization?             @relation("CompanyOrganizations", fields: [companyId], references: [id])
   organizations             Organization[]            @relation("CompanyOrganizations")
@@ -938,6 +939,11 @@ model PayrollRecord {
   // day-rate deduction, and the early-going fines.
   halfDays              Int           @default(0)
   halfDayDeduction      Decimal       @default(0) @db.Decimal(12, 2)
+  // Late-arrival rules (LatePolicyRule): day-equivalents charged to salary,
+  // their amount, and days taken from the leave balance instead.
+  latePenaltyDays       Decimal       @default(0) @db.Decimal(6, 2)
+  latePenaltyDeduction  Decimal       @default(0) @db.Decimal(12, 2)
+  latePenaltyLeaveDays  Decimal       @default(0) @db.Decimal(6, 2)
   earlyGoingDays        Int           @default(0)
   earlyGoingFine        Decimal       @default(0) @db.Decimal(12, 2)
   // Sum of PayrollAdjustment.amount (excluding FIELD_EDIT rows, which are
@@ -1017,6 +1023,31 @@ model SalaryRevision {
 
   @@index([employeeId, createdAt])
   @@index([organizationId, createdAt])
+}
+
+// A company's own late-arrival rule, e.g. "every 3 late arrivals in a month
+// count as a half day". Rules are applied per employee per calendar month,
+// largest lateCount first, each using up its late arrivals (so with 6→full
+// and 3→half, 7 lates = one full day). result: HALF_DAY / FULL_DAY.
+// deductFrom: LEAVE (annual leave balance — salary when none is left) or
+// SALARY (day rate = Organization.absentFineAmount; half day uses
+// halfDayDeductionPercent). replaceLateFine: the late arrivals a rule uses
+// aren't also charged the per-late fine. See utils/late-rules.js.
+model LatePolicyRule {
+  id              String       @id @default(cuid())
+  organizationId  String
+  name            String
+  active          Boolean      @default(true)
+  lateCount       Int
+  result          String       @default("HALF_DAY")
+  deductFrom      String       @default("LEAVE")
+  replaceLateFine Boolean      @default(true)
+  createdById     String?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
 }
 
 // An office expense an employee paid out of pocket (e.g. tea/supplies

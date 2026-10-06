@@ -125,7 +125,7 @@ function PayslipEditor({ record, state, setState, onSave, onCancel, saving, erro
         <TextField label="Other deductions (−)" type="number" min="0" step="any" placeholder="0" value={state.otherDeduction} onChange={set("otherDeduction")} />
       </div>
       <p className="text-xs text-muted-2">
-        Calculated automatically: absent {money(record.absentDeduction)}, late {money(record.lateDeduction)}, half days {money(record.halfDayDeduction)}, early going {money(record.earlyGoingFine)}, attendance fines {money(record.fineDeduction)} (set on the Attendance page), office expenses {money(record.expenseReimbursement)}, performance bonus {money(record.performanceBonus)}. To remove or reduce one of these, use Details → Add adjustment.
+        Calculated automatically: absent {money(record.absentDeduction)}, late {money(record.lateDeduction)}, half days {money(record.halfDayDeduction)}, late-arrival rule {money(record.latePenaltyDeduction)}, early going {money(record.earlyGoingFine)}, attendance fines {money(record.fineDeduction)} (set on the Attendance page), office expenses {money(record.expenseReimbursement)}, performance bonus {money(record.performanceBonus)}. To remove or reduce one of these, use Details → Add adjustment.
       </p>
       <TextField label="Note on payslip (optional)" maxLength={1000} value={state.note} onChange={set("note")} />
       <TextField label="Reason for this change (kept in the adjustment history)" maxLength={500} placeholder="e.g. Bonus approved by management" value={state.adjustmentReason} onChange={set("adjustmentReason")} />
@@ -332,10 +332,12 @@ function PayrollReview({ month, year, canGenerate, onGenerate, generating, onClo
                       <td className={`px-3 py-2 font-mono ${a.unrecordedDays ? "text-chip-yellow-fg" : ""}`}>{a.unrecordedDays || "—"}</td>
                       <td className="px-3 py-2">
                         <Amount value={e.deductions} tone="deduct" />
-                        {(e.absentDeduction > 0 || e.lateDeduction > 0 || e.halfDayDeduction > 0 || e.earlyGoingFine > 0) && (
+                        {(e.absentDeduction > 0 || e.lateDeduction > 0 || e.halfDayDeduction > 0 || e.earlyGoingFine > 0 || e.latePenaltyDeduction > 0 || e.latePenaltyLeaveDays > 0) && (
                           <div className="text-[10px] text-muted">
                             absent {money(e.absentDeduction)} · late {money(e.lateDeduction)}
                             {(e.halfDayDeduction > 0 || e.earlyGoingFine > 0) && <> · half/short ({e.halfDays}) {money(e.halfDayDeduction + e.earlyGoingFine)}</>}
+                            {e.latePenaltyDeduction > 0 && <> · late rule {money(e.latePenaltyDeduction)}</>}
+                            {e.latePenaltyLeaveDays > 0 && <> · late rule {e.latePenaltyLeaveDays} day from leave</>}
                           </div>
                         )}
                       </td>
@@ -923,6 +925,7 @@ export default function Payroll() {
               <div><p className="text-muted-2">Absent{absenceSummary(r) ? ` (${absenceSummary(r)})` : ""}</p><Amount value={r.absentDeduction} tone="deduct" /></div>
               <div><p className="text-muted-2">Late{r.lateDays ? ` (${r.lateDays})` : ""}</p><Amount value={r.lateDeduction} tone="deduct" /></div>
               {Number(r.halfDayDeduction) > 0 && <div><p className="text-muted-2">Half days ({r.halfDays})</p><Amount value={r.halfDayDeduction} tone="deduct" /></div>}
+              {Number(r.latePenaltyDeduction) > 0 && <div><p className="text-muted-2">Late rule ({Number(r.latePenaltyDays)} day)</p><Amount value={r.latePenaltyDeduction} tone="deduct" /></div>}
               {Number(r.earlyGoingFine) > 0 && <div><p className="text-muted-2">Early going ({r.earlyGoingDays})</p><Amount value={r.earlyGoingFine} tone="deduct" /></div>}
               {Number(r.adjustmentTotal) !== 0 && <div><p className="text-muted-2">Adjustments</p><Amount value={Math.abs(Number(r.adjustmentTotal))} tone={Number(r.adjustmentTotal) > 0 ? "add" : "deduct"} /></div>}
               {Number(r.fineDeduction) > 0 && <div><p className="text-muted-2">Attendance fines</p><Amount value={r.fineDeduction} tone="deduct" /></div>}
@@ -1009,6 +1012,12 @@ export default function Payroll() {
                       {r.lateDays > 0 && <div className="text-[11px] text-muted">{r.lateDays} day{r.lateDays === 1 ? "" : "s"}</div>}
                       {Number(r.halfDayDeduction) > 0 && (
                         <div className="text-[11px] text-muted">half days ({r.halfDays}) <Amount value={r.halfDayDeduction} tone="deduct" /></div>
+                      )}
+                      {Number(r.latePenaltyDeduction) > 0 && (
+                        <div className="text-[11px] text-muted">late rule ({Number(r.latePenaltyDays)} day) <Amount value={r.latePenaltyDeduction} tone="deduct" /></div>
+                      )}
+                      {Number(r.latePenaltyLeaveDays) > 0 && (
+                        <div className="text-[11px] text-muted">late rule: {Number(r.latePenaltyLeaveDays)} day from leave</div>
                       )}
                       {Number(r.earlyGoingFine) > 0 && (
                         <div className="text-[11px] text-muted">early going <Amount value={r.earlyGoingFine} tone="deduct" /></div>

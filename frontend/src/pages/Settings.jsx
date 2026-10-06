@@ -35,7 +35,6 @@ export default function Settings() {
   const [primaryColor, setPrimaryColor] = useState("#3B82F6")
   const [payrollBankName, setPayrollBankName] = useState("")
   const [payrollAccountNumber, setPayrollAccountNumber] = useState("")
-  const [lateDeductionAmount, setLateDeductionAmount] = useState(500)
   const [workingHoursPerDay, setWorkingHoursPerDay] = useState(8)
   const [workingDaysPerWeek, setWorkingDaysPerWeek] = useState(5)
   const [shiftStartDefault, setShiftStartDefault] = useState("09:00")
@@ -70,7 +69,6 @@ export default function Settings() {
       setPrimaryColor(organization.primaryColor || "#3B82F6")
       setPayrollBankName(organization.payrollBankName || "")
       setPayrollAccountNumber(organization.payrollAccountNumber || "")
-      setLateDeductionAmount(organization.lateDeductionAmount ?? 500)
       setWorkingHoursPerDay(organization.workingHoursPerDay ?? 8)
       setWorkingDaysPerWeek(organization.workingDaysPerWeek ?? 5)
       setShiftStartDefault(organization.shiftStartDefault || "09:00")
@@ -165,7 +163,7 @@ export default function Settings() {
   }
 
   const savePayrollAccount = useMutation({
-    mutationFn: () => api.patch("/organization", { payrollBankName, payrollAccountNumber, lateDeductionAmount }),
+    mutationFn: () => api.patch("/organization", { payrollBankName, payrollAccountNumber }),
     onSuccess: () => {
       setPayrollError("")
       queryClient.invalidateQueries({ queryKey: ["organization"] })
@@ -299,15 +297,6 @@ export default function Settings() {
               value={payrollAccountNumber}
               onChange={(e) => setPayrollAccountNumber(e.target.value)}
               hint="Stored encrypted"
-            />
-            <TextField
-              label="Late-arrival deduction (PKR / day)"
-              type="number"
-              min={500}
-              step={100}
-              value={lateDeductionAmount}
-              onChange={(e) => setLateDeductionAmount(e.target.value)}
-              hint="Deducted for every day an employee is marked Late"
             />
           </div>
           <button

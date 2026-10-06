@@ -2924,3 +2924,50 @@ the 2026-10-05 employee-details/leave section.
   recessed track with faint sun/moon, glossy knob carrying the active icon;
   light glass in light mode, smoky glass in dark) — replaces the yellow /
   periwinkle track, which was hard to see in light mode.
+
+## Post-module addition: company late-arrival rules (2026-10-06)
+
+- New `LatePolicyRule` model (per organization: name, active, `lateCount`,
+  `result` HALF_DAY/FULL_DAY, `deductFrom` LEAVE/SALARY, `replaceLateFine`)
+  + `PayrollRecord.latePenaltyDays/latePenaltyDeduction/latePenaltyLeaveDays`.
+  Migration `20261006150000_late_policy_rules` also inserts the default rule
+  "3 late arrivals = half day" (LEAVE, replaces the per-late fine) for every
+  existing company; new companies get it on creation (`DEFAULT_LATE_RULE`
+  in register + sub-company create). **Not yet deployed** at the time of
+  writing — the JS client is regenerated, so payroll and leave balances
+  fail until it is.
+- `utils/late-rules.js`: per employee per calendar month, chargeable late
+  arrivals (LATE, fine not waived, not already HALF_DAY/EARLY_GOING); active
+  rules largest `lateCount` first, each using up its lates. LEAVE units are
+  covered month by month from the pro-rata pool and the ANNUAL type (½-day
+  steps); what doesn't fit — and SALARY units — is charged at the day rate
+  (`absentFineAmount`; half day × `halfDayDeductionPercent`). Not Permanent
+  yet = no leave to take from → salary.
+- `leave-policy.js` `latePenaltiesForYear`: covered days count as used leave
+  in the balance and in request validation (schedule gains
+  `latePenaltyLeaveDays`, `latePenalties`). Payroll `computeAttendanceLines`
+  charges the salary part and no longer charges the per-late fine for lates
+  a `replaceLateFine` rule used (`lateDays` on the payslip = still-fined
+  lates). New line on Payroll, preview, My Payslips, PDF; adjustable as a
+  fine line (`latePenaltyDeduction`).
+- CRUD: `/api/late-rules` — GET anyone in the company; POST/PATCH/DELETE
+  ADMIN/CEO/HR (max 10 rules); every change refreshes the company's DRAFT
+  payslips and is audited (`late_rule.*`). UI: Leave Requests → Leave Policy
+  → "Late-arrival rules" (`components/LateRulesSection.jsx`): add, edit,
+  turn on/off, delete. My Attendance notes leave used by late rules.
+- Verified: rule math unit checks (3 → ½, 7 → ½+½ +1 fined, 6/3 rules
+  7 → full +1, no leave → salary); frontend build passes. Not exercised
+  against the DB (migration pending).
+
+### Follow-up (same day): one "Policy & fines" panel on the Attendance page
+
+- The header "Policy & fines" button now opens a full-width panel under the
+  header (was a small dropdown) with everything that turns attendance into
+  payslip deductions: 1 · fines per day (late, absent = day rate),
+  2 · half day & early going (same `PUT /attendance/fine-settings`, one
+  "Save fines & policy" button), 3 · late-arrival rules (`LateRulesSection`
+  with `plain`, own CRUD). HR / ADMIN / CEO only, as before.
+- Removed from elsewhere so there's one place: the rules list from the Leave
+  Requests → Leave Policy panel (now a link to Attendance → Policy & fines),
+  and the "Late-arrival deduction (PKR / day)" field from Settings → Payroll
+  Account (same `lateDeductionAmount`, now only on the Attendance page).

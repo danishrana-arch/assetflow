@@ -1,5 +1,6 @@
 const prisma = require("../lib/prisma")
 const { toDateOnly } = require("./date")
+const { activeLateRules, monthlyLateCounts, yearLatePenalties } = require("./late-rules")
 
 // Pro-rata leave policy.
 // - Paid leave is one yearly pool (Organization.annualLeaveEntitlement,
@@ -21,6 +22,9 @@ const { toDateOnly } = require("./date")
 // - UNPAID leave doesn't use the pool (no limit; payroll deducts it).
 // - Only PERMANENT employees may apply, and not for days before their
 //   Permanent date (they keep everything earned during probation).
+// - Company late-arrival rules (utils/late-rules.js) whose penalty is taken
+//   from leave use up the pool and the ANNUAL type like approved leave, in
+//   the month they happen; what doesn't fit goes to salary (payroll).
 
 const PENDING_LEAVE_STATUSES = ["PENDING_HR", "PENDING_FINAL_APPROVAL"]
 const ACTIVE_LEAVE_STATUSES = [...PENDING_LEAVE_STATUSES, "APPROVED"]
@@ -128,6 +132,36 @@ async function activeLeavesInYear(employeeId, year, excludeLeaveId) {
   })
 }
 
+// Late-arrival rule penalties for one employee and year, with the part the
+// leave balance covers (see late-rules.js yearLatePenalties). paidByMonth /
+// annualUsed are the employee's own leave requests (pending + approved);
+// computed here when not passed in. Returns months[1..12].
+async function latePenaltiesForYear({ organizationId, employee, org, year, paidByMonth, annualUsed }) {
+  const rules = await activeLateRules(prisma, organizationId)
+  const empty = Array.from({ length: 13 }, () => ({ lates: 0, finedLates: 0, units: [], leaveDays: 0, salaryDays: 0, salaryAmount: 0 }))
+  if (!rules.length) return { months: empty, rules }
+  const lateByMonth = await monthlyLateCounts(prisma, employee.id, year)
+  if (!lateByMonth.some((n) => n > 0)) return { months: empty, rules }
+  if (!paidByMonth || annualUsed === undefined) {
+    const { start, end } = yearBounds(year)
+    const [leaves, holidays] = await Promise.all([activeLeavesInYear(employee.id, year), holidaySet(organizationId, start, end)])
+    const paid = leaves.filter((l) => PAID_LEAVE_TYPES.includes(l.type))
+    paidByMonth = daysByMonth(paid, year, holidays)
+    annualUsed = sum(daysByMonth(paid.filter((l) => l.type === "ANNUAL"), year, holidays))
+  }
+  const allowances = leaveAllowances(org)
+  const eligible = employee.employmentStatus === undefined || employee.employmentStatus === "PERMANENT"
+  const leave = eligible
+    ? {
+        accruedBy: (m) => accruedBy(employee, year, m, allowances.total),
+        annualLimit: typeLimit(allowances, "ANNUAL", employee, year),
+        paidByMonth,
+        annualUsed,
+      }
+    : null // not Permanent yet: no leave to take it from — salary
+  return { months: yearLatePenalties({ lateByMonth, rules, org, leave }), rules }
+}
+
 // The month-by-month picture for one employee and year — used by the
 // balance endpoint and the leave form. `org` needs annualLeaveEntitlement,
 // sickLeaveAllowance, casualLeaveAllowance.
@@ -138,6 +172,10 @@ async function leaveSchedule({ organizationId, employee, org, year, todayKey }) 
   const paid = leaves.filter((l) => PAID_LEAVE_TYPES.includes(l.type))
   const perMonth = daysByMonth(paid, year, holidays)
   const eligible = employee.employmentStatus === "PERMANENT"
+  const annualRequested = sum(daysByMonth(paid.filter((l) => l.type === "ANNUAL"), year, holidays))
+  const { months: penalties } = await latePenaltiesForYear({ organizationId, employee, org, year, paidByMonth: [...perMonth], annualUsed: annualRequested })
+  const penaltyLeave = penalties.map((p) => (p ? p.leaveDays : 0))
+  for (let m = 1; m <= 12; m++) perMonth[m] += penaltyLeave[m] || 0
 
   let cumulative = 0
   const months = MONTH_NAMES.map((name, i) => {
@@ -149,7 +187,7 @@ async function leaveSchedule({ organizationId, employee, org, year, todayKey }) 
 
   const types = {}
   for (const type of PAID_LEAVE_TYPES) {
-    const used = sum(daysByMonth(paid.filter((l) => l.type === type), year, holidays))
+    const used = sum(daysByMonth(paid.filter((l) => l.type === type), year, holidays)) + (type === "ANNUAL" ? sum(penaltyLeave.slice(1)) : 0)
     const total = typeLimit(allowances, type, employee, year)
     types[type] = { total, fullYear: allowances[type], used, remaining: Math.max(0, round2(total - used)) }
   }
@@ -158,7 +196,10 @@ async function leaveSchedule({ organizationId, employee, org, year, todayKey }) 
   const current = ty === year ? months[tm - 1] : ty > year ? months[11] : null
   const yearEntitlement = accruedBy(employee, year, 12, allowances.total)
   const usedThisYear = sum(perMonth)
+  const latePenalties = penalties.slice(1).map((p, i) => ({ month: i + 1, lates: p.lates, leaveDays: p.leaveDays, salaryDays: p.salaryDays }))
   return {
+    latePenalties,
+    latePenaltyLeaveDays: round2(sum(penaltyLeave.slice(1))),
     year,
     eligible,
     employmentStatus: employee.employmentStatus,
@@ -231,10 +272,14 @@ async function validateLeaveRequest({ organizationId, employee, org, start, end,
 
     const paidExisting = existing.filter((l) => PAID_LEAVE_TYPES.includes(l.type))
     const before = daysByMonth(paidExisting, year, holidays)
+    const annualBefore = sum(daysByMonth(paidExisting.filter((l) => l.type === "ANNUAL"), year, holidays))
+    const { months: penalties } = await latePenaltiesForYear({ organizationId, employee, org, year, paidByMonth: [...before], annualUsed: annualBefore })
+    for (let m = 1; m <= 12; m++) before[m] += penalties[m]?.leaveDays || 0
+    const penaltyLeaveTotal = sum(penalties.slice(1).map((p) => p.leaveDays || 0))
 
     // 1. Type limit for the year (pro-rated).
     const limit = typeLimit(allowances, type, employee, year)
-    const usedOfType = sum(daysByMonth(paidExisting.filter((l) => l.type === type), year, holidays))
+    const usedOfType = sum(daysByMonth(paidExisting.filter((l) => l.type === type), year, holidays)) + (type === "ANNUAL" ? penaltyLeaveTotal : 0)
     if (usedOfType + requestedYear > limit) {
       const left = Math.max(0, round2(limit - usedOfType))
       return {
@@ -272,6 +317,7 @@ async function validateLeaveRequest({ organizationId, employee, org, start, end,
 }
 
 module.exports = {
+  latePenaltiesForYear,
   PENDING_LEAVE_STATUSES,
   ACTIVE_LEAVE_STATUSES,
   PAID_LEAVE_TYPES,

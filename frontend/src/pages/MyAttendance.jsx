@@ -638,6 +638,11 @@ export default function MyAttendance() {
                     )
                   })}
                 </div>
+                {sch.latePenaltyLeaveDays > 0 && (
+                  <p className="text-chip-yellow-fg">
+                    Late arrivals: {fmtLeaveDays(sch.latePenaltyLeaveDays)} of leave used this year by the company's late-arrival rules (counted in "Requested / approved" above).
+                  </p>
+                )}
                 <p className="text-muted-2">
                   Pro-rata leave: you earn {sch.monthlyRate} days of paid leave every month ({sch.entitlement} a year, shared by annual, casual and sick leave)
                   {joinedThisYear ? `, counted from ${SHORT_MONTHS[sch.accrualStartMonth - 1]} ${sch.year} when you joined` : ""}.

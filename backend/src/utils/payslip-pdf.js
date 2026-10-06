@@ -119,6 +119,7 @@ function streamPayslipPdf(res, { record, employee, organization, bankAccount }) 
     [leaveDetail ? `Absent (${leaveDetail})` : "Absent", record.absentDeduction],
     [record.lateDays ? `Late (${plural(record.lateDays, "day")})` : "Late", record.lateDeduction],
     ...(Number(record.halfDayDeduction) > 0 ? [[`Half days (${plural(record.halfDays, "day")})`, record.halfDayDeduction]] : []),
+    ...(Number(record.latePenaltyDeduction) > 0 ? [[`Late-arrival rule (${Number(record.latePenaltyDays)} day)`, record.latePenaltyDeduction]] : []),
     ...(Number(record.earlyGoingFine) > 0 ? [[`Early going (${plural(record.earlyGoingDays, "day")})`, record.earlyGoingFine]] : []),
     ...(Number(record.fineDeduction) > 0 ? [["Attendance fines", record.fineDeduction]] : []),
     ...(Number(record.otherDeduction) > 0 ? [["Other deductions", record.otherDeduction]] : []),

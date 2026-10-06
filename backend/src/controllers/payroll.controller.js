@@ -7,6 +7,7 @@ const { streamPayslipPdf } = require("../utils/payslip-pdf")
 const { hasModuleAccess } = require("../utils/roles")
 const { isScheduledWorkday } = require("../utils/work-schedule")
 const { dateKeyInTimeZone } = require("../utils/timezone")
+const { latePenaltiesForYear } = require("../utils/leave-policy")
 
 // Counts how many of an (inclusive) date range's days fall within the
 // given month, so a multi-day unpaid-leave request that only partly
@@ -88,15 +89,39 @@ async function computeAttendanceLines({ employeeId, base, month, year, lateRate 
   }
 
   // The only per-day rate: the org's absent fine (Attendance page → Fines).
-  const employee = await prisma.user.findUnique({ where: { id: employeeId }, select: { organization: { select: { absentFineAmount: true } } } })
+  const employee = await prisma.user.findUnique({
+    where: { id: employeeId },
+    select: {
+      id: true, organizationId: true, joiningDate: true, startDate: true, employmentStatus: true, permanentDate: true,
+      organization: { select: { absentFineAmount: true, halfDayDeductionPercent: true, annualLeaveEntitlement: true, sickLeaveAllowance: true, casualLeaveAllowance: true } },
+    },
+  })
   const perDay = toNumber(employee?.organization?.absentFineAmount)
+
+  // Company late-arrival rules (utils/late-rules.js): e.g. 3 lates = half
+  // day. Late arrivals a rule uses aren't also charged the per-late fine
+  // (when the rule says so); the part not taken from leave is charged here.
+  let finedLateDays = lateDays
+  let latePenalty = { salaryDays: 0, salaryAmount: 0, leaveDays: 0 }
+  if (employee) {
+    const { months } = await latePenaltiesForYear({ organizationId: employee.organizationId, employee, org: employee.organization, year })
+    const m = months[month]
+    if (m && m.lates > 0) {
+      finedLateDays = Math.min(lateDays, m.finedLates)
+      latePenalty = m
+    }
+  }
+
   return {
     absentDays,
     unpaidLeaveDays: fullUnpaidDays,
     halfDayLeaveDays: halfUnpaidDays,
-    lateDays,
+    lateDays: finedLateDays,
     absentDeduction: round2((absentDays + fullUnpaidDays) * perDay + halfUnpaidDays * (perDay / 2)),
-    lateDeduction: round2(lateDays * lateRate),
+    lateDeduction: round2(finedLateDays * lateRate),
+    latePenaltyDays: round2(latePenalty.salaryDays),
+    latePenaltyDeduction: round2(latePenalty.salaryAmount),
+    latePenaltyLeaveDays: round2(latePenalty.leaveDays),
     halfDays: chargedShortDays.length,
     halfDayDeduction: round2(halfDayDeductionDays * perDay),
     earlyGoingDays: chargedShortDays.filter((r) => r.dayType === "EARLY_GOING").length,
@@ -357,6 +382,9 @@ async function previewPayroll(req, res, next) {
         lateDeduction: round2(toNumber(amounts.lateDeduction)),
         halfDays: toNumber(amounts.halfDays),
         halfDayDeduction: round2(toNumber(amounts.halfDayDeduction)),
+        latePenaltyDays: toNumber(amounts.latePenaltyDays),
+        latePenaltyDeduction: round2(toNumber(amounts.latePenaltyDeduction)),
+        latePenaltyLeaveDays: toNumber(amounts.latePenaltyLeaveDays),
         earlyGoingDays: toNumber(amounts.earlyGoingDays),
         earlyGoingFine: round2(toNumber(amounts.earlyGoingFine)),
         adjustmentTotal: round2(toNumber(amounts.adjustmentTotal)),
@@ -394,6 +422,8 @@ async function previewPayroll(req, res, next) {
         lateDeduction: sum((e) => e.lateDeduction),
         halfDays: sum((e) => e.halfDays),
         halfDayDeduction: sum((e) => e.halfDayDeduction + e.earlyGoingFine),
+        latePenaltyDeduction: sum((e) => e.latePenaltyDeduction),
+        latePenaltyLeaveDays: sum((e) => e.latePenaltyLeaveDays),
         netPay: sum((e) => e.netPay),
       },
       issues: {
@@ -709,6 +739,7 @@ const LINE_LABELS = {
   absentDeduction: "Absent / unpaid leave",
   lateDeduction: "Late fines",
   halfDayDeduction: "Half-day deductions",
+  latePenaltyDeduction: "Late-arrival rule",
   earlyGoingFine: "Early-going fines",
   fineDeduction: "Manual attendance fines",
   otherDeduction: "Other deductions",
@@ -722,7 +753,7 @@ const LINE_LABELS = {
 const ADDITION_LINES = ["bonus", "terminationSettlement"]
 // Amount fields a draft edit (PATCH) can change, logged as FIELD_EDIT rows.
 const FIELD_EDIT_LINES = ["bonus", "tax", "otherDeduction", "terminationSettlement", "terminationDeduction"]
-const FINE_LINES = ["lateDeduction", "absentDeduction", "halfDayDeduction", "earlyGoingFine", "fineDeduction"]
+const FINE_LINES = ["lateDeduction", "absentDeduction", "halfDayDeduction", "latePenaltyDeduction", "earlyGoingFine", "fineDeduction"]
 const DEDUCTION_LINES = [...FINE_LINES, "otherDeduction", "tax", "terminationDeduction"]
 
 // sign: +1 raises net pay, -1 lowers it, 0 = the amount's own sign.
