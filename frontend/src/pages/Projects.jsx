@@ -315,7 +315,7 @@ function DeadlineModal({ project, onClose, onCompleted, onExtended }) {
   return createPortal(
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
       <div className="w-full max-w-md rounded-3xl bg-surface p-6 shadow-2xl">
-        <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-red-500/10 text-red-600 dark:text-red-300"><CalendarClock size={20} /></div>
+        <div className="flex h-11 w-11 items-center justify-center text-ink"><CalendarClock size={20} /></div>
         <h3 className="mt-5 text-lg font-semibold text-ink">Project deadline reached</h3>
         <p className="mt-2 text-sm leading-6 text-muted"><strong className="text-ink">{project.name}</strong> has reached its deadline. Mark it completed or extend the deadline.</p>
         <label className="mt-5 block"><span className="text-xs font-medium text-muted">Project link {project.projectUrl ? "" : "(required to complete)"}</span><input value={link} onChange={e => setLink(e.target.value)} className="field mt-1 w-full" placeholder="https://..." /></label>

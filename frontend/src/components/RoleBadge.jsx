@@ -13,7 +13,7 @@ export default function RoleBadge({ className = "" }) {
       className={`inline-flex h-9 items-center gap-1.5 whitespace-nowrap rounded-full px-3 text-xs font-semibold text-ink ${className}`}
       title={`Signed in as ${label}`}
     >
-      <ShieldCheck size={14} className="shrink-0 text-accent" />
+      <ShieldCheck size={14} className="shrink-0 text-ink" />
       {label}
     </span>
   )

@@ -108,7 +108,7 @@ export default function Profile() {
 function CardTitle({ icon: Icon, title, subtitle }) {
   return (
     <div className="flex items-center gap-3">
-      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-chip-blue-bg text-chip-blue-fg">
+      <span className="flex h-10 w-10 shrink-0 items-center justify-center text-ink">
         <Icon size={18} />
       </span>
       <div className="min-w-0">
@@ -235,7 +235,7 @@ function PasswordField({ label, value, onChange, autoComplete }) {
 function ProfileDetail({ icon: Icon, label, value, wrap = false, className = "" }) {
   return (
     <div className={`flex min-w-0 items-center gap-3 rounded-2xl border border-border p-3.5 ${className}`}>
-      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-black/[0.035] text-muted">
+      <div className="flex h-9 w-9 shrink-0 items-center justify-center text-ink">
         <Icon size={16} strokeWidth={1.8} />
       </div>
       <div className="min-w-0">

@@ -2857,3 +2857,70 @@ the 2026-10-05 employee-details/leave section.
   Attendance Geofence, Attendance permission matrix (full), and a full-width
   "Plan & Shortcuts" card (plan + the Leave Policy / Holidays / Attendance
   Devices / Audit Log links that used to sit under the leave card).
+
+## Post-module change: status icons from the design sheet (2026-10-06)
+
+- New `frontend/src/components/ui/StatusIcons.jsx` — the labelled icons from
+  the user's icon PDF as inline SVG (Material Symbols outlined geometry,
+  `currentColor`, transparent, lucide-compatible `size`/`className`):
+  OnLeave (square-dot "!"), Lost (warning), Repair (build), NotMarked
+  (person_remove), Present / Absent (person + thin check / cross), Active
+  projects (folder with three bars — hand-drawn, no Material equivalent),
+  TotalEmployees (group), InUse (360), Late (schedule). The two unlabelled
+  sheet icons (box, people+gear) were not used.
+- Swapped in where those labels appear: AttendanceSnapshot tiles, CEO
+  CompaniesOverview tiles (Assets keeps its icon), Dashboard "Under Repair"
+  card, Inventory In Use / Under Maintenance / Lost tiles, Attendance page
+  summary-card titles and Present / Absent / Leave status menu. Tile layout
+  and coloured chips unchanged.
+- Follow-up (same day): per the user, these icons are **black & white
+  only** — no coloured chip behind them, drawn in `text-ink` (black in light
+  mode, white in dark), slightly larger. Applies to the Company overview
+  tiles (incl. Assets), Attendance Snapshot tiles, Inventory stat tiles (incl.
+  Total Assets), the Attendance summary titles + status menu, and the
+  Dashboard "Under Repair" card (new StatCard `tone="plain"`). The tinted
+  tile backgrounds of the Snapshot / Inventory tiles were left as they were.
+
+### Follow-up (same day): every icon black & white, no background, one weight
+
+- `IconChip` no longer draws a coloured chip: black & white icon (`text-ink`)
+  at the same box size, `tone` accepted and ignored. `StatCard` always uses
+  its new `plain` tone. `EmptyState` icon box plain too.
+- Local coloured icon tiles removed the same way: Inventory (activity /
+  category / summary tiles), ErrorBoundary, GlobalSearch results,
+  HolidaysPanel, LeavePolicyPanel, OfflineAttendanceVerification, Dashboard
+  events, EmployeeProfile, Profile, Projects, PublicEmployeeForm,
+  OrganizationComparison; decorative icons coloured with `text-accent` /
+  `text-chip-*` (PageHeader stats, RoleBadge, QuickAttendance, calendar,
+  site form, status-menu tick, leave notice) → `text-ink`.
+- One weight: `svg.lucide:not([data-dock-item] *) { stroke-width: 1.5 }` in
+  `styles/index.css` (same line as the Material status icons). Sidebar dock
+  excluded (its hovered icon is bolder on purpose).
+- Left coloured on purpose: buttons (accent / delete), status pills,
+  location status labels (green "On site", red "Outside premises"), chart
+  legends, and the tinted tile backgrounds on Attendance Snapshot / Inventory.
+- Verified in Chrome as the real CEO (read-only, non-GET requests aborted):
+  Dashboard, Inventory, Attendance — no page errors.
+
+### Follow-up (same day): dashboard asset stat cards — hover icon, moved under the snapshot
+
+- `StatCard`: top-right icon 26px (was 20); on hover / keyboard focus it
+  fades out and a 64px copy rises into the bottom-right corner over the wave
+  (`group-hover`, 300ms, off under `prefers-reduced-motion`). Still black &
+  white, no background.
+- `Dashboard.jsx`: the Total Assets / Assigned Assets / Warranty Alerts
+  (+ IT's Under Repair) row now sits directly under the Attendance Snapshot
+  (was above it). For IT, who has no snapshot, the order is unchanged.
+- Follow-up: the top-right icon was removed from these cards entirely — the
+  icon now only appears on hover, sliding in diagonally from the bottom-right
+  corner (`translate-x-12 translate-y-12` → 0, clipped by the card's
+  `overflow-hidden`). Company overview's "Not marked" tile removed (7 tiles,
+  `xl:grid-cols-7`); `notMarkedToday` is still returned by the API and the
+  `?status=notmarked` Attendance filter still exists.
+- Follow-up: building icons removed next to company names (header
+  OrganizationSwitcher, Company overview dropdown + per-company breakdown);
+  Assigned Assets card icon is now lucide `PackageCheck` (box with a tick).
+  ThemeToggle redesigned as neutral Apple-style liquid glass (frosted
+  recessed track with faint sun/moon, glossy knob carrying the active icon;
+  light glass in light mode, smoky glass in dark) — replaces the yellow /
+  periwinkle track, which was hard to see in light mode.

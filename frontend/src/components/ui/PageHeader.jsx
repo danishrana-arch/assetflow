@@ -36,7 +36,7 @@ export default function PageHeader({ title, subtitle, backTo, back = true, stats
               style={s.highlight ? { backgroundColor: "var(--primary-container)" } : undefined}
             >
               <div className={`label-caps flex items-center gap-1.5 ${s.highlight ? "text-white/80" : ""}`}>
-                {s.icon && <s.icon size={14} className={s.highlight ? "" : "text-accent"} />}
+                {s.icon && <s.icon size={14} className={s.highlight ? "" : "text-ink"} />}
                 {s.label}
               </div>
               <div className="text-2xl font-bold" style={{ letterSpacing: "-0.01em" }}>

@@ -1,28 +1,22 @@
-const TONES = {
-  blue: "bg-chip-blue-bg text-chip-blue-fg",
-  purple: "bg-chip-purple-bg text-chip-purple-fg",
-  cyan: "bg-chip-cyan-bg text-chip-cyan-fg",
-  orange: "bg-chip-orange-bg text-chip-orange-fg",
-  green: "bg-chip-green-bg text-chip-green-fg",
-  pink: "bg-chip-pink-bg text-chip-pink-fg",
-  yellow: "bg-chip-yellow-bg text-chip-yellow-fg",
-  slate: "bg-chip-slate-bg text-chip-slate-fg",
-}
-
+// Icon "chip": black & white icon with no background (design decision
+// 2026-10-06 — no coloured circles behind icons). `tone` is accepted and
+// ignored so existing callers keep working; the box keeps its size so
+// layouts don't shift.
 const SIZES = {
-  sm: "h-9 w-9 rounded-xl",
-  md: "h-11 w-11 rounded-2xl",
-  lg: "h-12 w-12 rounded-2xl",
+  sm: "h-9 w-9",
+  md: "h-11 w-11",
+  lg: "h-12 w-12",
 }
 
-export default function IconChip({ icon: Icon, tone = "blue", size = "md", className = "" }) {
+const TONES = ["blue", "purple", "cyan", "orange", "green", "pink", "yellow", "slate"]
+
+// eslint-disable-next-line no-unused-vars
+export default function IconChip({ icon: Icon, tone, size = "md", className = "" }) {
   return (
-    <div
-      className={`flex shrink-0 items-center justify-center ${SIZES[size]} ${TONES[tone] || TONES.blue} ${className}`}
-    >
-      {Icon && <Icon size={size === "sm" ? 16 : 20} strokeWidth={2} />}
+    <div className={`flex shrink-0 items-center justify-center text-ink ${SIZES[size] || SIZES.md} ${className}`}>
+      {Icon && <Icon size={size === "sm" ? 20 : 24} />}
     </div>
   )
 }
 
-export const CHIP_TONES = Object.keys(TONES)
+export const CHIP_TONES = TONES

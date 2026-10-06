@@ -838,7 +838,7 @@ export default function EmployeeProfile() {
                 <dl className="mt-5 grid grid-cols-1 gap-x-6 gap-y-3.5 border-t border-border pt-4 sm:grid-cols-2 xl:grid-cols-3">
                   {heroMeta.map(({ key, icon: Icon, label, value }) => (
                     <div key={key} className="flex min-w-0 items-start gap-2.5">
-                      <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-surface-2 text-muted">
+                      <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center text-ink">
                         <Icon size={13} />
                       </span>
                       <div className="min-w-0">

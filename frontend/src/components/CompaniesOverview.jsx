@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { Building2, ChevronDown, ChevronRight, Users, UserCheck, Clock, UserX, Plane, UserMinus, Boxes, FolderKanban, Loader2, X } from "lucide-react"
+import { ChevronDown, ChevronRight, Boxes, Loader2, X } from "lucide-react"
+import { TotalEmployeesIcon, PresentIcon, LateIcon, AbsentIcon, OnLeaveIcon, ActiveProjectsIcon } from "./ui/StatusIcons"
 import api from "../api/client"
 import { useAuth } from "../context/AuthContext"
 
@@ -16,14 +17,13 @@ import { useAuth } from "../context/AuthContext"
 // `to` filters are chosen so the list shows exactly the tile's count
 // (attendance: Attendance.jsx FILTERS, today in the company's timezone).
 const TILES = [
-  { key: "employees", label: "Employees", icon: Users, tone: "bg-chip-blue-bg text-chip-blue-fg", to: "/employees?status=ACTIVE" },
-  { key: "presentToday", label: "Present", icon: UserCheck, tone: "bg-chip-green-bg text-chip-green-fg", to: "/attendance?status=present" },
-  { key: "lateToday", label: "Late", icon: Clock, tone: "bg-chip-yellow-bg text-chip-yellow-fg", to: "/attendance?status=late" },
-  { key: "absentToday", label: "Absent", icon: UserX, tone: "bg-chip-pink-bg text-chip-pink-fg", to: "/attendance?status=markedabsent" },
-  { key: "onLeaveToday", label: "On leave", icon: Plane, tone: "bg-chip-purple-bg text-chip-purple-fg", to: "/attendance?status=timeoff" },
-  { key: "notMarkedToday", label: "Not marked", icon: UserMinus, tone: "bg-surface-2 text-muted", to: "/attendance?status=notmarked" },
-  { key: "assets", label: "Assets", icon: Boxes, tone: "bg-surface-2 text-muted", to: "/inventory?view=all" },
-  { key: "activeProjects", label: "Active projects", icon: FolderKanban, tone: "bg-surface-2 text-muted", to: "/projects?status=IN_PROGRESS" },
+  { key: "employees", label: "Employees", icon: TotalEmployeesIcon, to: "/employees?status=ACTIVE" },
+  { key: "presentToday", label: "Present", icon: PresentIcon, to: "/attendance?status=present" },
+  { key: "lateToday", label: "Late", icon: LateIcon, to: "/attendance?status=late" },
+  { key: "absentToday", label: "Absent", icon: AbsentIcon, to: "/attendance?status=markedabsent" },
+  { key: "onLeaveToday", label: "On leave", icon: OnLeaveIcon, to: "/attendance?status=timeoff" },
+  { key: "assets", label: "Assets", icon: Boxes, to: "/inventory?view=all" },
+  { key: "activeProjects", label: "Active projects", icon: ActiveProjectsIcon, to: "/projects?status=IN_PROGRESS" },
 ]
 
 export default function CompaniesOverview() {
@@ -106,11 +106,10 @@ export default function CompaniesOverview() {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative">
-            <Building2 size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
             <select
               value={selected}
               onChange={(e) => { setSelected(e.target.value); setBreakdown(null) }}
-              className="field h-8 appearance-none py-0 pl-9 pr-9 text-xs font-semibold"
+              className="field h-8 appearance-none py-0 pl-3 pr-9 text-xs font-semibold"
               aria-label="Choose a company"
             >
               <option value="ALL">All companies ({rows.length})</option>
@@ -131,9 +130,9 @@ export default function CompaniesOverview() {
 
       {/* Compact tiles: icon + number on one line, label under — one row of
           eight on wide screens. Each is a button. */}
-      <div className="mt-3 grid grid-cols-2 gap-1.5 sm:grid-cols-4 xl:grid-cols-8">
+      <div className="mt-3 grid grid-cols-2 gap-1.5 sm:grid-cols-4 xl:grid-cols-7">
         {TILES.map((tile) => {
-          const { key, label, icon: Icon, tone } = tile
+          const { key, label, icon: Icon } = tile
           const busy = company && opening === `${company.id}:${key}`
           const active = breakdown === key
           return (
@@ -149,8 +148,8 @@ export default function CompaniesOverview() {
               }`}
             >
               <div className="flex items-center gap-1.5">
-                <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-lg ${tone}`}>
-                  {busy ? <Loader2 size={12} className="animate-spin" /> : <Icon size={12} />}
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center text-ink">
+                  {busy ? <Loader2 size={16} className="animate-spin" /> : <Icon size={20} />}
                 </span>
                 <span className="text-base font-semibold leading-none text-ink">{isLoading ? "—" : value(key)}</span>
                 <ChevronRight size={12} className="ml-auto shrink-0 text-muted-2 opacity-0 transition-opacity group-hover:opacity-100" />
@@ -186,7 +185,6 @@ export default function CompaniesOverview() {
                   onClick={() => openList(r.id, activeTile)}
                   className="flex min-w-0 items-center gap-2 rounded-lg border border-transparent bg-surface px-2.5 py-2 text-left text-xs hover:border-accent/50 disabled:opacity-60"
                 >
-                  <Building2 size={13} className="shrink-0 text-muted" />
                   <span className="min-w-0 flex-1 truncate font-medium text-ink">{r.name}</span>
                   <span className="font-semibold text-ink">{Number(r[activeTile.key]) || 0}</span>
                   {busy ? <Loader2 size={12} className="animate-spin text-muted" /> : <ChevronRight size={12} className="text-muted-2" />}

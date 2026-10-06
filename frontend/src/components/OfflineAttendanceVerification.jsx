@@ -62,7 +62,7 @@ export default function OfflineAttendanceVerification({ record, site }) {
     <div className="mt-4 overflow-hidden rounded-3xl border border-border bg-surface shadow-card">
       <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
         <div className="flex items-center gap-2">
-          <span className="flex h-9 w-9 items-center justify-center rounded-full bg-chip-green-bg text-chip-green-fg">
+          <span className="flex h-9 w-9 items-center justify-center text-ink">
             <CheckCircle2 size={18} />
           </span>
           <div>

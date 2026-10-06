@@ -133,7 +133,7 @@ export default function QuickAttendance({ className = "" }) {
       ) : !checkedOut ? (
         <>
           <span className="glass-btn gap-1.5 px-3 font-medium text-muted">
-            <CheckCircle2 size={14} className="text-chip-green-fg" /> In since <b className="text-ink">{time(today.checkInAt)}</b>
+            <CheckCircle2 size={14} className="text-ink" /> In since <b className="text-ink">{time(today.checkInAt)}</b>
           </span>
           <button
             type="button"
@@ -147,7 +147,7 @@ export default function QuickAttendance({ className = "" }) {
         </>
       ) : (
         <span className="glass-btn gap-1.5 px-3 font-medium text-muted">
-          <CheckCircle2 size={14} className="text-chip-green-fg" />
+          <CheckCircle2 size={14} className="text-ink" />
           Done today · <b className="text-ink">{time(today.checkInAt)} – {time(today.checkOutAt)}</b>
         </span>
       )}

@@ -69,7 +69,7 @@ export default function LeavePolicyPanel({ canEdit }) {
     <section className="card mb-5 min-w-0 p-5">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <button type="button" onClick={() => setOpen((v) => !v)} className="flex items-center gap-2 text-left">
-          <span className="flex h-8 w-8 items-center justify-center rounded-full bg-chip-green-bg text-chip-green-fg">
+          <span className="flex h-8 w-8 items-center justify-center text-ink">
             <CalendarCheck size={16} />
           </span>
           <span>

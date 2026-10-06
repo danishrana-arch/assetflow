@@ -10,6 +10,7 @@ import {
   Wrench, TriangleAlert, ArrowLeftRight, RotateCcw, CirclePlus, ArrowUpRight, ChevronLeft, ChevronRight,
 } from "lucide-react"
 import api from "../api/client"
+import { InUseIcon, RepairIcon, LostIcon } from "../components/ui/StatusIcons"
 import BackButton from "../components/ui/BackButton"
 import { useAuth } from "../context/AuthContext"
 import StatusPill from "../components/ui/StatusPill"
@@ -112,22 +113,18 @@ const STAT_TILES = [
   {
     key: "total", label: "Total Assets", status: "", icon: Package, stroke: "#16A34A",
     tile: "bg-chip-green-bg/25 border-chip-green-bg/70 dark:bg-chip-green-tint/[0.05] dark:border-chip-green-tint/10",
-    iconCls: "bg-chip-green-bg text-chip-green-fg dark:bg-chip-green-tint/15 dark:text-chip-green-tint",
   },
   {
-    key: "inUse", label: "In Use", status: "ASSIGNED", icon: Laptop, stroke: "#2563EB",
+    key: "inUse", label: "In Use", status: "ASSIGNED", icon: InUseIcon, stroke: "#2563EB",
     tile: "bg-chip-blue-bg/30 border-chip-blue-bg/80 dark:bg-chip-blue-tint/[0.06] dark:border-chip-blue-tint/10",
-    iconCls: "bg-chip-blue-bg text-chip-blue-fg dark:bg-chip-blue-tint/15 dark:text-chip-blue-tint",
   },
   {
-    key: "repair", label: "Under Maintenance", status: "REPAIR", icon: Wrench, stroke: "#F59E0B",
+    key: "repair", label: "Under Maintenance", status: "REPAIR", icon: RepairIcon, stroke: "#F59E0B",
     tile: "bg-chip-orange-bg/35 border-chip-orange-bg dark:bg-chip-orange-tint/[0.06] dark:border-chip-orange-tint/10",
-    iconCls: "bg-chip-orange-bg text-chip-orange-fg dark:bg-chip-orange-tint/15 dark:text-chip-orange-tint",
   },
   {
-    key: "lost", label: "Lost / Disposed", status: "LOST,DISPOSED", icon: TriangleAlert, stroke: "#DC2626",
+    key: "lost", label: "Lost / Disposed", status: "LOST,DISPOSED", icon: LostIcon, stroke: "#DC2626",
     tile: "bg-chip-pink-bg/30 border-chip-pink-bg/80 dark:bg-chip-pink-tint/[0.06] dark:border-chip-pink-tint/10",
-    iconCls: "bg-chip-pink-bg text-chip-pink-fg dark:bg-chip-pink-tint/15 dark:text-chip-pink-tint",
   },
 ]
 
@@ -605,7 +602,7 @@ export default function Inventory() {
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-4">
           <BackButton />
-          <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-chip-green-bg text-chip-green-fg dark:bg-chip-green-tint/15 dark:text-chip-green-tint">
+          <div className="flex h-14 w-14 shrink-0 items-center justify-center text-ink">
             <Package size={26} />
           </div>
           <div>
@@ -781,8 +778,8 @@ export default function Inventory() {
                   }`}
                 >
                   <div className="flex items-start gap-3">
-                    <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${t.iconCls}`}>
-                      <Icon size={20} />
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center text-ink">
+                      <Icon size={28} />
                     </div>
                     <div className="min-w-0">
                       <p className="truncate text-xs font-medium text-muted">{t.label}</p>
@@ -915,7 +912,7 @@ export default function Inventory() {
                           aria-label={`Select ${asset.name}`}
                           className="mt-1 h-4 w-4 cursor-pointer accent-[var(--accent)]"
                         />
-                        <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${TONE_CHIP[tone]}`}><Icon size={20} /></div>
+                        <div className="flex h-11 w-11 shrink-0 items-center justify-center text-ink"><Icon size={24} /></div>
                         <Link to={`/inventory/${asset.id}`} className="min-w-0 flex-1">
                           <p className="truncate text-sm font-semibold text-ink hover:text-accent">{asset.name}</p>
                           <p className="truncate font-mono text-[11px] text-muted-2">{asset.serialNumber}</p>
@@ -978,7 +975,7 @@ export default function Inventory() {
                           <td className="max-w-[140px] truncate px-3 py-3 font-mono text-xs text-ink" title={asset.serialNumber}>{asset.serialNumber}</td>
                           <td className="px-3 py-3">
                             <div className="flex items-center gap-3">
-                              <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${TONE_CHIP[tone]}`}><Icon size={17} /></div>
+                              <div className="flex h-9 w-9 shrink-0 items-center justify-center text-ink"><Icon size={20} /></div>
                               <div className="min-w-0">
                                 <Link to={`/inventory/${asset.id}`} className="block truncate font-medium text-ink hover:text-accent">{asset.name}</Link>
                                 {specs && <p className="truncate text-[11px] text-muted-2">{specs}</p>}
@@ -1109,7 +1106,7 @@ export default function Inventory() {
                   return (
                     <li key={e.id}>
                       <Link to={`/inventory/${e.asset.id}`} className="flex items-center gap-3 rounded-xl p-2 hover:bg-surface-2">
-                        <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${TONE_CHIP[meta.tone]}`}><Icon size={16} /></div>
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center text-ink"><Icon size={20} /></div>
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-sm font-medium text-ink">{e.asset.name}</p>
                           <p className="truncate text-xs text-muted">

@@ -135,7 +135,7 @@ export default function HolidaysPanel({ canManage, canAnnounce }) {
             return (
               <div key={h.id} className={`flex items-center justify-between gap-3 px-5 py-3.5 ${upcoming ? "" : "opacity-60"}`}>
                 <div className="flex min-w-0 items-center gap-3">
-                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent-soft text-accent">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center text-ink">
                     <CalendarDays size={16} />
                   </span>
                   <div className="min-w-0">

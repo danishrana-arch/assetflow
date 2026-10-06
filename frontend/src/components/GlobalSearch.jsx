@@ -164,7 +164,7 @@ export default function GlobalSearch({ className = "", compact = false, onNaviga
                     aria-selected={i === activeIndex}
                     className={rowClass(i)}
                   >
-                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-accent-soft text-accent">
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center text-ink">
                       <Icon size={15} />
                     </span>
                     <span className="min-w-0 flex-1">
@@ -200,7 +200,7 @@ export default function GlobalSearch({ className = "", compact = false, onNaviga
                       aria-selected={i === activeIndex}
                       className={rowClass(i)}
                     >
-                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-surface-2 text-muted">
+                      <span className="flex h-8 w-8 shrink-0 items-center justify-center text-ink">
                         <Icon size={15} />
                       </span>
                       <span className="min-w-0 flex-1">

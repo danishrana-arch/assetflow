@@ -29,7 +29,7 @@ export default function OrganizationComparison() {
         {(q.data || []).map((o) => (
           <div key={o.id} className="card p-5">
             <div className="flex items-start justify-between">
-              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-accent/10 text-accent">
+              <div className="flex h-10 w-10 items-center justify-center text-ink">
                 <Building2 size={19} />
               </div>
             </div>

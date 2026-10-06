@@ -16,6 +16,10 @@ export default function StatCard({
   // With `to`, the whole card is a link to that page.
   const Wrapper = to ? Link : "div"
   const tones = {
+    plain: {
+      iconBg: "",
+      iconColor: "text-ink",
+    },
     blue: {
       iconBg: "bg-[#DCE7FF] dark:bg-[#18345F]",
       iconColor: "text-[#0058BE] dark:text-[#6FA8FF]",
@@ -42,7 +46,8 @@ export default function StatCard({
     },
   }
 
-  const currentTone = tones[tone] || tones.blue
+  // Icons are black & white with no background for every tone.
+  const currentTone = tones.plain
 
   const isDown = trend?.direction === "down"
 
@@ -50,6 +55,7 @@ export default function StatCard({
     <Wrapper
       {...(to ? { to, "aria-label": `${label}: ${value}. Open ${label}` } : {})}
       className="
+        group
         block
         relative
         min-w-0
@@ -153,6 +159,42 @@ export default function StatCard({
 
 
       {/* =====================================================
+          HOVER ICON — slides in from the bottom-right corner
+      ====================================================== */}
+
+      {Icon && (
+        <div
+          className={`
+            pointer-events-none
+            absolute
+            bottom-3
+            right-4
+            z-[5]
+            translate-x-12
+            translate-y-12
+            opacity-0
+            transition-all
+            duration-300
+            ease-out
+            group-hover:translate-x-0
+            group-hover:translate-y-0
+            group-hover:opacity-100
+            group-focus-visible:translate-x-0
+            group-focus-visible:translate-y-0
+            group-focus-visible:opacity-100
+            motion-reduce:transition-none
+            sm:right-5
+            lg:right-6
+            ${currentTone.iconColor}
+          `}
+          aria-hidden="true"
+        >
+          <Icon size={64} />
+        </div>
+      )}
+
+
+      {/* =====================================================
           CONTENT
       ====================================================== */}
 
@@ -180,27 +222,6 @@ export default function StatCard({
           </p>
 
 
-          {/* ICON */}
-          <div
-            className={`
-              flex
-              h-11
-              w-11
-              shrink-0
-              items-center
-              justify-center
-              rounded-full
-              ${currentTone.iconBg}
-            `}
-          >
-            {Icon && (
-              <Icon
-                size={20}
-                strokeWidth={1.8}
-                className={currentTone.iconColor}
-              />
-            )}
-          </div>
 
         </div>
 

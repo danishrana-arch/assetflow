@@ -472,7 +472,7 @@ export default function MyAttendance() {
           <SectionHeader title="Today" />
           {loadingAttendance ? <p className="text-sm text-muted">Loading…</p> : isOnLeaveToday ? (
             <div className="flex items-center gap-3 rounded-2xl bg-chip-yellow-bg px-4 py-3">
-              <Palmtree size={18} className="text-chip-yellow-fg" />
+              <Palmtree size={18} className="text-ink" />
               <p className="text-sm font-semibold text-chip-yellow-fg">You're on approved leave today.</p>
             </div>
           ) : (

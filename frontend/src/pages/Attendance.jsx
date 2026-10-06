@@ -2,14 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, useSearchParams } from "react-router-dom"
-import {
-  Save, Download, CheckCircle2, XCircle, Palmtree, MapPin, AlertTriangle, ShieldAlert, X,
-  ChevronLeft, ChevronRight, CalendarDays, Search, SlidersHorizontal, LayoutGrid, List,
-  ClipboardCheck, ClipboardX, CalendarOff, FileBarChart, ArrowUp, ArrowDown,
-  ArrowUpDown, User, Clock, Timer, StickyNote, ChevronDown, Check, Plus, Pencil, Fingerprint, Home,
-  Trash2, Wallet,
-} from "lucide-react"
+import { Save, Download, CheckCircle2, MapPin, AlertTriangle, ShieldAlert, X, ChevronLeft, ChevronRight, CalendarDays, Search, SlidersHorizontal, LayoutGrid, List, FileBarChart, ArrowUp, ArrowDown, ArrowUpDown, User, Clock, Timer, StickyNote, ChevronDown, Check, Plus, Pencil, Fingerprint, Home, Trash2, Wallet } from "lucide-react"
 import api from "../api/client"
+import { PresentIcon, AbsentIcon, OnLeaveIcon } from "../components/ui/StatusIcons"
 import BackButton from "../components/ui/BackButton"
 import { useAuth } from "../context/AuthContext"
 import Avatar from "../components/ui/Avatar"
@@ -20,9 +15,9 @@ import { formatTime } from "../utils/time"
 
 // Buttons an admin can mark (LATE is set by the server's late rule).
 const STATUS_CONFIG = {
-  PRESENT: { label: "Present", tone: "green", icon: CheckCircle2 },
-  ABSENT: { label: "Absent", tone: "pink", icon: XCircle },
-  LEAVE: { label: "Leave", tone: "yellow", icon: Palmtree },
+  PRESENT: { label: "Present", tone: "green", icon: PresentIcon },
+  ABSENT: { label: "Absent", tone: "pink", icon: AbsentIcon },
+  LEAVE: { label: "Leave", tone: "yellow", icon: OnLeaveIcon },
 }
 const LATE_CONFIG = { label: "Late", tone: "yellow" }
 
@@ -62,9 +57,9 @@ const FILTERS = {
 }
 
 const SUMMARIES = [
-  { title: "Present Summary", icon: ClipboardCheck, tone: "text-chip-green-fg", keys: ["ontime", "late", "early"] },
-  { title: "Not Present Summary", icon: ClipboardX, tone: "text-chip-pink-fg", keys: ["absent", "noclockin", "noclockout"] },
-  { title: "Away Summary", icon: CalendarOff, tone: "text-chip-blue-fg", keys: ["dayoff", "timeoff"] },
+  { title: "Present Summary", icon: PresentIcon, tone: "text-chip-green-fg", keys: ["ontime", "late", "early"] },
+  { title: "Not Present Summary", icon: AbsentIcon, tone: "text-chip-pink-fg", keys: ["absent", "noclockin", "noclockout"] },
+  { title: "Away Summary", icon: OnLeaveIcon, tone: "text-chip-blue-fg", keys: ["dayoff", "timeoff"] },
 ]
 
 // Literal class names so Tailwind picks them up.
@@ -256,9 +251,9 @@ function StatusMenu({ row, canWrite, onMark }) {
                 onClick={() => { if (!active) onMark(row.employeeId, key); pop.close() }}
                 className={`flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-sm ${active ? "bg-surface-2 font-semibold text-ink" : "text-ink hover:bg-surface-2"}`}
               >
-                <cfg.icon size={14} className={`text-chip-${cfg.tone}-fg`} />
+                <cfg.icon size={16} className="text-ink" />
                 <span className="flex-1">{cfg.label}</span>
-                {active && <Check size={14} className="text-accent" />}
+                {active && <Check size={14} className="text-ink" />}
               </button>
             )
           })}
@@ -973,7 +968,7 @@ export default function Attendance() {
         {SUMMARIES.map((s) => (
           <div key={s.title} className="card min-w-0 p-4">
             <p className="flex items-center gap-2 text-sm font-semibold text-ink">
-              <s.icon size={16} className={s.tone} /> {s.title}
+              <s.icon size={18} className="text-ink" /> {s.title}
             </p>
             <div className={`mt-3 grid grid-cols-2 gap-y-3 ${METRIC_COLS[s.keys.length]}`}>
               {s.keys.map((k, i) => {

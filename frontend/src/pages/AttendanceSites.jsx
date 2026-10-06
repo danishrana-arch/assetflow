@@ -243,7 +243,7 @@ export default function AttendanceSites() {
         <div className="card p-5">
           <div className="mb-4 flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
-              {editingId ? <Pencil size={17} className="text-accent" /> : <Plus size={17} className="text-accent" />}
+              {editingId ? <Pencil size={17} className="text-ink" /> : <Plus size={17} className="text-ink" />}
               <h2 className="text-sm font-semibold text-ink">{editingId ? "Edit site" : "Add site"}</h2>
             </div>
             {editingId && (

@@ -656,73 +656,85 @@ h1, h2, h3, h4 {
     isolation: isolate;
     overflow: hidden;
     flex-shrink: 0;
-    width: 62px;
-    height: 32px;
+    width: 64px;
+    height: 34px;
     border-radius: 9999px;
     cursor: pointer;
-    -webkit-backdrop-filter: blur(16px) saturate(180%);
-    backdrop-filter: blur(16px) saturate(180%);
-    border: 1px solid rgba(255, 255, 255, 0.75);
-    background: linear-gradient(180deg, rgba(246, 232, 128, 0.62) 0%, rgba(226, 204, 84, 0.5) 100%);
+    -webkit-backdrop-filter: blur(18px) saturate(180%);
+    backdrop-filter: blur(18px) saturate(180%);
+    /* Light glass: frosted white, recessed, with a visible edge. */
+    border: 1px solid rgba(15, 23, 20, 0.12);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.5) 0%, rgba(236, 238, 236, 0.62) 100%);
     box-shadow:
-      inset 0 1px 1px rgba(255, 255, 255, 0.95),
-      inset 0 -3px 6px rgba(150, 120, 10, 0.2),
-      inset 0 0 10px rgba(255, 255, 255, 0.3),
-      0 8px 18px -8px rgba(170, 140, 20, 0.55),
-      0 1px 2px rgba(0, 0, 0, 0.06);
+      inset 0 2px 5px rgba(15, 23, 20, 0.14),
+      inset 0 -1px 1px rgba(255, 255, 255, 0.9),
+      0 1px 0 rgba(255, 255, 255, 0.8),
+      0 6px 16px -8px rgba(15, 23, 20, 0.35);
     transition: background 0.35s ease, box-shadow 0.35s ease, border-color 0.35s ease;
   }
-  /* Glossy sheen across the top half of the track. */
-  .theme-switch::before {
-    content: "";
-    position: absolute;
-    inset: 1px 6px 52% 6px;
-    z-index: -1;
-    border-radius: 9999px;
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.75), rgba(255, 255, 255, 0));
-    pointer-events: none;
-  }
+  /* Smoky glass in dark mode. */
   .theme-switch[data-on="true"] {
-    border-color: rgba(255, 255, 255, 0.45);
-    background: linear-gradient(180deg, rgba(150, 154, 240, 0.62) 0%, rgba(108, 112, 214, 0.55) 100%);
+    border-color: rgba(255, 255, 255, 0.2);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.07) 0%, rgba(255, 255, 255, 0.13) 100%);
     box-shadow:
-      inset 0 1px 1px rgba(255, 255, 255, 0.6),
-      inset 0 -3px 6px rgba(30, 30, 110, 0.3),
-      inset 0 0 10px rgba(255, 255, 255, 0.15),
-      0 8px 20px -8px rgba(90, 94, 220, 0.6),
-      0 1px 2px rgba(0, 0, 0, 0.15);
+      inset 0 2px 6px rgba(0, 0, 0, 0.45),
+      inset 0 -1px 1px rgba(255, 255, 255, 0.12),
+      0 1px 0 rgba(255, 255, 255, 0.06),
+      0 6px 16px -8px rgba(0, 0, 0, 0.6);
   }
-  .theme-switch[data-on="true"]::before { background: linear-gradient(180deg, rgba(255, 255, 255, 0.45), rgba(255, 255, 255, 0)); }
   .theme-switch:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent); outline-offset: 2px; }
 
+  /* Faint icons on the track; the one under the knob is covered by it. */
+  .theme-switch-track-icon {
+    position: absolute;
+    top: 50%;
+    z-index: 0;
+    display: flex;
+    transform: translateY(-50%);
+    color: rgba(15, 23, 20, 0.38);
+    pointer-events: none;
+  }
+  .theme-switch[data-on="true"] .theme-switch-track-icon { color: rgba(255, 255, 255, 0.4); }
+  .theme-switch-track-sun { left: 10px; }
+  .theme-switch-track-moon { right: 10px; }
+
+  /* Glossy glass knob. */
   .theme-switch-knob {
     position: absolute;
-    top: 2px;
-    left: 2px;
+    top: 3px;
+    left: 3px;
+    z-index: 1;
     width: 26px;
     height: 26px;
     display: flex;
     align-items: center;
     justify-content: center;
     border-radius: 9999px;
-    color: #fff;
-    background: radial-gradient(circle at 32% 26%, rgba(255, 255, 255, 0.85) 0%, rgba(255, 255, 255, 0.35) 42%, rgba(255, 255, 255, 0.16) 100%);
-    -webkit-backdrop-filter: blur(6px) saturate(160%);
-    backdrop-filter: blur(6px) saturate(160%);
-    border: 1px solid rgba(255, 255, 255, 0.9);
+    color: #111614;
+    background: radial-gradient(circle at 35% 25%, rgba(255, 255, 255, 1) 0%, rgba(255, 255, 255, 0.86) 45%, rgba(240, 242, 240, 0.8) 100%);
+    -webkit-backdrop-filter: blur(8px) saturate(170%);
+    backdrop-filter: blur(8px) saturate(170%);
+    border: 1px solid rgba(255, 255, 255, 0.95);
     box-shadow:
       inset 0 1px 1px rgba(255, 255, 255, 1),
-      inset 0 -2px 4px rgba(0, 0, 0, 0.1),
-      0 3px 8px rgba(0, 0, 0, 0.18),
-      0 0 0 0.5px rgba(0, 0, 0, 0.04);
-    transition: left 0.38s cubic-bezier(0.34, 1.56, 0.64, 1), width 0.2s ease;
+      inset 0 -2px 3px rgba(15, 23, 20, 0.1),
+      0 3px 8px rgba(15, 23, 20, 0.25),
+      0 0 0 0.5px rgba(15, 23, 20, 0.12);
+    transition: left 0.38s cubic-bezier(0.34, 1.56, 0.64, 1), width 0.2s ease, background 0.35s ease, color 0.35s ease;
   }
-  .theme-switch-knob svg { filter: drop-shadow(0 1px 1.5px rgba(120, 95, 0, 0.55)); }
-  .theme-switch[data-on="true"] .theme-switch-knob svg { filter: drop-shadow(0 1px 1.5px rgba(30, 30, 110, 0.5)); }
-  .theme-switch[data-on="true"] .theme-switch-knob { left: 32px; }
+  .theme-switch[data-on="true"] .theme-switch-knob {
+    left: 33px;
+    color: #ffffff;
+    background: radial-gradient(circle at 35% 25%, rgba(255, 255, 255, 0.5) 0%, rgba(255, 255, 255, 0.22) 45%, rgba(255, 255, 255, 0.12) 100%);
+    border-color: rgba(255, 255, 255, 0.55);
+    box-shadow:
+      inset 0 1px 1px rgba(255, 255, 255, 0.6),
+      inset 0 -2px 3px rgba(0, 0, 0, 0.25),
+      0 3px 10px rgba(0, 0, 0, 0.5);
+  }
   /* iOS-style stretch while pressed. */
   .theme-switch:active .theme-switch-knob { width: 32px; }
-  .theme-switch[data-on="true"]:active .theme-switch-knob { left: 26px; }
+  .theme-switch[data-on="true"]:active .theme-switch-knob { left: 27px; }
 
   @media (prefers-reduced-motion: reduce) {
     .glass-backdrop span { animation: none; }
@@ -776,4 +788,13 @@ img, svg { max-width: 100%; }
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* One icon weight across the app (2026-10-06): lucide icons draw at the same
+   1.5px-per-24px line as the Material status icons (components/ui/
+   StatusIcons.jsx). CSS beats the strokeWidth attribute, so individual
+   strokeWidth props no longer change the weight. The sidebar dock is left
+   alone — its hovered icon is drawn bolder on purpose. */
+svg.lucide:not([data-dock-item] *) {
+  stroke-width: 1.5;
 }

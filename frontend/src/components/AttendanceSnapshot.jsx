@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react"
 import { keepPreviousData, useQuery } from "@tanstack/react-query"
 import { Link } from "react-router-dom"
-import { CalendarDays, ChevronLeft, ChevronRight, Clock, UserCheck, Users, UserX } from "lucide-react"
+import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react"
+import { TotalEmployeesIcon, PresentIcon, LateIcon, AbsentIcon } from "./ui/StatusIcons"
 import api from "../api/client"
 import { formatTime } from "../utils/time"
 
@@ -32,19 +33,15 @@ const longFmt = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "lo
 const TILE_TONES = {
   blue: {
     tile: "bg-chip-blue-bg/35 border-chip-blue-bg/80 dark:bg-chip-blue-tint/[0.06] dark:border-chip-blue-tint/10",
-    icon: "bg-chip-blue-bg text-chip-blue-fg dark:bg-chip-blue-tint/15 dark:text-chip-blue-tint",
   },
   green: {
     tile: "bg-chip-green-bg/40 border-chip-green-bg dark:bg-chip-green-tint/[0.06] dark:border-chip-green-tint/10",
-    icon: "bg-chip-green-bg text-chip-green-fg dark:bg-chip-green-tint/15 dark:text-chip-green-tint",
   },
   yellow: {
     tile: "bg-chip-yellow-bg/20 border-chip-yellow-bg/50 dark:bg-chip-yellow-tint/[0.06] dark:border-chip-yellow-tint/10",
-    icon: "bg-chip-yellow-bg/80 text-chip-yellow-fg dark:bg-chip-yellow-tint/15 dark:text-chip-yellow-tint",
   },
   pink: {
     tile: "bg-chip-pink-bg/35 border-chip-pink-bg/80 dark:bg-chip-pink-tint/[0.06] dark:border-chip-pink-tint/10",
-    icon: "bg-chip-pink-bg text-chip-pink-fg dark:bg-chip-pink-tint/15 dark:text-chip-pink-tint",
   },
 }
 
@@ -57,8 +54,8 @@ function StatTile({ label, value, icon: Icon, tone, loading, to }) {
       aria-label={`${label}: ${value}. Open details`}
       className={`flex min-h-[150px] min-w-0 flex-col rounded-2xl border p-4 transition-all hover:-translate-y-px hover:shadow-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent lg:min-h-[200px] ${t.tile}`}
     >
-      <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full sm:h-12 sm:w-12 ${t.icon}`}>
-        <Icon size={22} strokeWidth={1.9} />
+      <div className="flex h-11 w-11 shrink-0 items-center justify-start text-ink sm:h-12 sm:w-12">
+        <Icon size={30} strokeWidth={1.9} />
       </div>
       <p className="mt-3 truncate text-sm font-medium text-muted">{label}</p>
       <p className={`mt-auto pt-2 text-3xl font-semibold leading-none text-ink transition-opacity sm:text-4xl ${loading ? "opacity-50" : ""}`}>
@@ -85,7 +82,7 @@ function AttendanceList({ rows, timeZone, isToday, isFuture, selected, loading }
       <div className="flex items-center justify-between gap-2">
         <p className="truncate text-sm font-semibold text-ink">{isToday ? "Today Attendance" : "Attendance"}</p>
         <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border px-2.5 py-1 text-[11px] font-medium text-ink">
-          <CalendarDays size={12} className="text-accent" />
+          <CalendarDays size={12} className="text-ink" />
           {chipFmt.format(asDate(selected))}
         </span>
       </div>
@@ -225,10 +222,10 @@ export default function AttendanceSnapshot({ timeZone, children }) {
         <div className="flex min-w-0 flex-col gap-4 lg:col-span-3">
         <div className="rounded-2xl border border-border p-3 sm:p-4">
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-            <StatTile label="Total Employees" value={show(counts?.total)} icon={Users} tone="blue" loading={loading} to="/employees" />
-            <StatTile label="Present" value={show(counts?.present)} icon={UserCheck} tone="green" loading={loading} to={`/attendance?date=${selected}&status=present`} />
-            <StatTile label={isToday ? "Late Today" : "Late"} value={show(counts?.late)} icon={Clock} tone="yellow" loading={loading} to={`/attendance?date=${selected}&status=late`} />
-            <StatTile label={isToday ? "Absent Today" : "Absent"} value={show(counts?.absent)} icon={UserX} tone="pink" loading={loading} to={`/attendance?date=${selected}&status=absent`} />
+            <StatTile label="Total Employees" value={show(counts?.total)} icon={TotalEmployeesIcon} tone="blue" loading={loading} to="/employees" />
+            <StatTile label="Present" value={show(counts?.present)} icon={PresentIcon} tone="green" loading={loading} to={`/attendance?date=${selected}&status=present`} />
+            <StatTile label={isToday ? "Late Today" : "Late"} value={show(counts?.late)} icon={LateIcon} tone="yellow" loading={loading} to={`/attendance?date=${selected}&status=late`} />
+            <StatTile label={isToday ? "Absent Today" : "Absent"} value={show(counts?.absent)} icon={AbsentIcon} tone="pink" loading={loading} to={`/attendance?date=${selected}&status=absent`} />
           </div>
         </div>
         {children}

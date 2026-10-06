@@ -4,27 +4,7 @@ import { Link } from "react-router-dom"
 import ParticleText from "../components/ParticleText"
 import { useTheme } from "../context/ThemeContext"
 
-import {
-  Package,
-  Layers,
-  ShieldAlert,
-  PlusCircle,
-  Truck,
-  ClipboardList,
-  Undo2,
-  Wrench,
-  UserPlus,
-  ArrowUpRight,
-  Boxes,
-  Laptop2,
-  MonitorSmartphone,
-  Smartphone,
-  CalendarDays,
-  X,
-  Plus,
-  Megaphone,
-  Info,
-} from "lucide-react"
+import { PackageCheck, Package, ShieldAlert, PlusCircle, Truck, ClipboardList, Undo2, Wrench, UserPlus, ArrowUpRight, Boxes, Laptop2, MonitorSmartphone, Smartphone, CalendarDays, X, Plus, Megaphone, Info } from "lucide-react"
 
 import {
   LineChart,
@@ -36,6 +16,7 @@ import {
 } from "recharts"
 
 import api from "../api/client"
+import { RepairIcon } from "../components/ui/StatusIcons"
 import { useAuth } from "../context/AuthContext"
 import StatCard from "../components/StatCard"
 import AttendanceSnapshot from "../components/AttendanceSnapshot"
@@ -666,72 +647,6 @@ export default function Dashboard() {
 
 
       {/* ======================================================
-          PRIMARY STATISTICS
-      ======================================================= */}
-
-      <section className={`grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 ${isIT ? "xl:grid-cols-4" : "xl:grid-cols-3"}`}>
-
-        <StatCard
-          label="Total Assets"
-          value={
-            stats?.totalAssets ?? "—"
-          }
-          sublabel="From last month"
-          icon={Package}
-          tone="blue"
-          to={canOpenInventory ? "/inventory?view=all" : undefined}
-          trend={{
-            value: "12%",
-            direction: "up",
-          }}
-        />
-
-        <StatCard
-          label="Assigned Assets"
-          value={
-            stats?.assignedAssets ?? "—"
-          }
-          sublabel={`${utilization}% utilization`}
-          icon={Layers}
-          tone="purple"
-          to={canOpenInventory ? "/assignments" : undefined}
-          trend={{
-            value: "8%",
-            direction: "up",
-          }}
-        />
-
-        <StatCard
-          label="Warranty Alerts"
-          value={
-            stats?.expiringWarranties ??
-            "—"
-          }
-          sublabel="Expiring in 30 days"
-          icon={ShieldAlert}
-          tone="cyan"
-          to={canOpenInventory ? "/inventory?warranty=expiring" : undefined}
-          trend={{
-            value: "3%",
-            direction: "down",
-          }}
-        />
-
-        {isIT && (
-          <StatCard
-            label="Under Repair"
-            value={stats?.assetsUnderRepair ?? "—"}
-            sublabel={`${openTickets.length} open support tickets`}
-            icon={Wrench}
-            tone="orange"
-            to="/inventory"
-          />
-        )}
-
-      </section>
-
-
-      {/* ======================================================
           EXECUTIVE SNAPSHOT
       ======================================================= */}
 
@@ -789,6 +704,72 @@ export default function Dashboard() {
 
           </section>
         )}
+
+
+      {/* ======================================================
+          PRIMARY STATISTICS
+      ======================================================= */}
+
+      <section className={`grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 ${isIT ? "xl:grid-cols-4" : "xl:grid-cols-3"}`}>
+
+        <StatCard
+          label="Total Assets"
+          value={
+            stats?.totalAssets ?? "—"
+          }
+          sublabel="From last month"
+          icon={Package}
+          tone="blue"
+          to={canOpenInventory ? "/inventory?view=all" : undefined}
+          trend={{
+            value: "12%",
+            direction: "up",
+          }}
+        />
+
+        <StatCard
+          label="Assigned Assets"
+          value={
+            stats?.assignedAssets ?? "—"
+          }
+          sublabel={`${utilization}% utilization`}
+          icon={PackageCheck}
+          tone="purple"
+          to={canOpenInventory ? "/assignments" : undefined}
+          trend={{
+            value: "8%",
+            direction: "up",
+          }}
+        />
+
+        <StatCard
+          label="Warranty Alerts"
+          value={
+            stats?.expiringWarranties ??
+            "—"
+          }
+          sublabel="Expiring in 30 days"
+          icon={ShieldAlert}
+          tone="cyan"
+          to={canOpenInventory ? "/inventory?warranty=expiring" : undefined}
+          trend={{
+            value: "3%",
+            direction: "down",
+          }}
+        />
+
+        {isIT && (
+          <StatCard
+            label="Under Repair"
+            value={stats?.assetsUnderRepair ?? "—"}
+            sublabel={`${openTickets.length} open support tickets`}
+            icon={RepairIcon}
+            tone="plain"
+            to="/inventory"
+          />
+        )}
+
+      </section>
 
 
       {/* ======================================================
@@ -1109,7 +1090,7 @@ export default function Dashboard() {
             {!loadingEvents && (calendarData.events || []).length === 0 && <p className="text-sm text-muted">No events in this period.</p>}
             {groupLeaveEvents(calendarData.events || []).map((event) => (
               <button key={event.id} type="button" onClick={() => setSelectedEvent(event)} className="flex w-full min-w-0 items-start gap-3 rounded-2xl bg-surface-2 p-3 text-left hover:bg-surface-2/70">
-                <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-surface text-muted"><CalendarDays size={15} /></div>
+                <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center text-ink"><CalendarDays size={15} /></div>
                 <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-ink">{event.title}</p><p className="mt-0.5 truncate text-xs text-muted">{eventDateLabel(event)} · {(event.type || 'EVENT').replaceAll('_',' ')}</p></div>
                 <span className="shrink-0 text-[11px] font-semibold text-accent">View</span>
               </button>
