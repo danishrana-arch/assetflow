@@ -29,7 +29,7 @@ api.interceptors.response.use(
       localStorage.removeItem("assetflow_token")
       localStorage.removeItem("assetflow_user_cache")
       localStorage.removeItem("assetflow_active_organization")
-      window.location.href = "/login"
+      window.location.href = "/"
     }
     return Promise.reject(err)
   }

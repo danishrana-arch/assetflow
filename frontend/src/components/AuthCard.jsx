@@ -22,7 +22,7 @@ export default function AuthCard({ title, subtitle, brandName, children }) {
             <span className={`min-w-0 truncate text-base font-bold tracking-tight ${isDark ? "text-white" : "text-[#202525]"}`}>{brandName}</span>
           </div>
         ) : (
-          <Link to="/login" className="mb-6 flex items-center gap-2.5">
+          <Link to="/" className="mb-6 flex items-center gap-2.5">
             <img src={logoFull} alt="ManagementDock" className="h-9 w-9 rounded-xl object-contain" />
             <span className={`text-base font-bold tracking-tight ${isDark ? "text-white" : "text-[#202525]"}`}>ManagementDock</span>
           </Link>
@@ -33,7 +33,7 @@ export default function AuthCard({ title, subtitle, brandName, children }) {
         {subtitle && <p className={`mt-1 text-sm ${isDark ? "text-white/55" : "text-[#687272]"}`}>{subtitle}</p>}
         <div className="mt-6">{children}</div>
         <p className={`mt-6 text-center text-sm ${isDark ? "text-white/60" : "text-[#687272]"}`}>
-          <Link to="/login" className="font-semibold text-accent hover:underline">Back to sign in</Link>
+          <Link to="/" className="font-semibold text-accent hover:underline">Back to sign in</Link>
         </p>
       </div>
     </div>

@@ -14,7 +14,6 @@ import DashboardLayout from "./layouts/DashboardLayout"
 import MyAttendance from "./pages/MyAttendance"
 // Same reason: the Site Admin workspace is used at sites with no signal.
 import SiteAttendance from "./pages/SiteAttendance"
-const Login = lazy(() => import("./pages/Login"))
 const Register = lazy(() => import("./pages/Register"))
 const Welcome = lazy(() => import("./pages/Welcome"))
 const ForgotPassword = lazy(() => import("./pages/ForgotPassword"))
@@ -71,7 +70,7 @@ function PageFallback() {
 // against its own fixed module list.
 function RequireModule({ moduleKey, children }) {
   const { user } = useAuth()
-  if (!hasModuleAccess(user?.role, moduleKey)) return <Navigate to={user?.id ? `/employees/${user.id}` : "/login"} replace />
+  if (!hasModuleAccess(user?.role, moduleKey)) return <Navigate to={user?.id ? `/employees/${user.id}` : "/"} replace />
   return children
 }
 
@@ -86,19 +85,19 @@ function RequireOwner({ children }) {
 
 function RequireInventoryAccess({ children }) {
   const { user } = useAuth()
-  if (!canManageInventory(user?.role)) return <Navigate to={user?.id ? `/employees/${user.id}` : "/login"} replace />
+  if (!canManageInventory(user?.role)) return <Navigate to={user?.id ? `/employees/${user.id}` : "/"} replace />
   return children
 }
 
 function RequireEmployeeDirectory({ children }) {
   const { user } = useAuth()
-  if (!canViewEmployeeDirectory(user?.role)) return <Navigate to={user?.id ? `/employees/${user.id}` : "/login"} replace />
+  if (!canViewEmployeeDirectory(user?.role)) return <Navigate to={user?.id ? `/employees/${user.id}` : "/"} replace />
   return children
 }
 
 function RequirePayrollAccess({ children }) {
   const { user } = useAuth()
-  if (!canAccessPayroll(user?.role)) return <Navigate to={user?.id ? `/employees/${user.id}` : "/login"} replace />
+  if (!canAccessPayroll(user?.role)) return <Navigate to={user?.id ? `/employees/${user.id}` : "/"} replace />
   return children
 }
 
@@ -120,7 +119,7 @@ function ProtectedShell() {
       </div>
     )
   }
-  if (!user) return <Navigate to="/login" replace />
+  if (!user) return <Navigate to="/" replace />
 
   const isManager = isManagement(user.role)
   const isIT = user.role === "IT_MANAGER"
@@ -187,7 +186,7 @@ export default function App() {
         <Suspense fallback={<PageFallback />}>
           <Routes>
             <Route path="/" element={<Welcome />} />
-            <Route path="/login" element={<Login />} />
+            <Route path="/login" element={<Navigate to="/" replace />} />
             <Route path="/register" element={<Register />} />
             <Route path="/forgot-password" element={<ForgotPassword />} />
             <Route path="/reset-password" element={<ResetPassword />} />

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { Link, Navigate } from "react-router-dom"
+import { Link, Navigate, useNavigate } from "react-router-dom"
 import { motion, useAnimationControls } from "framer-motion"
 import { ArrowRight, Lock } from "lucide-react"
 import { useAuth } from "../context/AuthContext"
@@ -9,6 +9,9 @@ import dashboardImg from "../assets/welcome-dashboard.png"
 
 /* Palette is written as hex values on purpose: the app's Tailwind theme
    redefines `slate`, so named slate/stone colours can't be relied on here. */
+const MAX_FAILS = 4
+const UNLOCK_KEY = "welcome_unlocked"
+const readUnlocked = () => { try { return sessionStorage.getItem(UNLOCK_KEY) === "1" } catch { return false } }
 const BRASS = "#dcc66e"
 const BRASS_LIGHT = "#f5df9a"
 const IVORY = "#fbf9f5"
@@ -43,8 +46,34 @@ function useClock() {
 }
 
 export default function Welcome() {
-  const { user, loading } = useAuth()
-  const [lit, setLit] = useState(false)
+  const { user, loading, login } = useAuth()
+  const [wasUnlocked] = useState(readUnlocked)
+  const navigate = useNavigate()
+  const [open, setOpen] = useState(wasUnlocked)
+  const [email, setEmail] = useState("")
+  const [password, setPassword] = useState("")
+  const [error, setError] = useState("")
+  const [busy, setBusy] = useState(false)
+  const [fails, setFails] = useState(0)
+
+  async function submitLogin(e) {
+    e.preventDefault()
+    setError("")
+    setBusy(true)
+    try {
+      await login(email, password)
+      try { sessionStorage.setItem(UNLOCK_KEY, "1") } catch { /* optional */ }
+      navigate("/")
+    } catch (err) {
+      setError(err.response?.data?.error || "Login failed")
+      const status = err.response?.status
+      if (status === 401) setFails((n) => n + 1)
+      if (status === 429) setFails(MAX_FAILS)
+    } finally {
+      setBusy(false)
+    }
+  }
+  const [lit, setLit] = useState(wasUnlocked)
   const chain = useAnimationControls()
   const clock = useClock()
   useFonts()
@@ -146,8 +175,10 @@ export default function Welcome() {
                 </div>
               </button>
             )}
-            {lit && <Link
-              to="/login"
+            {lit && <button
+              type="button"
+              onClick={() => setOpen((v) => !v)}
+              aria-expanded={open}
               className="group relative flex w-full items-center justify-between overflow-hidden rounded-xl border border-[#dcc66e]/30 px-6 py-4 transition-all duration-200 hover:border-[#f5df9a]/55"
               style={{
                 background: "linear-gradient(180deg,#1d2332 0%,#121722 100%)",
@@ -168,9 +199,73 @@ export default function Welcome() {
                   </span>
                 </div>
               </div>
-              <ArrowRight size={18} className="z-10 transition-transform duration-200 group-hover:translate-x-1.5" style={{ color: BRASS_LIGHT }} />
+              <ArrowRight size={18} className={`z-10 transition-transform duration-200 ${open ? "rotate-90" : "group-hover:translate-x-1.5"}`} style={{ color: BRASS_LIGHT }} />
               <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-[#f5df9a]/40 to-transparent" />
-            </Link>}
+            </button>}
+
+            {lit && open && (
+              <form
+                onSubmit={submitLogin}
+                className="space-y-3 rounded-xl border border-[#dcc66e]/20 bg-[#0e121a]/80 p-4"
+              >
+                {[
+                  { label: "Email", type: "email", value: email, set: (v) => { setEmail(v); setFails(0) }, ph: "you@company.com", ac: "email" },
+                  { label: "Password", type: "password", value: password, set: setPassword, ph: "••••••••", ac: "current-password" },
+                ].map((f) => (
+                  <label key={f.label} className="block">
+                    <span className="mb-1 block text-[10px] uppercase tracking-widest text-[#94a3b8]" style={mono}>{f.label}</span>
+                    <input
+                      type={f.type}
+                      value={f.value}
+                      onChange={(e) => f.set(e.target.value)}
+                      placeholder={f.ph}
+                      autoComplete={f.ac}
+                      required
+                      autoFocus={f.type === "email"}
+                      className="w-full rounded-lg border border-white/10 bg-[#090c12] px-3.5 py-2.5 text-sm text-[#f3efe6] outline-none transition placeholder:text-[#475569] focus:border-[#dcc66e]/60 focus:ring-2 focus:ring-[#dcc66e]/20"
+                    />
+                  </label>
+                ))}
+
+                <div className="text-right">
+                  <Link
+                    to={`/forgot-password${email ? `?email=${encodeURIComponent(email)}` : ""}`}
+                    className="text-xs font-medium hover:underline"
+                    style={{ color: BRASS_LIGHT }}
+                  >
+                    Forgot password?
+                  </Link>
+                </div>
+
+                {fails >= MAX_FAILS ? (
+                  <div role="alert" className="rounded-lg border border-amber-400/20 bg-amber-500/10 px-3 py-2.5 text-xs leading-5 text-[#fde68a]">
+                    <p className="font-semibold">Too many failed attempts</p>
+                    <p className="opacity-90">The account owner is notified about repeated failed sign-ins. If this is your account, reset your password instead of guessing.</p>
+                    <Link
+                      to={`/forgot-password${email ? `?email=${encodeURIComponent(email)}` : ""}`}
+                      className="mt-2 inline-block rounded-full bg-[#dcc66e] px-3.5 py-1.5 font-semibold text-[#090c12] hover:opacity-90"
+                    >
+                      Reset my password
+                    </Link>
+                  </div>
+                ) : (
+                  error && (
+                    <div role="alert" className="rounded-lg border border-red-400/20 bg-red-500/10 px-3 py-2 text-xs text-[#fca5a5]">
+                      {error}
+                    </div>
+                  )
+                )}
+
+                <button
+                  type="submit"
+                  disabled={busy}
+                  className="w-full rounded-lg py-3 text-sm font-semibold text-[#090c12] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+                  style={{ background: "linear-gradient(180deg,#f5df9a,#dcc66e)" }}
+                >
+                  {busy ? "Signing in…" : "Sign in"}
+                </button>
+              </form>
+            )}
 
             <div className="flex items-center justify-between px-1 pt-1 text-xs">
               <span className="text-[#64748b]">New to ManagementDock?</span>
@@ -264,11 +359,16 @@ export default function Welcome() {
                 src={officeImg}
                 alt="Executive desk in a bright office with floor-to-ceiling windows"
                 className="h-full w-full object-cover object-center transition-[filter] duration-1000"
-                style={{ filter: lit ? "brightness(.98) contrast(1.04)" : "brightness(.68) contrast(.95)" }}
+                style={{ filter: lit ? "brightness(.98) contrast(1.04)" : "brightness(.86) contrast(.97)" }}
               />
               <div
                 className="pointer-events-none absolute inset-0 bg-gradient-to-t from-[#090c12]/70 via-[#090c12]/20 to-black/30 transition-opacity duration-700"
-                style={{ opacity: lit ? 0.35 : 0.75 }}
+                style={{ opacity: lit ? 0.35 : 0.4 }}
+              />
+              {/* Lamp off: a soft shade settles over the upper part of the room */}
+              <div
+                className="pointer-events-none absolute inset-0 bg-gradient-to-b from-[#090c12]/80 via-[#090c12]/35 to-transparent transition-opacity duration-700"
+                style={{ opacity: lit ? 0 : 0.85 }}
               />
               <div className="absolute left-4 top-4 z-20 flex items-center gap-2 rounded border border-white/10 bg-black/50 px-3 py-1 text-[10px] uppercase tracking-wider text-[#e8e2d5] backdrop-blur-md" style={mono}>
                 <span className="h-1.5 w-1.5 rounded-full bg-[#dcc66e]" />

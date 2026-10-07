@@ -74,7 +74,7 @@ export default function AcceptInvite() {
       <AuthCard title={loadError.accepted ? "Already accepted" : "Invitation unavailable"}>
         <AuthMessage tone={loadError.accepted ? "info" : "error"}>{loadError.message}</AuthMessage>
         {loadError.accepted && (
-          <Link to="/login" className="pill-accent mt-4 block w-full py-3 text-center text-sm font-semibold">Sign in</Link>
+          <Link to="/" className="pill-accent mt-4 block w-full py-3 text-center text-sm font-semibold">Sign in</Link>
         )}
       </AuthCard>
     )

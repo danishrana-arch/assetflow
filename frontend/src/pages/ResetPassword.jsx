@@ -41,7 +41,7 @@ export default function ResetPassword() {
     return (
       <AuthCard title="Password updated">
         <AuthMessage>{done}</AuthMessage>
-        <Link to="/login" className="pill-accent mt-4 block w-full py-3 text-center text-sm font-semibold">Sign in</Link>
+        <Link to="/" className="pill-accent mt-4 block w-full py-3 text-center text-sm font-semibold">Sign in</Link>
       </AuthCard>
     )
   }
