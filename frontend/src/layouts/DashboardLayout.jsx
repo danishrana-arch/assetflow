@@ -60,8 +60,9 @@ export default function DashboardLayout() {
             </div>
           </div>
           <Outlet />
-          {/* The dashboard places its own copy under the alerts card. */}
-          {pathname !== "/" && pathname !== "/dashboard" && (
+          {/* Only on the employee profile and Settings; the dashboard places
+              its own copy under the alerts card. */}
+          {(/^\/employees\/[^/]+\/?$/.test(pathname) || pathname === "/settings") && (
             <PoweredBy className="mt-8 text-right" />
           )}
         </div>
