@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { Camera, ImagePlus, Trash2 } from "lucide-react"
+import { createPortal } from "react-dom"
+import { Camera, ImagePlus, Trash2, X } from "lucide-react"
 import api from "../api/client"
 import { useAuth } from "../context/AuthContext"
 import Avatar from "./ui/Avatar"
@@ -102,9 +103,60 @@ export default function ProfilePhoto({ employeeId, name, src, size = "2xl", canE
     inputRef.current?.click()
   }
 
+  // ADMIN / CEO can open any picture full-screen.
+  const { user } = useAuth()
+  const canEnlarge = Boolean(src) && ["ADMIN", "CEO"].includes(user?.role)
+  const [enlarged, setEnlarged] = useState(false)
+
+  useEffect(() => {
+    if (!enlarged) return undefined
+    const onKey = (e) => e.key === "Escape" && setEnlarged(false)
+    document.addEventListener("keydown", onKey)
+    return () => document.removeEventListener("keydown", onKey)
+  }, [enlarged])
+
   return (
     <div ref={wrapRef} className={`relative shrink-0 ${className}`}>
-      <Avatar name={name} src={src} size={size} className={pending ? "opacity-60" : ""} />
+      {canEnlarge ? (
+        <button
+          type="button"
+          onClick={() => setEnlarged(true)}
+          aria-label={`View ${name || "profile"} picture full size`}
+          title="View full size"
+          className="block cursor-zoom-in rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        >
+          <Avatar name={name} src={src} size={size} className={pending ? "opacity-60" : ""} />
+        </button>
+      ) : (
+        <Avatar name={name} src={src} size={size} className={pending ? "opacity-60" : ""} />
+      )}
+      {enlarged &&
+        createPortal(
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={`${name || "Profile"} picture`}
+            onClick={() => setEnlarged(false)}
+            className="fixed inset-0 z-[100] flex cursor-zoom-out flex-col items-center justify-center gap-4 bg-black/80 p-6 backdrop-blur-sm"
+          >
+            <button
+              type="button"
+              onClick={() => setEnlarged(false)}
+              aria-label="Close"
+              className="absolute right-5 top-5 flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-white hover:bg-white/25"
+            >
+              <X size={20} />
+            </button>
+            <img
+              src={src}
+              alt={name || "Profile picture"}
+              onClick={(e) => e.stopPropagation()}
+              className="aspect-square w-[min(88vw,80vh)] max-w-[640px] cursor-default rounded-3xl object-cover shadow-2xl"
+            />
+            {name && <p className="text-lg font-semibold text-white">{name}</p>}
+          </div>,
+          document.body,
+        )}
       {canEdit && (
         <>
           <button
