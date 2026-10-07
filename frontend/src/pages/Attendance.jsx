@@ -13,6 +13,7 @@ import StatusPill from "../components/ui/StatusPill"
 import EmptyState from "../components/ui/EmptyState"
 import WorkingTimeProgress, { effectiveWorkingMinutes } from "../components/ui/WorkingTimeProgress"
 import { formatTime } from "../utils/time"
+import { DateInput, DateRangeInput } from "../components/ui/DatePicker"
 
 // Buttons an admin can mark (LATE is set by the server's late rule).
 const STATUS_CONFIG = {
@@ -638,7 +639,6 @@ export default function Attendance() {
   const [exportError, setExportError] = useState("")
   const report = usePopover()
   const filterPop = usePopover()
-  const dateInputRef = useRef(null)
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ["attendance", date],
@@ -887,24 +887,25 @@ export default function Attendance() {
             <button type="button" onClick={() => goToDate(addDays(date, -1))} className="flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-surface text-muted hover:bg-surface-2 hover:text-ink" aria-label="Previous day">
               <ChevronLeft size={15} />
             </button>
-            <button
-              type="button"
-              onClick={() => { try { dateInputRef.current?.showPicker() } catch { dateInputRef.current?.focus() } }}
-              className="relative flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm font-semibold text-ink hover:bg-surface-2"
-              title="Pick a date"
-            >
-              {longDateFmt.format(new Date(`${date}T00:00:00Z`))}
-              <CalendarDays size={14} className="text-muted" />
-              <input
-                ref={dateInputRef}
-                type="date"
-                value={date}
-                onChange={(e) => goToDate(e.target.value)}
-                className="pointer-events-none absolute inset-0 opacity-0"
-                tabIndex={-1}
-                aria-label="Attendance date"
-              />
-            </button>
+            <DateInput
+              value={date}
+              onChange={(e) => e.target.value && goToDate(e.target.value)}
+              required
+              renderTrigger={({ ref, onClick, open }) => (
+                <button
+                  ref={ref}
+                  type="button"
+                  onClick={onClick}
+                  aria-expanded={open}
+                  aria-label="Attendance date"
+                  className="relative flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm font-semibold text-ink hover:bg-surface-2"
+                  title="Pick a date"
+                >
+                  {longDateFmt.format(new Date(`${date}T00:00:00Z`))}
+                  <CalendarDays size={14} className="text-muted" />
+                </button>
+              )}
+            />
             <button type="button" onClick={() => goToDate(addDays(date, 1))} className="flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-surface text-muted hover:bg-surface-2 hover:text-ink" aria-label="Next day">
               <ChevronRight size={15} />
             </button>
@@ -928,15 +929,15 @@ export default function Attendance() {
               <div className="absolute right-0 z-30 mt-2 w-72 rounded-2xl border border-border bg-surface p-4 shadow-pop">
                 <p className="text-sm font-semibold text-ink">Export attendance</p>
                 <p className="mt-0.5 text-xs text-muted">Excel sheet for a date range.</p>
-                <div className="mt-3 grid grid-cols-2 gap-2">
-                  <label className="text-[11px] font-medium text-muted">
-                    From
-                    <input type="date" value={exportRange.startDate} max={exportRange.endDate} onChange={(e) => setExportRange((r) => ({ ...r, startDate: e.target.value }))} className="field mt-1 px-2 py-2 text-xs" />
-                  </label>
-                  <label className="text-[11px] font-medium text-muted">
-                    To
-                    <input type="date" value={exportRange.endDate} min={exportRange.startDate} onChange={(e) => setExportRange((r) => ({ ...r, endDate: e.target.value }))} className="field mt-1 px-2 py-2 text-xs" />
-                  </label>
+                <div className="mt-3">
+                  <p className="mb-1 text-[11px] font-medium text-muted">Dates</p>
+                  <DateRangeInput
+                    from={exportRange.startDate}
+                    to={exportRange.endDate}
+                    onChange={({ from, to }) => setExportRange((r) => ({ ...r, startDate: from, endDate: to }))}
+                    className="field px-2.5 py-2 text-xs"
+                    aria-label="Export date range"
+                  />
                 </div>
                 {exportError && <p className="mt-2 text-xs text-danger">{exportError}</p>}
                 <button

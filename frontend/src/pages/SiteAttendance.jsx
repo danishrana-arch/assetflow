@@ -11,6 +11,7 @@ import Avatar from "../components/ui/Avatar"
 import StatusPill from "../components/ui/StatusPill"
 import EmptyState from "../components/ui/EmptyState"
 import { formatTime } from "../utils/time"
+import { DateRangeInput } from "../components/ui/DatePicker"
 import {
   getAttendanceDeviceId,
   getSiteAdminQueue,
@@ -286,14 +287,17 @@ function HistoryTab({ todayKey }) {
   return (
     <div>
       <div className="card mb-4 grid grid-cols-2 gap-3 p-4 sm:flex sm:items-end">
-        <label className="block text-xs font-semibold uppercase tracking-wide text-muted sm:w-48">
-          From
-          <input type="date" value={range.from} max={range.to} onChange={(e) => setRange((r) => ({ ...r, from: e.target.value }))} className="field mt-1.5 py-2.5 normal-case tracking-normal" />
-        </label>
-        <label className="block text-xs font-semibold uppercase tracking-wide text-muted sm:w-48">
-          To
-          <input type="date" value={range.to} min={range.from} max={todayKey} onChange={(e) => setRange((r) => ({ ...r, to: e.target.value }))} className="field mt-1.5 py-2.5 normal-case tracking-normal" />
-        </label>
+        <div className="col-span-2 sm:w-72">
+          <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted">Dates</p>
+          <DateRangeInput
+            from={range.from}
+            to={range.to}
+            max={todayKey}
+            onChange={({ from, to }) => setRange({ from, to })}
+            className="field py-2.5"
+            aria-label="History date range"
+          />
+        </div>
         {data?.rows && <p className="col-span-2 text-xs text-muted sm:ml-auto sm:pb-3">{data.rows.length} site-day{data.rows.length === 1 ? "" : "s"}</p>}
       </div>
       {data?.fromCache && <p className="mb-2 text-xs text-chip-yellow-fg">Offline — showing the copy saved on this device.</p>}

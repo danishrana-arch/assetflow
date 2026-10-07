@@ -116,7 +116,7 @@ const EMPLOYEE_SELECT = {
 async function loadOrgSettings(orgIds) {
   const orgs = await prisma.organization.findMany({
     where: { id: { in: orgIds } },
-    select: { id: true, name: true, timezone: true, shiftStartDefault: true, lateThresholdMinutes: true, breakStart: true, breakEnd: true, workingDaysPerWeek: true, workingHoursPerDay: true, absentFineAmount: true },
+    select: { id: true, name: true, timezone: true, shiftStartDefault: true, lateThresholdMinutes: true, breakStart: true, breakEnd: true, workingDaysPerWeek: true, workingDays: true, workingHoursPerDay: true, absentFineAmount: true },
   })
   return new Map(orgs.map((o) => [o.id, o]))
 }

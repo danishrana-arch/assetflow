@@ -25,6 +25,19 @@ const PRESETS = [
   { label: "Slate", value: "#0F172A" },
 ]
 
+// Monday-first, values = JS/UTC weekday numbers stored in Organization.workingDays.
+const WEEKDAYS = [[1, "Mon", "Monday"], [2, "Tue", "Tuesday"], [3, "Wed", "Wednesday"], [4, "Thu", "Thursday"], [5, "Fri", "Friday"], [6, "Sat", "Saturday"], [0, "Sun", "Sunday"]]
+
+function parseWorkingDays(organization) {
+  const raw = organization?.workingDays
+  if (typeof raw === "string" && raw.trim()) {
+    const days = raw.split(",").map(Number).filter((n) => Number.isInteger(n) && n >= 0 && n <= 6)
+    if (days.length) return days
+  }
+  const n = Number(organization?.workingDaysPerWeek ?? 5)
+  return n >= 7 ? [0, 1, 2, 3, 4, 5, 6] : Array.from({ length: Math.max(1, n) }, (_, i) => i + 1)
+}
+
 export default function Settings() {
   const { user, organizations, refreshUser, switchOrganization } = useAuth()
   const isCeo = user?.role === "CEO"
@@ -36,7 +49,8 @@ export default function Settings() {
   const [payrollBankName, setPayrollBankName] = useState("")
   const [payrollAccountNumber, setPayrollAccountNumber] = useState("")
   const [workingHoursPerDay, setWorkingHoursPerDay] = useState(8)
-  const [workingDaysPerWeek, setWorkingDaysPerWeek] = useState(5)
+  // Working weekdays, 0 Sunday … 6 Saturday (Organization.workingDays).
+  const [workingDays, setWorkingDays] = useState([1, 2, 3, 4, 5])
   const [shiftStartDefault, setShiftStartDefault] = useState("09:00")
   const [lateThresholdMinutes, setLateThresholdMinutes] = useState(15)
   const [shiftEndDefault, setShiftEndDefault] = useState("18:00")
@@ -70,7 +84,7 @@ export default function Settings() {
       setPayrollBankName(organization.payrollBankName || "")
       setPayrollAccountNumber(organization.payrollAccountNumber || "")
       setWorkingHoursPerDay(organization.workingHoursPerDay ?? 8)
-      setWorkingDaysPerWeek(organization.workingDaysPerWeek ?? 5)
+      setWorkingDays(parseWorkingDays(organization))
       setShiftStartDefault(organization.shiftStartDefault || "09:00")
       setShiftEndDefault(organization.shiftEndDefault || "18:00")
       setLateThresholdMinutes(organization.lateThresholdMinutes ?? 15)
@@ -125,7 +139,7 @@ export default function Settings() {
   })
 
   const saveWorkSchedule = useMutation({
-    mutationFn: () => api.patch("/organization", { workingHoursPerDay, workingDaysPerWeek, shiftStartDefault, shiftEndDefault, lateThresholdMinutes, timezone, breakStart: breakStart || null, breakEnd: breakEnd || null }),
+    mutationFn: () => api.patch("/organization", { workingHoursPerDay, workingDays, shiftStartDefault, shiftEndDefault, lateThresholdMinutes, timezone, breakStart: breakStart || null, breakEnd: breakEnd || null }),
     onSuccess: () => {
       setScheduleError("")
       queryClient.invalidateQueries({ queryKey: ["organization"] })
@@ -434,9 +448,35 @@ export default function Settings() {
           <div className="card min-w-0 p-6">
             <SectionHeader title="Work Schedule & Time Zone" />
             <p className="mb-4 text-xs text-muted">
-              These values drive automatic attendance calculations. The standard 5-day week is Monday through Friday.
+              These values drive attendance, leave and payroll. Days that aren't working days (e.g. the weekend) are never counted as leave or absent.
             </p>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted">Working days</p>
+              <div className="grid grid-cols-7 gap-1.5" role="group" aria-label="Working days">
+                {WEEKDAYS.map(([day, short, long]) => {
+                  const on = workingDays.includes(day)
+                  return (
+                    <button
+                      key={day}
+                      type="button"
+                      aria-pressed={on}
+                      title={`${long}: ${on ? "working day" : "day off"}`}
+                      onClick={() => setWorkingDays((d) => (on ? d.filter((x) => x !== day) : [...d, day].sort((a, b) => a - b)))}
+                      className={`flex flex-col items-center rounded-xl border px-1 py-2 text-xs font-semibold transition-colors ${on ? "border-accent bg-accent text-on-accent" : "border-border-strong bg-surface text-muted hover:text-ink"}`}
+                    >
+                      {short}
+                      <span className={`mt-0.5 text-[9px] font-medium ${on ? "opacity-80" : "text-muted-2"}`}>{on ? "Work" : "Off"}</span>
+                    </button>
+                  )
+                })}
+              </div>
+              <p className={`mt-1.5 text-[11px] ${workingDays.length ? "text-muted-2" : "text-chip-pink-fg"}`}>
+                {workingDays.length
+                  ? `${workingDays.length} working day${workingDays.length === 1 ? "" : "s"} a week · off: ${WEEKDAYS.filter(([d]) => !workingDays.includes(d)).map(([, , l]) => l).join(", ") || "none"}. A weekend inside a leave isn't counted as leave.`
+                  : "Pick at least one working day."}
+              </p>
+            </div>
+            <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
               <TextField
                 label="Working hours / day"
                 type="number"
@@ -445,15 +485,6 @@ export default function Settings() {
                 step="0.5"
                 value={workingHoursPerDay}
                 onChange={(e) => setWorkingHoursPerDay(e.target.value)}
-              />
-              <TextField
-                label="Working days / week"
-                type="number"
-                min={1}
-                max={7}
-                step="1"
-                value={workingDaysPerWeek}
-                onChange={(e) => setWorkingDaysPerWeek(e.target.value)}
               />
             </div>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 mt-4">
@@ -503,11 +534,11 @@ export default function Settings() {
               </div>
             </div>
             <p className="mt-2 text-xs text-muted-2">
-              Expected weekly time: {(Number(workingHoursPerDay || 0) * Number(workingDaysPerWeek || 0)).toFixed(1)} hours.
+              Expected weekly time: {(Number(workingHoursPerDay || 0) * workingDays.length).toFixed(1)} hours.
             </p>
             <button
               onClick={() => saveWorkSchedule.mutate()}
-              disabled={saveWorkSchedule.isPending}
+              disabled={saveWorkSchedule.isPending || workingDays.length === 0}
               className="pill-accent mt-4 px-5 py-2.5 text-sm disabled:opacity-60"
             >
               {saveWorkSchedule.isPending ? "Saving…" : "Save work schedule"}

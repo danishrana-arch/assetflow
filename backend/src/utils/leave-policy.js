@@ -1,5 +1,6 @@
 const prisma = require("../lib/prisma")
 const { toDateOnly } = require("./date")
+const { isScheduledWorkday } = require("./work-schedule")
 const { activeLateRules, monthlyLateCounts, yearLatePenalties } = require("./late-rules")
 
 // Pro-rata leave policy.
@@ -92,16 +93,20 @@ function typeLimit(allowances, type, employee, year) {
   return Math.max(0, round2(pool - prorate(allowances.SICK) - prorate(allowances.CASUAL)))
 }
 
-async function holidaySet(organizationId, start, end) {
+// Days that don't count as leave: company holidays and, when `org` is given,
+// the company's non-working weekdays (e.g. a weekend inside a leave).
+async function holidaySet(organizationId, start, end, org) {
   const holidays = await prisma.holiday.findMany({
     where: { organizationId, date: { gte: start, lte: end } },
     select: { date: true },
   })
-  return new Set(holidays.map((h) => dayKey(h.date)))
+  const set = new Set(holidays.map((h) => dayKey(h.date)))
+  if (!org) return set
+  return { has: (key) => set.has(key) || !isScheduledWorkday(new Date(`${key}T00:00:00Z`), org) }
 }
 
 // Chargeable leave days per month of `year` ([0] unused, [1..12]) for the
-// given leaves — holidays skipped, half day = 0.5.
+// given leaves — holidays and non-working days skipped, half day = 0.5.
 function daysByMonth(leaves, year, holidays) {
   const months = new Array(13).fill(0)
   for (const leave of leaves) {
@@ -151,7 +156,7 @@ async function latePenaltiesForYear({ organizationId, employee, org, year, paidB
   if (!lateByMonth.some((n) => n > 0)) return { months: empty, rules }
   if (!paidByMonth || annualUsed === undefined) {
     const { start, end } = yearBounds(year)
-    const [leaves, holidays] = await Promise.all([activeLeavesInYear(employee.id, year), holidaySet(organizationId, start, end)])
+    const [leaves, holidays] = await Promise.all([activeLeavesInYear(employee.id, year), holidaySet(organizationId, start, end, org)])
     const paid = leaves.filter(isPaidLeave)
     paidByMonth = daysByMonth(paid, year, holidays)
     annualUsed = sum(daysByMonth(paid.filter((l) => l.type === "ANNUAL"), year, holidays))
@@ -174,7 +179,7 @@ async function latePenaltiesForYear({ organizationId, employee, org, year, paidB
 // sickLeaveAllowance, casualLeaveAllowance.
 async function leaveSchedule({ organizationId, employee, org, year, todayKey }) {
   const { start, end } = yearBounds(year)
-  const [leaves, holidays] = await Promise.all([activeLeavesInYear(employee.id, year), holidaySet(organizationId, start, end)])
+  const [leaves, holidays] = await Promise.all([activeLeavesInYear(employee.id, year), holidaySet(organizationId, start, end, org)])
   const allowances = leaveAllowances(org)
   const paid = leaves.filter(isPaidLeave)
   const perMonth = daysByMonth(paid, year, holidays)
@@ -271,7 +276,7 @@ async function validateLeaveRequest({ organizationId, employee, org, start, end,
   let requestedTotal = 0
   for (let year = start.getUTCFullYear(); year <= end.getUTCFullYear(); year++) {
     const { start: ys, end: ye } = yearBounds(year)
-    const [existing, holidays] = await Promise.all([activeLeavesInYear(employee.id, year), holidaySet(organizationId, ys, ye)])
+    const [existing, holidays] = await Promise.all([activeLeavesInYear(employee.id, year), holidaySet(organizationId, ys, ye, org)])
     const requested = daysByMonth([request], year, holidays)
     const requestedYear = sum(requested)
     requestedTotal += requestedYear
@@ -319,7 +324,7 @@ async function validateLeaveRequest({ organizationId, employee, org, start, end,
       }
     }
   }
-  if (requestedTotal === 0) return { status: 400, error: "These dates are all company holidays — there's nothing to request." }
+  if (requestedTotal === 0) return { status: 400, error: "These dates are all company holidays or days off — there's nothing to request." }
   return null
 }
 

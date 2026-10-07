@@ -43,6 +43,10 @@ model Organization {
   payrollBankName           String?
   workingHoursPerDay        Decimal                   @default(8) @db.Decimal(4, 2)
   workingDaysPerWeek        Int                       @default(5)
+  // Which weekdays are worked, as UTC weekday numbers (0 Sun … 6 Sat),
+  // comma-separated, e.g. "1,2,3,4,5" = Mon–Fri. workingDaysPerWeek is
+  // kept equal to the count. See utils/work-schedule.js.
+  workingDays               String                    @default("1,2,3,4,5")
   companyId                 String?
   parentOrganizationId      String?
   // DEPRECATED — superseded by hierarchyRole (migrated to PARENT); kept so no

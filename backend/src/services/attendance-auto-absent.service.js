@@ -106,7 +106,7 @@ async function markUncheckedInEmployeesAbsent() {
         shiftStartDefault: true,
         shiftEndDefault: true,
         workingHoursPerDay: true,
-        workingDaysPerWeek: true,
+        workingDaysPerWeek: true, workingDays: true,
       },
     })
 

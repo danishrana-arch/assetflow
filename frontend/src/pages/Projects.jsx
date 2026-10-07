@@ -22,6 +22,7 @@ import api from "../api/client"
 import PageHeader from "../components/ui/PageHeader"
 import Avatar from "../components/ui/Avatar"
 import Tasks from "./Tasks"
+import { DateInput } from "../components/ui/DatePicker"
 
 const TASK_STATUS = { TODO: "To do", IN_PROGRESS: "In progress", BLOCKED: "Blocked", DONE: "Done" }
 
@@ -219,7 +220,7 @@ function ProjectDetails({ project, onClose, onRefresh, onDeleted, canEdit = true
           <div className="card p-5">
             <div className="grid gap-4 md:grid-cols-2">
               <label><span className="text-xs font-medium text-muted">Project status</span><select disabled={!canEdit} value={status} onChange={e => setStatus(e.target.value)} className="field mt-1 w-full text-xs">{Object.entries(STATUS).map(([value, meta]) => <option key={value} value={value}>{meta.label}</option>)}</select></label>
-              <label><span className="text-xs font-medium text-muted">Deadline</span><input disabled={!canEdit} type="date" value={newDeadline} onChange={e => setNewDeadline(e.target.value)} className="field mt-1 w-full text-xs" /></label>
+              <label><span className="text-xs font-medium text-muted">Deadline</span><DateInput disabled={!canEdit} value={newDeadline} onChange={e => setNewDeadline(e.target.value)} className="field mt-1 w-full text-xs" /></label>
               <label className="md:col-span-2"><span className="text-xs font-medium text-muted">Project link {status === "COMPLETED" ? "(required)" : "(optional)"}</span><input value={projectUrl} onChange={e => setProjectUrl(e.target.value)} className="field mt-1 w-full text-xs" placeholder="https://..." /></label>
             </div>
 
@@ -319,7 +320,7 @@ function DeadlineModal({ project, onClose, onCompleted, onExtended }) {
         <h3 className="mt-5 text-lg font-semibold text-ink">Project deadline reached</h3>
         <p className="mt-2 text-sm leading-6 text-muted"><strong className="text-ink">{project.name}</strong> has reached its deadline. Mark it completed or extend the deadline.</p>
         <label className="mt-5 block"><span className="text-xs font-medium text-muted">Project link {project.projectUrl ? "" : "(required to complete)"}</span><input value={link} onChange={e => setLink(e.target.value)} className="field mt-1 w-full" placeholder="https://..." /></label>
-        <div className="mt-4"><label className="text-xs font-medium text-muted">New deadline</label><input type="date" value={date} min={new Date().toISOString().slice(0, 10)} onChange={e => setDate(e.target.value)} className="field mt-1 w-full" /></div>
+        <div className="mt-4"><label className="text-xs font-medium text-muted">New deadline</label><DateInput value={date} min={new Date().toISOString().slice(0, 10)} onChange={e => setDate(e.target.value)} className="field mt-1 w-full" /></div>
         <div className="mt-6 grid grid-cols-2 gap-3">
           <button onClick={() => canComplete && mutation.mutate({ status: "COMPLETED", deadline: project.deadline, projectUrl: link.trim() })} disabled={!canComplete || mutation.isPending} className="rounded-2xl bg-emerald-500/10 px-4 py-2.5 text-xs font-semibold text-emerald-700 dark:text-emerald-300 disabled:opacity-50">Yes, complete it</button>
           <button onClick={() => date && mutation.mutate({ status: project.status, deadline: date, projectUrl: link.trim() || null })} disabled={!date || mutation.isPending} className="pill-accent px-4 py-2.5 text-xs disabled:opacity-50">Increase deadline</button>
@@ -373,7 +374,7 @@ function CreateProjectModal({ onClose, onCreated }) {
               <div className="mt-3 grid gap-4 sm:grid-cols-2">
                 <label className="sm:col-span-2"><span className="text-xs font-medium text-muted">Project name</span><input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className="field mt-1 w-full" placeholder="Website redesign" /></label>
                 <label><span className="text-xs font-medium text-muted">Client</span><input value={form.clientName} onChange={e => setForm({ ...form, clientName: e.target.value })} className="field mt-1 w-full" placeholder="Client name" /></label>
-                <label><span className="text-xs font-medium text-muted">Deadline</span><input type="date" value={form.deadline} onChange={e => setForm({ ...form, deadline: e.target.value })} className="field mt-1 w-full" /></label>
+                <label><span className="text-xs font-medium text-muted">Deadline</span><DateInput value={form.deadline} onChange={e => setForm({ ...form, deadline: e.target.value })} className="field mt-1 w-full" /></label>
                 <label className="sm:col-span-2"><span className="text-xs font-medium text-muted">Project link {form.status === "COMPLETED" ? "(required)" : "(optional)"}</span><input value={form.projectUrl} onChange={e => setForm({ ...form, projectUrl: e.target.value })} className="field mt-1 w-full" placeholder="https://..." /></label>
                 <label className="sm:col-span-2"><span className="text-xs font-medium text-muted">Status</span><select value={form.status} onChange={e => setForm({ ...form, status: e.target.value })} className="field mt-1 w-full">{Object.entries(STATUS).map(([value, meta]) => <option key={value} value={value}>{meta.label}</option>)}</select></label>
               </div>

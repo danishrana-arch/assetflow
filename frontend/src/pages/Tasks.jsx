@@ -8,6 +8,7 @@ import Avatar from "../components/ui/Avatar"
 import { hasModuleAccess } from "../utils/roles"
 import { useAuth } from "../context/AuthContext"
 import useMarkNotificationsRead from "../hooks/useMarkNotificationsRead"
+import { DateInput } from "../components/ui/DatePicker"
 
 const STATUSES = { TODO: "To do", IN_PROGRESS: "In progress", BLOCKED: "Blocked", DONE: "Done" }
 const PRIORITIES = { LOW: "Low", MEDIUM: "Medium", HIGH: "High", URGENT: "Urgent" }
@@ -53,7 +54,7 @@ export default function Tasks({ embedded = false }) {
       <label className="sm:col-span-2"><span className="text-xs font-semibold text-muted">Description</span><textarea className="field mt-1 w-full" rows="3" value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></label>
       <label><span className="text-xs font-semibold text-muted">Assignee</span><select className="field mt-1 w-full" value={form.assignedToId} onChange={e=>setForm({...form,assignedToId:e.target.value})}><option value="">Unassigned</option>{employees.filter(e=>e.status!=="LEFT_COMPANY").map(e=><option key={e.id} value={e.id}>{e.name}</option>)}</select></label>
       <label><span className="text-xs font-semibold text-muted">Priority</span><select className="field mt-1 w-full" value={form.priority} onChange={e=>setForm({...form,priority:e.target.value})}>{Object.entries(PRIORITIES).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select></label>
-      <label><span className="text-xs font-semibold text-muted">Due date</span><input type="date" className="field mt-1 w-full" value={form.dueDate} onChange={e=>setForm({...form,dueDate:e.target.value})}/></label>
+      <label><span className="text-xs font-semibold text-muted">Due date</span><DateInput className="field mt-1 w-full" value={form.dueDate} onChange={e=>setForm({...form,dueDate:e.target.value})}/></label>
       <label><span className="text-xs font-semibold text-muted">Estimated hours</span><input type="number" min="0" step="0.25" className="field mt-1 w-full" value={form.estimatedHours} onChange={e=>setForm({...form,estimatedHours:e.target.value})}/></label>
       <div className="sm:col-span-2 flex justify-end"><button disabled={create.isPending} className="pill-accent px-5 py-2.5 text-sm">{create.isPending ? "Creating…" : "Create task"}</button></div>
       {formError && <p className="sm:col-span-2 text-xs text-danger">{formError}</p>}
@@ -69,7 +70,7 @@ export default function Tasks({ embedded = false }) {
           <label className="sm:col-span-2"><span className="text-xs font-semibold text-muted">Project (optional)</span><select className="field mt-1 w-full" value={editForm.projectId} onChange={e=>setEditForm({...editForm,projectId:e.target.value})}><option value="">No project assign directly</option>{projects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
           <label><span className="text-xs font-semibold text-muted">Assignee</span><select className="field mt-1 w-full" value={editForm.assignedToId} onChange={e=>setEditForm({...editForm,assignedToId:e.target.value})}><option value="">Unassigned</option>{employees.filter(e=>e.status!=="LEFT_COMPANY").map(e=><option key={e.id} value={e.id}>{e.name}</option>)}</select></label>
           <label><span className="text-xs font-semibold text-muted">Priority</span><select className="field mt-1 w-full" value={editForm.priority} onChange={e=>setEditForm({...editForm,priority:e.target.value})}>{Object.entries(PRIORITIES).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select></label>
-          <label><span className="text-xs font-semibold text-muted">Due date</span><input type="date" className="field mt-1 w-full" value={editForm.dueDate} onChange={e=>setEditForm({...editForm,dueDate:e.target.value})}/></label>
+          <label><span className="text-xs font-semibold text-muted">Due date</span><DateInput className="field mt-1 w-full" value={editForm.dueDate} onChange={e=>setEditForm({...editForm,dueDate:e.target.value})}/></label>
           <label><span className="text-xs font-semibold text-muted">Estimated hours</span><input type="number" min="0" step="0.25" className="field mt-1 w-full" value={editForm.estimatedHours} onChange={e=>setEditForm({...editForm,estimatedHours:e.target.value})}/></label>
           <label className="sm:col-span-2"><span className="text-xs font-semibold text-muted">Actual hours</span><input type="number" min="0" step="0.25" className="field mt-1 w-full" value={editForm.actualHours} onChange={e=>setEditForm({...editForm,actualHours:e.target.value})}/></label>
           <div className="sm:col-span-2 flex justify-end gap-2"><button type="button" onClick={cancelEdit} className="rounded-2xl bg-surface-2 px-4 py-2.5 text-xs">Cancel</button><button disabled={saveEdit.isPending} className="pill-accent px-5 py-2.5 text-sm">{saveEdit.isPending?"Saving…":"Save changes"}</button></div>

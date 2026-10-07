@@ -29,7 +29,7 @@ const ENGINE_ORG_SELECT = {
   shiftStartDefault: true,
   shiftEndDefault: true,
   workingHoursPerDay: true,
-  workingDaysPerWeek: true,
+  workingDaysPerWeek: true, workingDays: true,
   breakStart: true,
   breakEnd: true,
   lateThresholdMinutes: true,

@@ -1,4 +1,5 @@
 import { useId } from "react"
+import { DateInput } from "./DatePicker"
 
 export function TextField({ label, hint, error, className = "", id, ...props }) {
   const generatedId = useId()
@@ -10,7 +11,11 @@ export function TextField({ label, hint, error, className = "", id, ...props }) 
           {label}
         </label>
       )}
-      <input id={fieldId} className="field" {...props} />
+      {props.type === "date" ? (
+        <DateInput id={fieldId} {...props} />
+      ) : (
+        <input id={fieldId} className="field" {...props} />
+      )}
       {error && <p className="mt-1 text-xs text-danger">{error}</p>}
       {hint && !error && <p className="mt-1 text-xs text-muted-2">{hint}</p>}
     </div>

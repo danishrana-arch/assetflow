@@ -6,6 +6,7 @@ const { notifyManagement, createNotification } = require("../utils/notifications
 const { dateKeyInTimeZone } = require("../utils/timezone")
 const { validateLeaveRequest, leaveSchedule, leaveAllowances, NOT_PERMANENT_MESSAGE, PENDING_LEAVE_STATUSES } = require("../utils/leave-policy")
 const { refreshDraftPayslip } = require("./payroll.controller")
+const { isScheduledWorkday } = require("../utils/work-schedule")
 
 function eachDate(start, end) {
   const days = []
@@ -25,15 +26,20 @@ function dayCount(start, end) {
 const MAX_LEAVE_SPAN_DAYS = 60
 const LEAVE_TYPES = ["ANNUAL", "CASUAL", "SICK", "UNPAID"]
 
+// The days of a leave that actually count: working weekdays that aren't
+// company holidays (a weekend inside a leave isn't a leave day).
+async function leaveWorkdays(organizationId, start, end) {
+  const [holidays, org] = await Promise.all([
+    prisma.holiday.findMany({ where: { organizationId, date: { gte: start, lte: end } }, select: { date: true } }),
+    prisma.organization.findUnique({ where: { id: organizationId }, select: { workingDays: true, workingDaysPerWeek: true } }),
+  ])
+  const holidaySet = new Set(holidays.map((h) => h.date.toISOString().slice(0, 10)))
+  return eachDate(start, end).filter((d) => !holidaySet.has(d.toISOString().slice(0, 10)) && isScheduledWorkday(d, org))
+}
+
 async function chargeableDays(organizationId, start, end, isHalfDay) {
   if (isHalfDay) return 0.5
-  const holidays = await prisma.holiday.findMany({
-    where: { organizationId, date: { gte: start, lte: end } },
-    select: { date: true },
-  })
-  const holidaySet = new Set(holidays.map((h) => h.date.toISOString().slice(0, 10)))
-  const total = eachDate(start, end).filter((d) => !holidaySet.has(d.toISOString().slice(0, 10))).length
-  return total
+  return (await leaveWorkdays(organizationId, start, end)).length
 }
 
 async function findTeamLeaveConflict({ organizationId, employeeId, start, end, excludeLeaveId }) {
@@ -83,7 +89,7 @@ async function createLeave(req, res, next) {
     // be a switched-to org for ADMIN/CEO.
     const employee = await prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, organizationId: true, employmentStatus: true, permanentDate: true, joiningDate: true, startDate: true, organization: { select: { timezone: true, sickLeaveAllowance: true, casualLeaveAllowance: true, annualLeaveEntitlement: true } } },
+      select: { id: true, organizationId: true, employmentStatus: true, permanentDate: true, joiningDate: true, startDate: true, organization: { select: { timezone: true, sickLeaveAllowance: true, casualLeaveAllowance: true, annualLeaveEntitlement: true, workingDays: true, workingDaysPerWeek: true } } },
     })
     if (!employee) return res.status(404).json({ error: "User not found" })
     const organizationId = employee.organizationId
@@ -204,7 +210,19 @@ async function listLeaves(req, res, next) {
       isManagement ? hrIdsInOrganization(organizationId) : [],
     ])
 
-    res.json(leaves.map((leave) => ({ ...leave, canReview: isManagement && canReviewLeave({ leave, userId, role, hrIds }) })))
+    // days = working days the leave actually uses (weekends / holidays inside
+    // it don't count), per the leave's own organization.
+    const orgIds = [...new Set(leaves.map((l) => l.organizationId))]
+    const [orgs, holidays] = await Promise.all([
+      prisma.organization.findMany({ where: { id: { in: orgIds } }, select: { id: true, workingDays: true, workingDaysPerWeek: true } }),
+      prisma.holiday.findMany({ where: { organizationId: { in: orgIds } }, select: { organizationId: true, date: true } }),
+    ])
+    const orgById = new Map(orgs.map((o) => [o.id, o]))
+    const holidayKeys = new Set(holidays.map((h) => `${h.organizationId}|${h.date.toISOString().slice(0, 10)}`))
+    const workingDayCount = (l) =>
+      l.isHalfDay ? 0.5 : eachDate(l.startDate, l.endDate).filter((d) => !holidayKeys.has(`${l.organizationId}|${d.toISOString().slice(0, 10)}`) && isScheduledWorkday(d, orgById.get(l.organizationId))).length
+
+    res.json(leaves.map((leave) => ({ ...leave, days: workingDayCount(leave), canReview: isManagement && canReviewLeave({ leave, userId, role, hrIds }) })))
   } catch (err) {
     next(err)
   }
@@ -442,7 +460,8 @@ async function reviewLeave(req, res, next) {
       }
     }
     const markAbsent = payAs === "UNPAID" && leave.type !== "UNPAID"
-    const days = decision === "APPROVED" && !leave.isHalfDay ? eachDate(leave.startDate, leave.endDate) : []
+    // Only working days are marked (a weekend or holiday inside the leave isn't).
+    const days = decision === "APPROVED" && !leave.isHalfDay ? await leaveWorkdays(organizationId, leave.startDate, leave.endDate) : []
 
     const updated = await prisma.$transaction(async (tx) => {
       const saved = await tx.leaveApplication.update({

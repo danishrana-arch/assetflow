@@ -20,6 +20,22 @@ function daysInMonthOverlap(start, end, monthStart, monthEnd) {
   return Math.round((to - from) / 86400000) + 1
 }
 
+// Working days (company weekdays, holidays excluded) of a leave that fall
+// inside the month — a weekend inside an unpaid leave isn't charged.
+async function workdaysInMonthOverlap(employeeId, start, end, monthStart, monthEnd) {
+  const from = start < monthStart ? monthStart : start
+  const to = end < monthEnd ? end : new Date(monthEnd.getTime() - 86400000)
+  if (to < from) return 0
+  const emp = await prisma.user.findUnique({ where: { id: employeeId }, select: { organizationId: true, organization: { select: { workingDays: true, workingDaysPerWeek: true } } } })
+  const holidays = await prisma.holiday.findMany({ where: { organizationId: emp?.organizationId, date: { gte: from, lte: to } }, select: { date: true } })
+  const holidayKeys = new Set(holidays.map((h) => h.date.toISOString().slice(0, 10)))
+  let n = 0
+  for (let d = new Date(from); d <= to; d.setUTCDate(d.getUTCDate() + 1)) {
+    if (!holidayKeys.has(d.toISOString().slice(0, 10)) && isScheduledWorkday(d, emp?.organization)) n += 1
+  }
+  return n
+}
+
 // POST /api/payroll/generate  { month, year }
 // Creates one DRAFT record per ACTIVE employee with a baseSalary set, for
 // employees who don't already have a record for that month; an existing
@@ -86,7 +102,7 @@ async function computeAttendanceLines({ employeeId, base, month, year, lateRate 
     if (leave.isHalfDay) {
       halfUnpaidDays += 1 // half-day leave is always a single day by definition
     } else {
-      fullUnpaidDays += daysInMonthOverlap(leave.startDate, leave.endDate, monthStart, monthEnd)
+      fullUnpaidDays += await workdaysInMonthOverlap(employeeId, leave.startDate, leave.endDate, monthStart, monthEnd)
     }
   }
 
@@ -95,7 +111,7 @@ async function computeAttendanceLines({ employeeId, base, month, year, lateRate 
     where: { id: employeeId },
     select: {
       id: true, organizationId: true, joiningDate: true, startDate: true, employmentStatus: true, permanentDate: true,
-      organization: { select: { absentFineAmount: true, halfDayDeductionPercent: true, annualLeaveEntitlement: true, sickLeaveAllowance: true, casualLeaveAllowance: true } },
+      organization: { select: { absentFineAmount: true, halfDayDeductionPercent: true, annualLeaveEntitlement: true, sickLeaveAllowance: true, casualLeaveAllowance: true, workingDays: true, workingDaysPerWeek: true } },
     },
   })
   const perDay = toNumber(employee?.organization?.absentFineAmount)
@@ -267,7 +283,7 @@ async function previewPayroll(req, res, next) {
     const monthEnd = new Date(Date.UTC(year, month, 1)) // exclusive
     const organization = await prisma.organization.findUnique({
       where: { id: organizationId },
-      select: { lateDeductionAmount: true, workingDaysPerWeek: true, timezone: true },
+      select: { lateDeductionAmount: true, workingDaysPerWeek: true, workingDays: true, timezone: true },
     })
     const lateRate = toNumber(organization?.lateDeductionAmount) || 500
     const todayKey = dateKeyInTimeZone(new Date(), organization?.timezone || "UTC")
@@ -327,7 +343,9 @@ async function previewPayroll(req, res, next) {
     const paidLeaveByEmployee = new Map()
     for (const l of approvedLeaves) {
       if (l.type === "UNPAID" || l.payAs === "UNPAID") continue // unpaid: computeAttendanceLines / ABSENT days
-      const days = l.isHalfDay ? 0.5 : daysInMonthOverlap(l.startDate, l.endDate, monthStart, monthEnd)
+      const startKey = l.startDate.toISOString().slice(0, 10)
+      const endKey = l.endDate.toISOString().slice(0, 10)
+      const days = l.isHalfDay ? 0.5 : workdayKeys.filter((k) => k >= startKey && k <= endKey).length
       paidLeaveByEmployee.set(l.employeeId, (paidLeaveByEmployee.get(l.employeeId) || 0) + days)
     }
 

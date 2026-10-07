@@ -3014,3 +3014,44 @@ the 2026-10-05 employee-details/leave section.
   "Unpaid · absent" on the employee's own leave.
 - Verified: backend loads, frontend build passes. Not exercised against the
   DB (migration pending).
+
+## Post-module addition: working weekdays + app-wide calendar picker (2026-10-07)
+
+- **Working days**: `Organization.workingDays` ("1,2,3,4,5" = UTC weekday
+  numbers, 0 Sun … 6 Sat); `workingDaysPerWeek` kept = the count. Migration
+  `20261007130000_organization_working_days` back-fills from the old count
+  (first N days from Monday; 7 = every day) — **not yet deployed** at the
+  time of writing; JS client regenerated. `utils/work-schedule.js`:
+  `workingDaySet` / `isScheduledWorkday` read it (fallback to the count for
+  org objects without it), `normalizeWorkingDays`. Every org select that had
+  `workingDaysPerWeek` also selects `workingDays` (attendance, engine,
+  auto-absent, HR report, payroll). `PATCH /organization` takes
+  `workingDays` (array/"1,3"; ≥ 1 day) — legacy `workingDaysPerWeek` still
+  accepted. Settings → Work Schedule: 7 Mon…Sun toggles (replaces the
+  "Working days / week" number).
+- **Leave counts working days only**: `leave-policy.js` `holidaySet(…, org)`
+  also skips non-working weekdays (balance, validation, late-rule cover);
+  `leave.controller.js` `leaveWorkdays()` — `chargeableDays` and approval
+  marking (LEAVE / unpaid ABSENT) only touch working, non-holiday days, so a
+  weekend inside a leave is neither counted nor marked; `GET /leaves` rows
+  carry `days` (working days; Leave Requests shows it). Payroll: unpaid-leave
+  days (`workdaysInMonthOverlap`) and the preview's paid-leave days count
+  working days only.
+- **Calendar**: `components/ui/DatePicker.jsx` — `DateInput` (drop-in for
+  `<input type="date">`: value "YYYY-MM-DD", event-like onChange, min/max,
+  required via a hidden input, Today / Clear / Cancel, `renderTrigger` for a
+  custom button) and `DateRangeInput` ({from,to}; "Select For" presets
+  Today / This Week / Last 7 days / This Month / Last 30 days / Last Month /
+  Last 3 / 6 Months; range highlight with hover preview; Range line +
+  Cancel / Apply). Monday-first, month arrows, year dropdown → year grid,
+  today ringed; portaled popover that stops mousedown so dropdowns/modals
+  around it stay open. `TextField type="date"` renders it automatically;
+  every raw `<input type="date">` was converted. Ranges: Attendance export,
+  Site Attendance history, Dashboard inventory activity (pill trigger);
+  Attendance day navigator uses `renderTrigger`. HR report keeps separate
+  from/to fields (types where only one is used). Not converted: the
+  Performance page's `type="month"` input.
+- Verified: working-day unit checks, backend loads, frontend build passes;
+  calendar rendered in a standalone bundle with the app CSS (range presets,
+  Apply, year grid, no console errors). Not exercised in the live app
+  (migrations pending).

@@ -27,8 +27,11 @@ function fmt(dateStr) {
 
 // Calendar days in the request (half-day = 0.5). The balance endpoint counts
 // chargeable days (skipping weekends/holidays), so this is an upper bound.
+// Working days the leave uses (server-counted: weekends / holidays inside it
+// don't count); older responses without it fall back to calendar days.
 function requestDays(leave) {
   if (leave.isHalfDay) return 0.5
+  if (typeof leave.days === "number") return leave.days
   return Math.round((new Date(leave.endDate) - new Date(leave.startDate)) / 86400000) + 1
 }
 

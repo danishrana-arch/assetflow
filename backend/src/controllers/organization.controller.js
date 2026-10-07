@@ -1,4 +1,5 @@
 const prisma = require("../lib/prisma")
+const { normalizeWorkingDays } = require("../utils/work-schedule")
 const { DEFAULT_LATE_RULE } = require("../utils/late-rules")
 const { logAudit } = require("../utils/audit")
 const { encryptField, decryptField } = require("../utils/crypto")
@@ -127,7 +128,7 @@ async function updateOrganization(req, res, next) {
       name, logoUrl, primaryColor, accentColor, theme,
       sickLeaveAllowance, casualLeaveAllowance, annualLeaveEntitlement,
       payrollBankName, payrollAccountNumber, lateDeductionAmount,
-      workingHoursPerDay, workingDaysPerWeek,
+      workingHoursPerDay, workingDaysPerWeek, workingDays,
       shiftStartDefault, shiftEndDefault, lateThresholdMinutes,
       timezone, breakStart, breakEnd,
       geofenceEnabled, officeLatitude, officeLongitude, geofenceRadiusMeters,
@@ -217,12 +218,19 @@ async function updateOrganization(req, res, next) {
       }
     }
 
-    if (workingDaysPerWeek !== undefined) {
+    let workingDaysListUpdate
+    if (workingDays !== undefined) {
+      const normalized = normalizeWorkingDays(workingDays)
+      if (!normalized) return res.status(400).json({ error: "Pick at least one working day" })
+      workingDaysListUpdate = normalized
+      workingDaysUpdate = normalized.split(",").length
+    } else if (workingDaysPerWeek !== undefined) {
       const n = Number(workingDaysPerWeek)
       if (!Number.isInteger(n) || n < 1 || n > 7) {
         return res.status(400).json({ error: "workingDaysPerWeek must be an integer between 1 and 7" })
       }
       workingDaysUpdate = n
+      workingDaysListUpdate = n >= 7 ? "0,1,2,3,4,5,6" : Array.from({ length: n }, (_, i) => i + 1).join(",")
     }
     if (lateDeductionAmount !== undefined) {
       const n = Number(lateDeductionAmount)
@@ -274,6 +282,7 @@ async function updateOrganization(req, res, next) {
         ...(lateDeductionUpdate !== undefined ? { lateDeductionAmount: lateDeductionUpdate } : {}),
         ...(workingHoursUpdate !== undefined ? { workingHoursPerDay: workingHoursUpdate } : {}),
         ...(workingDaysUpdate !== undefined ? { workingDaysPerWeek: workingDaysUpdate } : {}),
+        ...(workingDaysListUpdate !== undefined ? { workingDays: workingDaysListUpdate } : {}),
         ...(shiftStartDefault !== undefined ? { shiftStartDefault } : {}),
         ...(shiftEndDefault !== undefined ? { shiftEndDefault } : {}),
         ...(lateThresholdMinutes !== undefined ? { lateThresholdMinutes: Number(lateThresholdMinutes) } : {}),

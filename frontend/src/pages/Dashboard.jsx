@@ -28,6 +28,7 @@ import IconChip from "../components/ui/IconChip"
 import SectionHeader from "../components/ui/SectionHeader"
 import DashboardClock, { DashboardSky, greetingFor, useOrgClock } from "../components/DashboardClock"
 import { groupLeaveEvents, eventDateLabel } from "../utils/calendarEvents"
+import { DateInput, DateRangeInput } from "../components/ui/DatePicker"
 
 
 /* ============================================================
@@ -820,46 +821,25 @@ export default function Dashboard() {
                   Repair
                 </span>
 
-                <div className="flex min-w-0 max-w-full items-center gap-1 rounded-full border border-border-strong px-2 py-1">
-
-                  <input
-                    type="date"
-                    value={range.start}
-                    max={range.end}
-                    onChange={(e) =>
-                      setRange((r) => ({
-                        ...r,
-                        start:
-                          e.target.value,
-                      }))
-                    }
-                    className="w-[105px] min-w-0 bg-transparent text-[10px] font-medium text-ink outline-none sm:w-[120px] sm:text-[11px]"
-                    aria-label="From date"
-                  />
-
-                  <span className="shrink-0 text-muted-2">
-                    –
-                  </span>
-
-                  <input
-                    type="date"
-                    value={range.end}
-                    min={range.start}
-                    max={new Date()
-                      .toISOString()
-                      .slice(0, 10)}
-                    onChange={(e) =>
-                      setRange((r) => ({
-                        ...r,
-                        end:
-                          e.target.value,
-                      }))
-                    }
-                    className="w-[105px] min-w-0 bg-transparent text-[10px] font-medium text-ink outline-none sm:w-[120px] sm:text-[11px]"
-                    aria-label="To date"
-                  />
-
-                </div>
+                <DateRangeInput
+                  from={range.start}
+                  to={range.end}
+                  max={new Date().toISOString().slice(0, 10)}
+                  onChange={({ from, to }) => setRange((r) => ({ ...r, start: from, end: to }))}
+                  renderTrigger={({ ref, onClick, open, text }) => (
+                    <button
+                      ref={ref}
+                      type="button"
+                      onClick={onClick}
+                      aria-expanded={open}
+                      aria-label="Inventory activity date range"
+                      className="flex min-w-0 max-w-full items-center gap-1.5 rounded-full border border-border-strong px-3 py-1.5 text-[10px] font-medium text-ink hover:bg-surface-2 sm:text-[11px]"
+                    >
+                      <CalendarDays size={13} className="shrink-0 text-muted" />
+                      <span className="truncate">{text || "Select dates"}</span>
+                    </button>
+                  )}
+                />
 
               </div>
             }
@@ -1078,7 +1058,7 @@ export default function Dashboard() {
           {showEventForm && isManager && (
             <form onSubmit={(e) => { e.preventDefault(); if (eventForm.title.trim() && eventForm.date) createEvent.mutate() }} className="mt-4 grid grid-cols-1 gap-2 rounded-2xl border border-border bg-surface-2 p-3 sm:grid-cols-2">
               <input className="field min-w-0" placeholder="Event title" value={eventForm.title} onChange={(e) => setEventForm((v) => ({ ...v, title: e.target.value }))} required />
-              <input className="field min-w-0" type="date" value={eventForm.date} onChange={(e) => setEventForm((v) => ({ ...v, date: e.target.value }))} required />
+              <DateInput className="field min-w-0" value={eventForm.date} onChange={(e) => setEventForm((v) => ({ ...v, date: e.target.value }))} required />
               <input className="field min-w-0 sm:col-span-2" placeholder="Details (optional)" value={eventForm.description} onChange={(e) => setEventForm((v) => ({ ...v, description: e.target.value }))} />
               <label className="flex items-center gap-2 text-xs text-muted"><input type="checkbox" checked={eventForm.isAnnual} onChange={(e) => setEventForm((v) => ({ ...v, isAnnual: e.target.checked }))} /> Repeat every year</label>
               <div className="flex justify-start sm:justify-end"><button type="submit" disabled={createEvent.isPending} className="pill-accent px-4 py-2 text-xs">{createEvent.isPending ? 'Saving…' : 'Save event'}</button></div>

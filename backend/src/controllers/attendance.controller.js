@@ -57,7 +57,7 @@ async function getDailyAttendance(req, res, next) {
         where: { id: organizationId },
         select: {
           workingHoursPerDay: true,
-          workingDaysPerWeek: true,
+          workingDaysPerWeek: true, workingDays: true,
           geofenceEnabled: true,
           officeLatitude: true,
           officeLongitude: true,
@@ -601,7 +601,7 @@ async function exportAttendanceSheet(req, res, next) {
     const { organizationId, role, departmentId } = req.user
     const organization = await prisma.organization.findUnique({
       where: { id: organizationId },
-      select: { workingHoursPerDay: true, workingDaysPerWeek: true, timezone: true, breakStart: true, breakEnd: true, shiftStartDefault: true, shiftEndDefault: true },
+      select: { workingHoursPerDay: true, workingDaysPerWeek: true, workingDays: true, timezone: true, breakStart: true, breakEnd: true, shiftStartDefault: true, shiftEndDefault: true },
     })
     if (!organization) return res.status(404).json({ error: "Organization not found" })
 
