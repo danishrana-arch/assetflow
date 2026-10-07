@@ -123,7 +123,7 @@ export default function LeavePolicyPanel({ canEdit }) {
 
           <ul className="grid gap-x-6 gap-y-1.5 text-xs text-muted sm:grid-cols-2">
             <li>• Leave is earned month by month: {total} ÷ 12 = <span className="font-semibold text-ink">{monthly} days</span> per month, adding up through the year.</li>
-            <li>• Joining mid-year earns only for the remaining months — e.g. joining in June gives <span className="font-semibold text-ink">{r2((7 * total) / 12)} days</span> that year.</li>
+            <li>• Leave starts from the month an employee becomes <span className="font-semibold text-ink">Permanent</span> — e.g. Permanent in August: {r2(total / 12)} days in August, growing each month to <span className="font-semibold text-ink">{r2((5 * total) / 12)} days</span> by December. Nothing is earned on probation.</li>
             <li>• Annual, casual and sick leave share this one total; each type also has its own yearly limit (pro-rated the same way).</li>
             <li>• An employee can only use what they'll have earned by the month of the leave — pending requests count too.</li>
             <li>• Unpaid leave doesn't use the balance; it's deducted from that month's payslip.</li>

@@ -8,10 +8,12 @@ const { activeLateRules, monthlyLateCounts, yearLatePenalties } = require("./lat
 //   month by month: 30 / 12 = 2.5 days per month, cumulative — January 2.5,
 //   February 5, March 7.5, … December 30. Resets every January (no carry
 //   forward).
-// - Pro-rata from the joining month: someone who joins in June earns from
-//   June only (7 months x 2.5 = 17.5 days that year). Joining date, else
-//   start date; with neither set, the employee is treated as already
-//   employed and earns from January. The joining month counts in full.
+// - Pro-rata from the month the employee becomes PERMANENT: Permanent in
+//   August = 2.5 days in August, 5 by September, … 12.5 by December
+//   (5 months x 2.5). That month counts in full. Nothing is earned while on
+//   probation. From the next January it's a full year again (2.5 in Jan …
+//   30 in Dec). Permanent with no permanentDate recorded = earns from
+//   January.
 // - Each type also has its own yearly limit, pro-rated the same way:
 //   sick = sickLeaveAllowance, casual = casualLeaveAllowance, annual = the
 //   rest of the pool. A request must fit both the type limit and the pool.
@@ -21,7 +23,7 @@ const { activeLateRules, monthlyLateCounts, yearLatePenalties } = require("./lat
 //   February, but only against what will have been earned by December.
 // - UNPAID leave doesn't use the pool (no limit; payroll deducts it).
 // - Only PERMANENT employees may apply, and not for days before their
-//   Permanent date (they keep everything earned during probation).
+//   Permanent date.
 // - Company late-arrival rules (utils/late-rules.js) whose penalty is taken
 //   from leave use up the pool and the ANNUAL type like approved leave, in
 //   the month they happen; what doesn't fit goes to salary (payroll).
@@ -35,6 +37,8 @@ const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "Ju
 const NOT_PERMANENT_MESSAGE = "Leave applications are available after your employment status becomes Permanent."
 
 const round2 = (n) => Math.round(n * 100) / 100
+// Uses the paid pool: a paid type that the final approver didn't make unpaid.
+const isPaidLeave = (l) => PAID_LEAVE_TYPES.includes(l.type) && l.payAs !== "UNPAID"
 const floorHalf = (n) => Math.floor(n * 2 + 1e-9) / 2
 
 function dayKey(date) {
@@ -49,12 +53,15 @@ function leaveAllowances(org) {
   return { total, SICK: sick, CASUAL: casual, ANNUAL: Math.max(0, total - sick - casual) }
 }
 
+// Leave is earned from the Permanent date. (employmentStatus undefined =
+// a caller that didn't select it; treated as Permanent.)
 function accrualStartDate(employee) {
-  return employee?.joiningDate || employee?.startDate || null
+  return employee?.permanentDate || null
 }
 
 // First month (1-12) of `year` that earns leave, or null for none.
 function firstAccrualMonth(employee, year) {
+  if (employee?.employmentStatus !== undefined && employee.employmentStatus !== "PERMANENT") return null
   const start = accrualStartDate(employee)
   if (!start) return 1
   const d = toDateOnly(start)
@@ -128,7 +135,7 @@ async function activeLeavesInYear(employeeId, year, excludeLeaveId) {
       endDate: { gte: start },
       ...(excludeLeaveId ? { id: { not: excludeLeaveId } } : {}),
     },
-    select: { id: true, type: true, status: true, startDate: true, endDate: true, isHalfDay: true },
+    select: { id: true, type: true, status: true, startDate: true, endDate: true, isHalfDay: true, payAs: true },
   })
 }
 
@@ -145,7 +152,7 @@ async function latePenaltiesForYear({ organizationId, employee, org, year, paidB
   if (!paidByMonth || annualUsed === undefined) {
     const { start, end } = yearBounds(year)
     const [leaves, holidays] = await Promise.all([activeLeavesInYear(employee.id, year), holidaySet(organizationId, start, end)])
-    const paid = leaves.filter((l) => PAID_LEAVE_TYPES.includes(l.type))
+    const paid = leaves.filter(isPaidLeave)
     paidByMonth = daysByMonth(paid, year, holidays)
     annualUsed = sum(daysByMonth(paid.filter((l) => l.type === "ANNUAL"), year, holidays))
   }
@@ -169,7 +176,7 @@ async function leaveSchedule({ organizationId, employee, org, year, todayKey }) 
   const { start, end } = yearBounds(year)
   const [leaves, holidays] = await Promise.all([activeLeavesInYear(employee.id, year), holidaySet(organizationId, start, end)])
   const allowances = leaveAllowances(org)
-  const paid = leaves.filter((l) => PAID_LEAVE_TYPES.includes(l.type))
+  const paid = leaves.filter(isPaidLeave)
   const perMonth = daysByMonth(paid, year, holidays)
   const eligible = employee.employmentStatus === "PERMANENT"
   const annualRequested = sum(daysByMonth(paid.filter((l) => l.type === "ANNUAL"), year, holidays))
@@ -270,7 +277,7 @@ async function validateLeaveRequest({ organizationId, employee, org, start, end,
     requestedTotal += requestedYear
     if (!isPaid || requestedYear === 0) continue
 
-    const paidExisting = existing.filter((l) => PAID_LEAVE_TYPES.includes(l.type))
+    const paidExisting = existing.filter(isPaidLeave)
     const before = daysByMonth(paidExisting, year, holidays)
     const annualBefore = sum(daysByMonth(paidExisting.filter((l) => l.type === "ANNUAL"), year, holidays))
     const { months: penalties } = await latePenaltiesForYear({ organizationId, employee, org, year, paidByMonth: [...before], annualUsed: annualBefore })
@@ -286,7 +293,7 @@ async function validateLeaveRequest({ organizationId, employee, org, start, end,
         status: 400,
         error:
           `Not enough ${LEAVE_TYPE_NAMES[type]} leave for ${year}: ${fmtDays(left)} left of ${fmtDays(limit)}` +
-          `${limit < allowances[type] ? ` (pro-rated from ${allowances[type]} for the months since you joined)` : ""}, this request needs ${fmtDays(requestedYear)}.` +
+          `${limit < allowances[type] ? ` (pro-rated from ${allowances[type]} for the months since you became Permanent)` : ""}, this request needs ${fmtDays(requestedYear)}.` +
           " You can choose another leave type or Unpaid.",
       }
     }
@@ -304,7 +311,7 @@ async function validateLeaveRequest({ organizationId, employee, org, start, end,
         return {
           status: 400,
           error: earned === 0
-            ? `You haven't earned any paid leave by ${MONTH_NAMES[m - 1]} ${year} yet — leave is earned from your joining month.`
+            ? `You haven't earned any paid leave by ${MONTH_NAMES[m - 1]} ${year} yet — leave is earned from the month you became Permanent.`
             : `By the end of ${MONTH_NAMES[m - 1]} ${year} you'll have earned ${fmtDays(earned)} of paid leave` +
               ` (${round2(allowances.total / 12)} per month), and you already have ${fmtDays(already)} requested or approved.` +
               ` This request needs ${fmtDays(requestedYear)}. Choose later dates, fewer days, or Unpaid leave.`,

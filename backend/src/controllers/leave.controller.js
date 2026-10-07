@@ -5,6 +5,7 @@ const { toDateOnly } = require("../utils/date")
 const { notifyManagement, createNotification } = require("../utils/notifications")
 const { dateKeyInTimeZone } = require("../utils/timezone")
 const { validateLeaveRequest, leaveSchedule, leaveAllowances, NOT_PERMANENT_MESSAGE, PENDING_LEAVE_STATUSES } = require("../utils/leave-policy")
+const { refreshDraftPayslip } = require("./payroll.controller")
 
 function eachDate(start, end) {
   const days = []
@@ -264,13 +265,14 @@ async function getLeaveBalance(req, res, next) {
 
     const approved = await prisma.leaveApplication.findMany({
       where: { organizationId: employee.organizationId, employeeId, status: "APPROVED", startDate: { gte: yearStart, lte: yearEnd } },
-      select: { type: true, startDate: true, endDate: true, isHalfDay: true },
+      select: { type: true, startDate: true, endDate: true, isHalfDay: true, payAs: true },
     })
 
     const used = { ANNUAL: 0, CASUAL: 0, SICK: 0, UNPAID: 0 }
     for (const leave of approved) {
       const days = await chargeableDays(employee.organizationId, leave.startDate, leave.endDate, leave.isHalfDay)
-      used[leave.type] = (used[leave.type] || 0) + days
+      const bucketKey = leave.payAs === "UNPAID" ? "UNPAID" : leave.type
+      used[bucketKey] = (used[bucketKey] || 0) + days
     }
 
     // Pro-rata picture (approved + pending count against what's earned —
@@ -428,6 +430,20 @@ async function reviewLeave(req, res, next) {
       }
     }
 
+    // Paid or unpaid — the final approver decides (UNPAID-type requests are
+    // always unpaid). Unpaid full days are marked ABSENT, so payroll charges
+    // the absent fine for them; an unpaid half day is charged half of it.
+    let payAs = null
+    if (decision === "APPROVED") {
+      if (leave.type === "UNPAID") payAs = "UNPAID"
+      else {
+        payAs = req.body.payAs || "PAID"
+        if (!["PAID", "UNPAID"].includes(payAs)) return res.status(400).json({ error: "payAs must be PAID or UNPAID" })
+      }
+    }
+    const markAbsent = payAs === "UNPAID" && leave.type !== "UNPAID"
+    const days = decision === "APPROVED" && !leave.isHalfDay ? eachDate(leave.startDate, leave.endDate) : []
+
     const updated = await prisma.$transaction(async (tx) => {
       const saved = await tx.leaveApplication.update({
         where: { id },
@@ -436,30 +452,50 @@ async function reviewLeave(req, res, next) {
           reviewedById: userId,
           reviewedAt: now,
           reviewNote: note,
+          payAs,
         },
       })
 
-      if (decision === "APPROVED" && !leave.isHalfDay) {
-        const days = eachDate(leave.startDate, leave.endDate)
-        await Promise.all(
-          days.map((day) =>
-            tx.attendanceRecord.upsert({
-              where: { employeeId_date: { employeeId: leave.employeeId, date: day } },
-              update: { status: "LEAVE", markedById: userId },
-              create: {
-                organizationId,
-                employeeId: leave.employeeId,
-                date: day,
-                status: "LEAVE",
-                markedById: userId,
-              },
-            })
-          )
+      const status = markAbsent ? "ABSENT" : "LEAVE"
+      await Promise.all(
+        days.map((day) =>
+          tx.attendanceRecord.upsert({
+            where: { employeeId_date: { employeeId: leave.employeeId, date: day } },
+            update: { status, markedById: userId },
+            create: { organizationId, employeeId: leave.employeeId, date: day, status, markedById: userId },
+          })
         )
+      )
+
+      // Day note so the Attendance page says why the day is Absent.
+      if (markAbsent) {
+        const text = `${leave.type.charAt(0) + leave.type.slice(1).toLowerCase()} leave approved as unpaid — marked absent, absent fine applies.`
+        for (const day of days) {
+          const existingNote = await tx.attendanceNote.findUnique({ where: { employeeId_date: { employeeId: leave.employeeId, date: day } } })
+          if (existingNote) {
+            if (!existingNote.note.includes(text)) {
+              await tx.attendanceNote.update({ where: { id: existingNote.id }, data: { note: `${existingNote.note}\n${text}`.slice(0, 500) } })
+            }
+          } else {
+            await tx.attendanceNote.create({ data: { organizationId, employeeId: leave.employeeId, date: day, note: text, authorId: userId } })
+          }
+        }
       }
 
       return saved
     })
+
+    // Keep DRAFT payslips of the affected months current.
+    if (decision === "APPROVED") {
+      const months = new Set()
+      for (let d = new Date(leave.startDate); d <= leave.endDate; d.setUTCDate(d.getUTCDate() + 1)) {
+        months.add(`${d.getUTCFullYear()}-${d.getUTCMonth() + 1}`)
+      }
+      for (const key of months) {
+        const [year, month] = key.split("-").map(Number)
+        await refreshDraftPayslip({ organizationId, employeeId: leave.employeeId, month, year }).catch(() => {})
+      }
+    }
 
     logAudit({
       organizationId,
@@ -467,7 +503,7 @@ async function reviewLeave(req, res, next) {
       action: `leave.${decision.toLowerCase()}`,
       targetType: "LeaveApplication",
       targetId: id,
-      note: `${leave.type}${leave.isHalfDay ? " (half-day)" : ""} for employee ${leave.employeeId}`,
+      note: `${leave.type}${leave.isHalfDay ? " (half-day)" : ""} for employee ${leave.employeeId}${payAs ? ` — ${payAs.toLowerCase()}` : ""}`,
     })
 
     await createNotification({
@@ -476,7 +512,7 @@ async function reviewLeave(req, res, next) {
       createdById: userId,
       type: "LEAVE_REQUEST",
       title: `Leave request ${decision.toLowerCase()}`,
-      message: `${leave.type} leave was ${decision === "APPROVED" ? "approved" : "rejected at final approval"}.${note ? ` ${note}` : ""}`,
+      message: `${leave.type} leave was ${decision === "APPROVED" ? (markAbsent ? "approved as unpaid — those days are marked absent and the absent fine applies" : "approved") : "rejected at final approval"}.${note ? ` ${note}` : ""}`,
       link: "/attendance/me",
     })
 

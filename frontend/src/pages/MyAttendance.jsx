@@ -590,7 +590,7 @@ export default function MyAttendance() {
           {balance?.schedule?.currentMonth && (() => {
             const sch = balance.schedule
             const cm = sch.currentMonth
-            const joinedThisYear = sch.accrualStartMonth && sch.accrualStartMonth > 1
+            const permanentThisYear = sch.accrualStartMonth && sch.accrualStartMonth > 1
             return (
               <div className="mb-4 space-y-3 rounded-2xl bg-surface-2 px-4 py-3 text-xs text-muted">
                 <div className="grid gap-2 sm:grid-cols-3">
@@ -645,7 +645,7 @@ export default function MyAttendance() {
                 )}
                 <p className="text-muted-2">
                   Pro-rata leave: you earn {sch.monthlyRate} days of paid leave every month ({sch.entitlement} a year, shared by annual, casual and sick leave)
-                  {joinedThisYear ? `, counted from ${SHORT_MONTHS[sch.accrualStartMonth - 1]} ${sch.year} when you joined` : ""}.
+                  {permanentThisYear ? `, counted from ${SHORT_MONTHS[sch.accrualStartMonth - 1]} ${sch.year} when you became Permanent` : ""}.
                   You can only use what you've earned by the month of the leave. Unpaid leave doesn't use your balance. Resets every January.
                   Requests go to HR, then to an Admin or CEO.
                 </p>
@@ -682,6 +682,7 @@ export default function MyAttendance() {
                     <p className="text-sm font-semibold text-ink">{fmt(leave.startDate)} — {fmt(leave.endDate)}</p>
                     <div className="flex items-center gap-1.5">
                       <StatusPill tone="slate">{LEAVE_TYPE_LABELS[leave.type] || leave.type}</StatusPill>
+                      {leave.status === "APPROVED" && leave.payAs === "UNPAID" && leave.type !== "UNPAID" && <StatusPill tone="pink">Unpaid · absent</StatusPill>}
                       <StatusPill tone={LEAVE_TONE[leave.status] || "slate"}>{LEAVE_STATUS_LABELS[leave.status] || leave.status}</StatusPill>
                     </div>
                   </div>

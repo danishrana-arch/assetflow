@@ -71,7 +71,9 @@ async function computeAttendanceLines({ employeeId, base, month, year, lateRate 
     where: {
       employeeId,
       status: "APPROVED",
-      type: "UNPAID",
+      // Unpaid-type leave, plus half-day leave the approver made unpaid (a
+      // full day made unpaid is ABSENT in attendance and counted there).
+      OR: [{ type: "UNPAID" }, { payAs: "UNPAID", isHalfDay: true }],
       startDate: { lt: monthEnd },
       endDate: { gte: monthStart },
     },
@@ -285,7 +287,7 @@ async function previewPayroll(req, res, next) {
       prisma.holiday.findMany({ where: { organizationId, date: { gte: monthStart, lt: monthEnd } }, select: { date: true } }),
       prisma.leaveApplication.findMany({
         where: { organizationId, status: "APPROVED", startDate: { lt: monthEnd }, endDate: { gte: monthStart } },
-        select: { employeeId: true, type: true, startDate: true, endDate: true, isHalfDay: true },
+        select: { employeeId: true, type: true, startDate: true, endDate: true, isHalfDay: true, payAs: true },
       }),
       prisma.leaveApplication.findMany({
         where: { organizationId, status: { in: ["PENDING_HR", "PENDING_FINAL_APPROVAL"] }, startDate: { lt: monthEnd }, endDate: { gte: monthStart } },
@@ -324,7 +326,7 @@ async function previewPayroll(req, res, next) {
 
     const paidLeaveByEmployee = new Map()
     for (const l of approvedLeaves) {
-      if (l.type === "UNPAID") continue // already part of computeAttendanceLines
+      if (l.type === "UNPAID" || l.payAs === "UNPAID") continue // unpaid: computeAttendanceLines / ABSENT days
       const days = l.isHalfDay ? 0.5 : daysInMonthOverlap(l.startDate, l.endDate, monthStart, monthEnd)
       paidLeaveByEmployee.set(l.employeeId, (paidLeaveByEmployee.get(l.employeeId) || 0) + days)
     }

@@ -447,6 +447,11 @@ model LeaveApplication {
   reason         String
   type           LeaveType   @default(CASUAL)
   isHalfDay      Boolean     @default(false)
+  // Decided at final approval (ADMIN/CEO): PAID = uses the leave balance,
+  // marked LEAVE; UNPAID = days marked ABSENT and charged the absent fine
+  // (half-day: half the fine). Null until approved; UNPAID-type requests are
+  // always UNPAID.
+  payAs          String?
   status         LeaveStatus @default(PENDING_HR)
   // Step 1: HR decision (PENDING_HR → PENDING_FINAL_APPROVAL / REJECTED).
   hrReviewedById String?

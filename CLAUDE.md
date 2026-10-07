@@ -2971,3 +2971,46 @@ the 2026-10-05 employee-details/leave section.
   Requests → Leave Policy panel (now a link to Attendance → Policy & fines),
   and the "Late-arrival deduction (PKR / day)" field from Settings → Payroll
   Account (same `lateDeductionAmount`, now only on the Attendance page).
+
+### Follow-up (2026-10-07): leave is earned from the Permanent date, not joining
+
+- `leave-policy.js` `accrualStartDate` = `permanentDate` (was joining /
+  start date); `firstAccrualMonth` returns none while not PERMANENT (no
+  earning on probation; a caller without `employmentStatus` is treated as
+  Permanent). Permanent in August → 2.5 in Aug, 5 Sep … 12.5 Dec; type
+  limits pro-rated the same way (Aug: annual 7 / casual 2.5 / sick 3); the
+  next January starts a full year (2.5 … 30). Permanent with no date =
+  from January. Late-rule leave coverage and payroll use the same
+  `accruedBy`, so they follow automatically. Wording updated on the Leave
+  Policy panel and My Attendance.
+- Data at the time (ACTIVE users): 12 on PROBATION; of 30 PERMANENT, 23
+  have `permanentDate` in Sept 2026 — the 2026-10-05 migration set it from
+  `createdAt` when there was no joining date — so they earn from Sept 2026
+  (10 days by Dec). HR can correct Permanent dates on each profile; no data
+  was changed.
+
+## Post-module addition: final approver decides paid / unpaid leave (2026-10-07)
+
+- `LeaveApplication.payAs` (`PAID` / `UNPAID`, null until approved; UNPAID-
+  type requests are always UNPAID). Migration
+  `20261007120000_leave_pay_decision` (adds the column, back-fills approved
+  rows) — **not yet deployed** at the time of writing; JS client
+  regenerated, so leave list/balance/approval fail until it is.
+  (`20261006150000_late_policy_rules` was deployed by the user.)
+- `reviewLeave` final step (ADMIN/CEO) takes `payAs`. Unpaid on a paid type:
+  full days are upserted as **ABSENT** (not LEAVE) + a day note "… leave
+  approved as unpaid — marked absent, absent fine applies." → payroll counts
+  them as absent days (absent fine each, waivable like any absent day); an
+  unpaid half day leaves attendance alone and is charged half the absent
+  fine via the unpaid-leave query (`OR [{type UNPAID}, {payAs UNPAID,
+  isHalfDay}]`). DRAFT payslips of the affected months are refreshed. The
+  employee's notification says it was approved as unpaid.
+- Leave policy: `isPaidLeave` = paid type and `payAs !== "UNPAID"` — unpaid-
+  decided leave doesn't use the pool / type limits; balance puts it in the
+  `unpaid` bucket; payroll preview's paid-leave days skip it.
+- UI: Leave Requests — Paid / Unpaid toggle next to "Final approve" (paid
+  types only; Unpaid asks to confirm; the impact line explains the result),
+  "Paid" / "Unpaid · absent" tag on approved leave; My Attendance shows
+  "Unpaid · absent" on the employee's own leave.
+- Verified: backend loads, frontend build passes. Not exercised against the
+  DB (migration pending).

@@ -41,7 +41,7 @@ function payrollMonths(leave) {
 
 // What approving this request does, in plain words, plus the employee's
 // remaining balance for paid leave types (GET /leaves/balance, existing).
-function LeaveImpact({ leave }) {
+function LeaveImpact({ leave, payAs }) {
   const { data: balance } = useQuery({
     queryKey: ["leave-balance", leave.employeeId, new Date(leave.startDate).getUTCFullYear()],
     queryFn: () =>
@@ -66,7 +66,13 @@ function LeaveImpact({ leave }) {
       ) : isPending(leave) ? (
         <p>Checking balance…</p>
       ) : null}
-      {isPending(leave) && (
+      {isPending(leave) && payAs === "UNPAID" && leave.type !== "UNPAID" ? (
+        <p className="font-semibold text-chip-pink-fg">
+          {leave.isHalfDay
+            ? "Approving as unpaid charges half of the absent fine on the payslip; the balance isn't used."
+            : "Approving as unpaid marks these days Absent and charges the absent fine for each; the balance isn't used."}
+        </p>
+      ) : isPending(leave) && (
         <p>{leave.isHalfDay ? "Half day — attendance isn't changed." : "Approving marks these days as Leave on the attendance sheet."}</p>
       )}
     </div>
@@ -107,13 +113,16 @@ export default function LeaveRequests() {
     )
   }, [allLeaves, statusFilter, search])
 
+  // Final approver's Paid / Unpaid choice per request (default Paid).
+  const [payChoice, setPayChoice] = useState({})
   const review = useMutation({
-    mutationFn: ({ id, decision, reviewNote }) => api.patch(`/leaves/${id}/review`, { decision, reviewNote }),
+    mutationFn: ({ id, decision, reviewNote, payAs }) => api.patch(`/leaves/${id}/review`, { decision, reviewNote, payAs }),
     onSuccess: () => {
       setConflictError(null)
       queryClient.invalidateQueries({ queryKey: ["leaves"] })
       queryClient.invalidateQueries({ queryKey: ["leave-balance"] })
       queryClient.invalidateQueries({ queryKey: ["attendance"] })
+      queryClient.invalidateQueries({ queryKey: ["payroll"] })
     },
     onError: (err, variables) => {
       setConflictError({ leaveId: variables.id, message: err.response?.data?.error || "Could not update this application" })
@@ -196,7 +205,7 @@ export default function LeaveRequests() {
                   {leave.employee?.department?.name ? ` · ${leave.employee.department.name}` : ""}
                 </p>
                 <p className="mt-1 text-xs text-muted-2">{leave.reason}</p>
-                <LeaveImpact leave={leave} />
+                <LeaveImpact leave={leave} payAs={payChoice[leave.id] || "PAID"} />
                 {leave.hrReviewedBy && leave.status !== "REJECTED" && (
                   <p className="mt-1 text-[11px] text-muted-2">
                     HR approved by {leave.hrReviewedBy.name}{leave.hrReviewedAt ? ` on ${fmt(leave.hrReviewedAt)}` : ""}{leave.hrReviewNote ? ` — “${leave.hrReviewNote}”` : ""}
@@ -216,14 +225,41 @@ export default function LeaveRequests() {
 
             <div className="flex flex-wrap items-center gap-2">
               <StatusPill tone="slate">{LEAVE_TYPE_LABELS[leave.type] || leave.type}</StatusPill>
+              {leave.status === "APPROVED" && leave.payAs && leave.type !== "UNPAID" && (
+                <StatusPill tone={leave.payAs === "UNPAID" ? "pink" : "green"}>{leave.payAs === "UNPAID" ? "Unpaid · absent" : "Paid"}</StatusPill>
+              )}
               <StatusPill tone={LEAVE_TONE[leave.status]}>{LEAVE_STATUS_LABELS[leave.status] || leave.status}</StatusPill>
               {isPending(leave) && !leave.canReview && (
                 <span className="text-[11px] text-muted-2">{leave.status === "PENDING_HR" ? "Waiting for HR" : "Waiting for Admin / CEO"}</span>
               )}
               {leave.canReview && (
                 <>
+                  {leave.status === "PENDING_FINAL_APPROVAL" && leave.type !== "UNPAID" && (
+                    <div className="flex rounded-full border border-border-strong bg-surface p-0.5" role="radiogroup" aria-label="Pay this leave as">
+                      {[["PAID", "Paid"], ["UNPAID", "Unpaid"]].map(([key, label]) => {
+                        const active = (payChoice[leave.id] || "PAID") === key
+                        return (
+                          <button
+                            key={key}
+                            type="button"
+                            role="radio"
+                            aria-checked={active}
+                            onClick={() => setPayChoice((c) => ({ ...c, [leave.id]: key }))}
+                            title={key === "UNPAID" ? "Marks the days Absent and charges the absent fine" : "Uses the employee's leave balance"}
+                            className={`rounded-full px-3 py-1.5 text-xs font-semibold transition-colors ${active ? (key === "UNPAID" ? "bg-chip-pink-bg text-chip-pink-fg" : "bg-chip-green-bg text-chip-green-fg") : "text-muted hover:text-ink"}`}
+                          >
+                            {label}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
                   <button
-                    onClick={() => review.mutate({ id: leave.id, decision: "APPROVED" })}
+                    onClick={() => {
+                      const payAs = leave.status === "PENDING_FINAL_APPROVAL" ? payChoice[leave.id] || "PAID" : undefined
+                      if (payAs === "UNPAID" && leave.type !== "UNPAID" && !window.confirm(`Approve ${leave.employee?.name}'s leave as UNPAID? ${leave.isHalfDay ? "Half of the absent fine is charged." : "Those days are marked Absent and the absent fine is charged for each."}`)) return
+                      review.mutate({ id: leave.id, decision: "APPROVED", payAs })
+                    }}
                     disabled={review.isPending}
                     className="pill-accent flex items-center gap-1.5 px-3.5 py-2 text-xs disabled:opacity-60"
                   >
