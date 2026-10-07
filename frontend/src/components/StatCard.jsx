@@ -77,10 +77,9 @@ export default function StatCard({
         transition-all
         duration-200
 
-        hover:-translate-y-[1px]
-        hover:shadow-[0_12px_34px_rgba(30,50,40,0.08)]
+        hover:shadow-[0_4px_14px_rgba(30,50,40,0.05)]
 
-        dark:hover:shadow-[0_12px_34px_rgba(0,0,0,0.28)]
+        dark:hover:shadow-[0_4px_14px_rgba(0,0,0,0.20)]
 
         sm:h-[154px]
         sm:px-5

@@ -52,7 +52,7 @@ function StatTile({ label, value, icon: Icon, tone, loading, to }) {
     <Link
       to={to}
       aria-label={`${label}: ${value}. Open details`}
-      className={`flex min-h-[150px] min-w-0 flex-col rounded-2xl border p-4 transition-all hover:-translate-y-px hover:shadow-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent lg:min-h-[200px] ${t.tile}`}
+      className={`flex min-h-[150px] min-w-0 flex-col rounded-2xl border p-4 transition-shadow duration-200 hover:shadow-[0_2px_8px_rgba(0,0,0,0.05)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent lg:min-h-[200px] ${t.tile}`}
     >
       <div className="flex h-11 w-11 shrink-0 items-center justify-start text-ink sm:h-12 sm:w-12">
         <Icon size={30} strokeWidth={1.9} />
