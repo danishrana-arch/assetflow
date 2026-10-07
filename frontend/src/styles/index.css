@@ -798,3 +798,30 @@ img, svg { max-width: 100%; }
 svg.lucide:not([data-dock-item] *) {
   stroke-width: 1.5;
 }
+
+/* Attendance Snapshot: hovered stat tile slides its list in from the right,
+   the other tiles rise into a compact strip along the top. */
+@keyframes snap-slide-in {
+  from { opacity: 0; transform: translateX(48px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@keyframes snap-rise {
+  from { opacity: 0; transform: translateY(28px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.snap-slide-in { animation: snap-slide-in 320ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.snap-rise { animation: snap-rise 320ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+@media (prefers-reduced-motion: reduce) {
+  .snap-slide-in, .snap-rise { animation: none; }
+}
+
+/* Interactive metric workspace: content fades in as its box moves. */
+@keyframes metric-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.metric-fade { animation: metric-fade 260ms ease-out both; }
+@media (prefers-reduced-motion: reduce) {
+  .metric-fade { animation: none; }
+  .metric-box { transition: none !important; }
+}

@@ -1,8 +1,9 @@
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { keepPreviousData, useQuery } from "@tanstack/react-query"
 import { Link } from "react-router-dom"
 import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react"
 import { TotalEmployeesIcon, PresentIcon, LateIcon, AbsentIcon } from "./ui/StatusIcons"
+import InteractiveMetricWorkspace from "./ui/InteractiveMetricWorkspace"
 import api from "../api/client"
 import { formatTime } from "../utils/time"
 
@@ -29,40 +30,16 @@ const monthDayFmt = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", month: "
 const chipFmt = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "short", month: "short", day: "numeric", year: "numeric" })
 const longFmt = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "long", month: "long", day: "numeric", year: "numeric" })
 
-// Soft tinted tiles; light tints in light mode, faint glows in dark mode.
-const TILE_TONES = {
-  blue: {
-    tile: "bg-chip-blue-bg/35 border-chip-blue-bg/80 dark:bg-chip-blue-tint/[0.06] dark:border-chip-blue-tint/10",
-  },
-  green: {
-    tile: "bg-chip-green-bg/40 border-chip-green-bg dark:bg-chip-green-tint/[0.06] dark:border-chip-green-tint/10",
-  },
-  yellow: {
-    tile: "bg-chip-yellow-bg/20 border-chip-yellow-bg/50 dark:bg-chip-yellow-tint/[0.06] dark:border-chip-yellow-tint/10",
-  },
-  pink: {
-    tile: "bg-chip-pink-bg/35 border-chip-pink-bg/80 dark:bg-chip-pink-tint/[0.06] dark:border-chip-pink-tint/10",
-  },
-}
-
-function StatTile({ label, value, icon: Icon, tone, loading, to }) {
-  const t = TILE_TONES[tone]
-  return (
-    // Icon on top, number at the bottom — fits four across in one row.
-    <Link
-      to={to}
-      aria-label={`${label}: ${value}. Open details`}
-      className={`flex min-h-[150px] min-w-0 flex-col rounded-2xl border p-4 transition-shadow duration-200 hover:shadow-[0_2px_8px_rgba(0,0,0,0.05)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent lg:min-h-[200px] ${t.tile}`}
-    >
-      <div className="flex h-11 w-11 shrink-0 items-center justify-start text-ink sm:h-12 sm:w-12">
-        <Icon size={30} strokeWidth={1.9} />
-      </div>
-      <p className="mt-3 truncate text-sm font-medium text-muted">{label}</p>
-      <p className={`mt-auto pt-2 text-3xl font-semibold leading-none text-ink transition-opacity sm:text-4xl ${loading ? "opacity-50" : ""}`}>
-        {value}
-      </p>
-    </Link>
-  )
+function useIsWide() {
+  const query = "(min-width: 768px)"
+  const [wide, setWide] = useState(() => typeof window !== "undefined" && window.matchMedia(query).matches)
+  useEffect(() => {
+    const mq = window.matchMedia(query)
+    const on = () => setWide(mq.matches)
+    mq.addEventListener("change", on)
+    return () => mq.removeEventListener("change", on)
+  }, [])
+  return wide
 }
 
 const STATUS_PILL = {
@@ -140,22 +117,31 @@ export default function AttendanceSnapshot({ timeZone, children }) {
   const isFuture = selected > todayKey
   const isToday = selected === todayKey
 
-  const { counts, arrivals } = useMemo(() => {
+  const { counts, arrivals, lists } = useMemo(() => {
     const rows = data?.rows
-    if (!rows) return { counts: null, arrivals: [] }
+    if (!rows) return { counts: null, arrivals: [], lists: {} }
     const future = data.date > todayKey
     const scheduled = data?.schedule?.isScheduledWorkday !== false
     const attended = rows.filter((r) => r.status === "PRESENT" || r.status === "LATE")
+    const lateRows = rows.filter((r) => r.status === "LATE")
+    // Only people expected to work count as absent: nobody on a day that
+    // hasn't happened yet, and on a non-working day only an explicitly
+    // marked absence. Leave is never absent.
+    const absentRows = future ? [] : rows.filter((r) => r.status === "ABSENT" && (scheduled || r.recordId))
+    const byName = (a, b) => (a.name || "").localeCompare(b.name || "")
     return {
+      lists: {
+        total: [...rows].sort(byName),
+        present: [...attended].sort(byName),
+        late: [...lateRows].sort(byName),
+        absent: [...absentRows].sort(byName),
+      },
       counts: {
         total: rows.length,
         // Same rule as Attendance.jsx's header: LATE still counts as present.
         present: attended.length,
-        late: rows.filter((r) => r.status === "LATE").length,
-        // Only people expected to work count as absent: nobody on a day that
-        // hasn't happened yet, and on a non-working day only an explicitly
-        // marked absence. Leave is never absent.
-        absent: future ? 0 : rows.filter((r) => r.status === "ABSENT" && (scheduled || r.recordId)).length,
+        late: lateRows.length,
+        absent: absentRows.length,
       },
       // Most recent arrival first; manual marks without a check-in time last.
       arrivals: [...attended].sort((a, b) => {
@@ -166,7 +152,64 @@ export default function AttendanceSnapshot({ timeZone, children }) {
     }
   }, [data, todayKey])
 
-  const show = (n) => (counts ? n : "—")
+  const wide = useIsWide()
+  const tz = data?.schedule?.timezone || timeZone
+  const metrics = useMemo(() => {
+    const c = counts
+    const val = (n) => (c ? n : "—")
+    const pct = (n) => (c && c.total > 0 ? `${Math.round((n / c.total) * 100)}%` : "—")
+    const toItems = (rows, withLate) =>
+      (rows || []).map((r) => ({
+        id: r.employeeId,
+        primary: r.name,
+        to: `/employees/${r.employeeId}`,
+        badge: withLate && r.status === "LATE" && r.lateMinutes > 0 ? formatLate(r.lateMinutes) : null,
+        secondary: r.checkInAt ? formatTime(r.checkInAt, { timeZone: tz }) : null,
+      }))
+    const onLeave = (data?.rows || []).filter((r) => r.status === "LEAVE").length
+    const earliest = (lists.present || []).filter((r) => r.checkInAt).sort((x, y) => x.checkInAt.localeCompare(y.checkInAt))[0]
+    const attendance = (status) => `/attendance?date=${selected}&status=${status}`
+    return [
+      {
+        id: "total", title: "Total Employees", value: val(c?.total), icon: TotalEmployeesIcon, tone: "blue",
+        description: "Active workforce",
+        stats: [
+          { label: "Present", value: val(c?.present) },
+          { label: "Late", value: val(c?.late) },
+          { label: "Absent", value: val(c?.absent) },
+        ],
+        items: toItems(lists.total), emptyText: "No employees.",
+        action: { label: "View Employees", to: "/employees" },
+      },
+      {
+        id: "present", title: "Present", value: val(c?.present), icon: PresentIcon, tone: "green",
+        description: isToday ? "Employees currently present" : "Employees present",
+        stats: [
+          { label: "Attendance", value: pct(c?.present ?? 0) },
+          ...(earliest ? [{ label: "First check-in", value: formatTime(earliest.checkInAt, { timeZone: tz }) }] : []),
+        ],
+        items: toItems(lists.present, true), emptyText: "Nobody has checked in.",
+        action: { label: "View Attendance", to: attendance("present") },
+      },
+      {
+        id: "late", title: isToday ? "Late Today" : "Late", value: val(c?.late), icon: LateIcon, tone: "amber",
+        description: "Employees arriving late",
+        stats: [{ label: "Of workforce", value: pct(c?.late ?? 0) }],
+        items: toItems(lists.late, true), emptyText: "Nobody was late.",
+        action: { label: "View Attendance", to: attendance("late") },
+      },
+      {
+        id: "absent", title: isToday ? "Absent Today" : "Absent", value: val(c?.absent), icon: AbsentIcon, tone: "red",
+        description: isToday ? "Employees absent today" : "Employees absent",
+        stats: [
+          { label: "Of workforce", value: pct(c?.absent ?? 0) },
+          { label: "On leave", value: c ? onLeave : "—" },
+        ],
+        items: toItems(lists.absent), emptyText: "Nobody is absent.",
+        action: { label: "View Attendance", to: attendance("absent") },
+      },
+    ]
+  }, [counts, lists, data, selected, isToday, tz])
   const arrowClass =
     "flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border bg-surface text-muted transition-colors hover:bg-surface-2 hover:text-ink sm:h-10 sm:w-10"
 
@@ -220,13 +263,8 @@ export default function AttendanceSnapshot({ timeZone, children }) {
       {/* Stats (60%, four across) + attendance list (40%) */}
       <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-5">
         <div className="flex min-w-0 flex-col gap-4 lg:col-span-3">
-        <div className="rounded-2xl border border-border p-3 sm:p-4">
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-            <StatTile label="Total Employees" value={show(counts?.total)} icon={TotalEmployeesIcon} tone="blue" loading={loading} to="/employees" />
-            <StatTile label="Present" value={show(counts?.present)} icon={PresentIcon} tone="green" loading={loading} to={`/attendance?date=${selected}&status=present`} />
-            <StatTile label={isToday ? "Late Today" : "Late"} value={show(counts?.late)} icon={LateIcon} tone="yellow" loading={loading} to={`/attendance?date=${selected}&status=late`} />
-            <StatTile label={isToday ? "Absent Today" : "Absent"} value={show(counts?.absent)} icon={AbsentIcon} tone="pink" loading={loading} to={`/attendance?date=${selected}&status=absent`} />
-          </div>
+        <div className="rounded-2xl border border-border p-3 sm:p-4 md:h-[280px] lg:h-[300px]">
+          <InteractiveMetricWorkspace metrics={metrics} wide={wide} loading={loading} />
         </div>
         {children}
         </div>

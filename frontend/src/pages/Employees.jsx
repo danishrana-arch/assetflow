@@ -54,10 +54,6 @@ const STAT_TILES = [
     key: "ON_LEAVE", label: "On Leave", dot: "bg-chip-blue-fg dark:bg-chip-blue-tint",
     tile: "bg-chip-blue-bg/35 border-chip-blue-bg/80 dark:bg-chip-blue-tint/[0.06] dark:border-chip-blue-tint/10",
   },
-  {
-    key: "LEFT_COMPANY", label: "Left Company", dot: "bg-danger",
-    tile: "bg-chip-pink-bg/35 border-chip-pink-bg/80 dark:bg-chip-pink-tint/[0.06] dark:border-chip-pink-tint/10",
-  },
 ]
 
 function slugName(name) {
@@ -449,7 +445,7 @@ export default function Employees() {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           {STAT_TILES.map((t) => {
             const value = t.key ? counts[t.key] || 0 : totalCount
             const active = filters.status === t.key

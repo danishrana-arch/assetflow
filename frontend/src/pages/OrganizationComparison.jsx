@@ -50,10 +50,7 @@ export default function OrganizationComparison() {
                 </div>
               ))}
             </div>
-            <div className="mt-3 flex justify-between text-xs text-muted">
-              <span>
-                Attendance: <b className="text-ink">{o.attendanceRate}%</b>
-              </span>
+            <div className="mt-3 flex justify-end text-xs text-muted">
               <span>{o.departments} departments</span>
             </div>
           </div>
