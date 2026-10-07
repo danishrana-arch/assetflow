@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { Link, Outlet } from "react-router-dom"
+import { Link, Outlet, useLocation } from "react-router-dom"
 import { Settings as SettingsIcon } from "lucide-react"
 import Sidebar from "../components/Sidebar"
 import Topbar from "../components/Topbar"
@@ -10,11 +10,13 @@ import GlobalSearch from "../components/GlobalSearch"
 import NotificationBell from "../components/NotificationBell"
 import ProfileBadge from "../components/ProfileBadge"
 import ThemeToggle from "../components/ThemeToggle"
+import PoweredBy from "../components/PoweredBy"
 import { usePageHistoryTracker } from "../utils/pageHistory"
 
 export default function DashboardLayout() {
   const [mobileOpen, setMobileOpen] = useState(false)
   const { user } = useAuth()
+  const { pathname } = useLocation()
   const showCompanySwitcher = ["ADMIN", "CEO", "IT_MANAGER"].includes(user?.role)
   // Same rule as App.jsx's RequireOwner on /settings.
   const canOpenSettings = ["ADMIN", "CEO"].includes(user?.role)
@@ -58,6 +60,10 @@ export default function DashboardLayout() {
             </div>
           </div>
           <Outlet />
+          {/* The dashboard places its own copy under the alerts card. */}
+          {pathname !== "/" && pathname !== "/dashboard" && (
+            <PoweredBy className="mt-8 text-right" />
+          )}
         </div>
       </main>
     </div>

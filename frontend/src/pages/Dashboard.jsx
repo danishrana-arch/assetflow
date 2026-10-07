@@ -2,6 +2,7 @@ import { useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "react-router-dom"
 import ParticleText from "../components/ParticleText"
+import PoweredBy from "../components/PoweredBy"
 import { useTheme } from "../context/ThemeContext"
 
 import { PackageCheck, Package, ShieldAlert, PlusCircle, Truck, ClipboardList, Undo2, Wrench, UserPlus, ArrowUpRight, Boxes, Laptop2, MonitorSmartphone, Smartphone, CalendarDays, X, Plus, Megaphone, Info } from "lucide-react"
@@ -1306,6 +1307,8 @@ export default function Dashboard() {
         )}
 
       </section>
+
+      <PoweredBy className="mt-3 text-right" />
 
 
       {/* ======================================================
