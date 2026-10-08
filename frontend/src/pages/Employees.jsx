@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import { useMutation, useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query"
-import { Link } from "react-router-dom"
+import { Link, useNavigate } from "react-router-dom"
 import {
   Search, Plus, X, Copy, Trash2, Upload, FileOutput, Pencil, Mail, FileDown,
   ExternalLink, ArrowUp, ArrowDown, ArrowUpDown, User as UserIcon, Network, GraduationCap as InternIcon, ChevronDown,
@@ -160,6 +160,7 @@ function StatusMenu({ emp, editable, busy, onChange }) {
 
 export default function Employees() {
   const { user } = useAuth()
+  const navigate = useNavigate()
   const canManageEmployees = user?.role === "ADMIN" || user?.role === "CEO"
   const canDeleteEmployee = (emp) => canManageEmployees && emp.id !== user?.id && (user?.role === "CEO" || emp.role !== "CEO")
   // HR can create employees with any non-owner role (backend: inviteEmployee).
@@ -750,7 +751,7 @@ export default function Employees() {
         {employees.map((emp) => (
           <div key={emp.id} className="card flex items-center gap-3 p-4">
             <Avatar name={emp.name} src={emp.photoUrl} size="md" />
-            <button type="button" onClick={() => drawer.open(emp.id)} className="min-w-0 flex-1 text-left">
+            <Link to={`/employees/${emp.id}`} className="min-w-0 flex-1 text-left">
               <p className="truncate text-sm font-semibold text-ink">{emp.name}</p>
               <p className="truncate text-xs text-muted">{emp.designation || ROLE_LABELS[emp.role] || emp.role}</p>
               <p className="mt-0.5 truncate text-xs text-muted-2">
@@ -758,7 +759,7 @@ export default function Employees() {
                 {emp.manager?.name ? ` · ${emp.manager.name}` : ""}
                 {emp.joiningDate ? ` · ${formatDay(emp.joiningDate)}` : ""}
               </p>
-            </button>
+            </Link>
             <div className="flex flex-col items-end gap-2">
               {statusCell(emp)}
               <div className="flex items-center">
@@ -792,11 +793,11 @@ export default function Employees() {
                   />
                 </th>
                 <th className="px-4 py-3"><SortHeader label="Employee" field="name" sort={sort} onSort={toggleSort} /></th>
-                <th className="px-4 py-3"><SortHeader label="Status" field="status" sort={sort} onSort={toggleSort} /></th>
+                <th className="px-4 py-3">Email</th>
                 <th className="px-4 py-3"><SortHeader label="Department" field="department" sort={sort} onSort={toggleSort} /></th>
                 <th className="px-4 py-3"><SortHeader label="Manager" field="manager" sort={sort} onSort={toggleSort} /></th>
                 <th className="px-4 py-3"><SortHeader label="Start Day" field="joiningDate" sort={sort} onSort={toggleSort} /></th>
-                <th className="px-4 py-3">Job Role</th>
+                <th className="px-4 py-3"><SortHeader label="Status" field="status" sort={sort} onSort={toggleSort} /></th>
                 <th className="px-4 py-3">Type</th>
                 <th className="px-4 py-3">Action</th>
               </tr>
@@ -805,7 +806,7 @@ export default function Employees() {
               {employees.map((emp) => (
                 <tr
                   key={emp.id}
-                  onClick={(e) => { if (!e.target.closest("a,button,input,label")) drawer.open(emp.id) }}
+                  onClick={(e) => { if (!e.target.closest("a,button,input,label")) navigate(`/employees/${emp.id}`) }}
                   className={`cursor-pointer border-b border-border last:border-0 transition-colors hover:bg-surface-2 ${selected.has(emp.id) ? "bg-accent-soft" : ""}`}
                 >
                   <td className="px-4 py-3">
@@ -821,16 +822,14 @@ export default function Employees() {
                     <div className="flex items-center gap-3">
                       <Avatar name={emp.name} src={emp.photoUrl} size="sm" />
                       <div className="min-w-0">
-                        <button type="button" onClick={() => drawer.open(emp.id)} className="block max-w-full truncate text-left font-semibold text-ink hover:text-accent">
+                        <Link to={`/employees/${emp.id}`} className="block max-w-full truncate text-left font-semibold text-ink hover:text-accent">
                           {emp.name}
-                        </button>
+                        </Link>
                         <p className="truncate text-xs text-muted">{emp.designation || ROLE_LABELS[emp.role] || emp.role}</p>
                       </div>
                     </div>
                   </td>
-                  <td className="px-4 py-3">
-                    {statusCell(emp)}
-                  </td>
+                  <td className="px-4 py-3 text-ink"><span className="block max-w-[220px] truncate" title={emp.email}>{emp.email}</span></td>
                   <td className="px-4 py-3 text-ink">
                     {emp.department?.name ? (
                       <button type="button" onClick={() => setFilter("department", emp.department.id)} className="text-left hover:text-accent hover:underline" title={`Show only ${emp.department.name}`}>
@@ -840,7 +839,9 @@ export default function Employees() {
                   </td>
                   <td className="px-4 py-3 text-ink">{emp.manager?.name || <span className="text-muted-2">—</span>}</td>
                   <td className="px-4 py-3 text-ink">{emp.joiningDate ? formatDay(emp.joiningDate) : <span className="text-muted-2">—</span>}</td>
-                  <td className="px-4 py-3 text-ink">{emp.designation || ROLE_LABELS[emp.role] || emp.role}</td>
+                  <td className="px-4 py-3">
+                    {statusCell(emp)}
+                  </td>
                   <td className="px-4 py-3 text-ink">
                     {TYPE_LABELS[emp.workLocationType] ? (
                       <button type="button" onClick={() => setFilter("type", emp.workLocationType)} className="rounded-full border border-border px-2.5 py-0.5 text-xs font-medium hover:bg-surface-2" title={`Show only ${TYPE_LABELS[emp.workLocationType]}`}>
