@@ -8,7 +8,9 @@ actual routing/guard code (`frontend/src/App.jsx`, `Sidebar.jsx`,
 assumed from feature names. Each row is "verify this works / is
 blocked as stated," not a full step-by-step script.
 
-**Latest run (2026-09-28, after the later additions)**: see **§17** —
+**Latest run (2026-10-08) — ManagementDock Control Center (§18):** `backend/scripts/test-control-center.js` — **96/96 checks passed** (access control, every read screen, create/update/delete for organizations, users, custom roles, plans, feature overrides, permissions, subscriptions, suspend/restore/delete for non-payment, audit log). Browser screens still need a manual pass (see §18g).
+
+**Earlier run (2026-09-28, after the later additions)**: see **§17** —
 delete/re-add, failed-login alerts + password reset, HR report
 generator, Vite upgrade, session-refresh smoke: **723/723 checks passed**
 (API 86, browser 38, static 101, RBAC regression 498), plus the 3
@@ -24,7 +26,7 @@ corrected in place (ATT-13/16/17, LV-03, ORG-02, ORG-03, EMP-11) — the
 code behaves as intended. **Final run with corrected expectations: 498/498
 API checks passed**, plus **100/100 static/unit checks** (role-map
 parity, route guards, nav gating, time/timezone utils, notification
-links — see CLAUDE.md "Automated RBAC test run"). §16 item 10 (`.env`
+links). §16 item 10 (`.env`
 git history) also done — clean.
 
 **Still untested (can't be done safely/automatically)**: all
@@ -693,10 +695,151 @@ exist yet); mobile-viewport layout of the new HR report card.
 
 ---
 
+## 18. ManagementDock Control Center (platform administration)
+
+Platform-wide administration that is **completely separate from any company**:
+one dedicated account (role `PLATFORM_ADMIN`, hidden organization
+`managementdock-platform`, created with `backend/scripts/create-platform-admin.js`).
+No company role — not even a CEO or Admin — can open it or call
+`/api/platform/*`. Only this account can publish/edit plans, features and
+sales; companies just subscribe to what is published.
+
+**Automated run: `backend/scripts/test-control-center.js`** —
+`cd backend && PLATFORM_ADMIN_EMAIL=<platform email> node scripts/test-control-center.js`.
+It signs a token for the platform account (never needs its password), reads
+real data, and does every write on a throwaway `zz-test-…` organization,
+role, user and plan that it deletes afterwards (it also asserts nothing is
+left behind, CC-99). Result: **96/96 checks passed** (2026-10-08, against the live database)
+
+### 18a. Access control
+
+| ID | What to verify | Expected |
+|----|----------------|----------|
+| CC-01 | Platform account's session | `/auth/me` returns role `PLATFORM_ADMIN` and `isPlatformAdmin: true`; no company data |
+| CC-02 | CEO / Admin / HR / Employee call any of the 12 platform read endpoints, or create an organization | **403** on every one; no token → 401 |
+| CC-03 | A company CEO uses Billing | Can read published plans; **403** when creating or editing a plan |
+| UI-01 | Log in as the platform account | Lands on `/control-center`; the app shows only the top bar (name, email, theme, Change password, Log out) and the 10 sections — no company sidebar, dashboard, search, bell or company switcher; any other URL redirects back |
+| UI-02 | Company users type `/control-center` | Redirected away; the route doesn't exist for them |
+| UI-03 | Change password (top bar) | Needs current password; new one ≥ 12 chars, different, confirmed; wrong current password shows an error and keeps the session |
+
+### 18b. Screens (read)
+
+| ID | Screen | Expected |
+|----|--------|----------|
+| CC-04 | Overview | Org totals (active/archived/groups), active users, plan mix, paid subscriptions, near/at-limit counts, new inquiries, recent platform activity |
+| CC-05 | Organizations | Table: status, group/main company, plan, subscription status, employees/limit, features on, usage state, created; search + status/plan filters; own platform organization never listed |
+| CC-06 | Organization drawer (8 tabs) | Overview, People, Hierarchy (group as peers), Features, Permissions, Billing (+ invoices), Usage, Activity all load |
+| CC-07 | Features | 10 features with platform availability, "entitled in N of M organizations", overrides, plans that include it |
+| CC-08 | Roles & Permissions | Built-in roles × features and × modules (read-only, defined in code) + custom roles |
+| CC-09 | Usage | Employees, user accounts, sites, projects, storage (+ organizations on a group's main company) against the plan's limits; ≥ 80% = warning, ≥ 100% = at limit |
+| CC-10 | System Settings | Version, environment, DB health, payments/email configured flags; **no secret values** anywhere in the payload |
+| CC-11 | Billing | Subscriptions list (plan, status, monthly, renews, provider linked), invoices, sales inquiries; banner when payments aren't connected |
+
+### 18c. Create / update / delete
+
+| ID | Operation | Expected |
+|----|-----------|----------|
+| CC-20 | Add organization | Creates a company + its first Admin; temporary password shown **once**; duplicate admin email → 409 |
+| CC-21 | Rename organization | Saved and audited |
+| CC-30 | Add custom role | Name + base role + module list; unknown module → 400; name equal to a built-in role → 409 |
+| CC-31 | Add user | Organization, name, email, role or custom role; temporary password shown once; signs in and receives the role's modules; refused over the plan's employee limit (CC-53) |
+| CC-32 | Custom role effect | The role's module works (leave), others are 403 (payroll) |
+| CC-33 | Edit custom role | Applies on the user's very next request |
+| CC-34 | Edit user / reset password | Designation/status saved; reset returns a new one-time password and the old one stops working |
+| CC-35 | Change role | Built-in role audited with before/after; clears any custom role; your own account can't be changed |
+| CC-36 | Delete user / custom role | User removed (or a clear "mark Left company instead" 409 if records block it); deleting a role moves its users to their base role |
+| CC-40 | Feature override — off | The organization's admin gets **403 `FEATURE_NOT_ENTITLED`** on that module; `/auth/me` lists it in `disabledModules` (nav hides it) |
+| CC-41 | Reset override / unknown feature | Back to the plan default; unknown key → 404 |
+| CC-42 | Attendance permission matrix (per organization) | Create/Read/Update/Delete per role saves and reads back; audited |
+| CC-50 | Add plan | Price, employee/site/project/organization/storage limits, included features, provider price id; duplicate key → 409; unknown feature → 400 |
+| CC-51 | Sale | Start (20% off → effective price) and end |
+| CC-52 | Assign plan to an organization | Needs a reason; blocked (409 `DOWNGRADE_BLOCKED`) if it has more employees than the plan allows; **no payment collected** (stored $0, audit says so) |
+| CC-53 | Limits | Usage shows state "at limit" at 2/2; adding a user beyond the employee limit → 403 |
+| CC-54 | Cancel subscription | Needs a reason; organization moves to the Free plan |
+| CC-55 | Delete plan | Allowed when nobody is on it; the Free plan can never be deleted |
+| CC-56 | Delete sales inquiry | Removed after a browser confirm — **manual** (the suite has no inquiry data to delete) |
+
+### 18d. Non-payment: suspend, restore, delete
+
+| ID | Scenario | Expected |
+|----|----------|----------|
+| CC-60 | Suspend for non-payment | Needs a reason; an active organization can't be deleted directly |
+| CC-61 | While suspended | Existing sessions → 401 `ORGANIZATION_SUSPENDED`; sign-in → 403 "suspended for an overdue payment" (only after a **correct** password — a wrong password gets the normal error); a CEO can't switch into it |
+| CC-62 | Lift suspension | Listed as Suspended, then Active; access returns immediately |
+| CC-63 | Archive / restore | Archive needs a reason; restore works; the platform's own organization can't be suspended/archived/deleted |
+| CC-64 | Delete organization | Only when suspended or archived, and the exact name must be typed; users and its log are removed; the deletion is recorded in the platform account's own log |
+
+### 18e. Audit log
+
+| ID | What to verify | Expected |
+|----|----------------|----------|
+| CC-70 | Every action above is logged | organization created/renamed/suspended/unsuspended/archived/restored/deleted, user created/updated/role changed/password reset/deleted, role created/updated/deleted, feature override, subscription assigned/cancelled, attendance permissions, plan created/updated/deleted, sale set/ended — each with actor, organization, time and **before/after values** (plus reason where one is required) |
+| CC-71 | Filters | Search, organization, date range, "Platform actions" scope, paging |
+| CC-72 | Read-only | No create/edit/delete routes for audit entries |
+| CC-99 | Clean-up | The suite leaves no organization, user, role or plan behind |
+
+### 18f. How it works (reference for testers)
+
+- **Who is a platform admin:** only a user whose role is `PLATFORM_ADMIN`
+  (`backend/src/utils/platform.js`). It lives in the hidden organization
+  `managementdock-platform` and is created/reset with
+  `backend/scripts/create-platform-admin.js` (needs the `PLATFORM_ADMIN`
+  enum value from migration `20261008140000_control_center`). No setting,
+  email list or company role can grant it.
+- **Access rule (entitlement):** a user reaches a module only if (1) the
+  feature is available platform-wide, (2) the organization's plan includes it
+  or an override turns it on, (3) the user's role (or custom role) permits the
+  module, and (4) any per-user flag applies. `requireModule` /
+  `requireModuleOrSelf` enforce (2); biometric devices and organization
+  comparison use `requireFeature`. Lookups are cached 30 s and **fail open** if
+  the lookup errors. Existing plans were all given every feature by the
+  migration, so nothing changed until a platform admin narrows a plan.
+  Feature keys: `backend/src/utils/features.js` — keep in sync with the
+  migration list.
+- **Custom roles** (`CustomRole`, `User.customRoleId`, migration
+  `20261008150000_custom_roles`): a named module list on top of a base role.
+  The list replaces the base role's modules; the base role still decides every
+  other check (`requireRole`, `isManagement`). Applied through
+  `runWithAccess` (AsyncLocalStorage, `utils/roles.js`) so the existing
+  `hasModuleAccess(req.user.role, …)` calls honour it; the frontend mirrors
+  it with `setCustomModules` / `setDisabledModules` in `utils/roles.js`.
+- **Plans** reuse `billing.controller.js` (mounted again under
+  `/api/platform/plans`); `canManagePlans` = platform admin only. Plan fields
+  added: `featureKeys`, `siteLimit`, `projectLimit`, `organizationLimit`,
+  `storageLimitMb`, `billingInterval`, `stripePriceId`.
+- **Subscriptions:** a platform "assign plan" is administrative — stored at
+  $0, no payment collected, audit entry says so. Subscription status
+  `SUSPENDED` switches a company off (`requireAuth`, login, organization
+  switcher). Lifting sets it back to `ACTIVE`.
+- **Audit:** `AuditLog.details` holds `{ before, after, reason… }`. Platform
+  actions are `platform.*`; plan edits stay `billing.*`; attendance permission
+  changes are `permissions.attendance_updated`. Deleting an organization
+  removes that organization's own log; the deletion itself is recorded in the
+  platform account's log.
+- **Deleting / archiving:** organizations are archived or suspended first;
+  hard delete needs the typed name. Users that still own records can't be
+  deleted (409) — set them to "Left company".
+- **Deploy order:** `npx prisma migrate deploy && npx prisma generate` (backend
+  stopped) **before** restarting the backend, then run
+  `create-platform-admin.js` once.
+
+### 18g. Not covered / manual
+
+- Browser screens were not clicked through by automation (no browser tool in
+  this environment): UI-01…UI-03, drawer tabs, dialogs, the one-time password
+  dialog, the context menus and the phone layout need a manual pass.
+- Real payments: Stripe is not connected (`services/billing-payments.js`), so
+  checkout, portal, invoices and automatic suspension on a failed payment
+  cannot be tested; suspension is a manual decision by the platform admin.
+- Site / project / organization / storage limits only warn; only the
+  employee limit is enforced when adding people.
+
+---
+
 ## Appendix: known pre-existing gaps to track separately (not new bugs to file blind)
 
-These are documented in `CLAUDE.md` as already-known, deliberate, or
-tracked items — confirm current status rather than re-reporting them as
+These are already-known, deliberate, or
+tracked items (see git history for the change notes that used to live in `CLAUDE.md`) — confirm current status rather than re-reporting them as
 new findings:
 
 - Only `MyAttendance` was pulled out of lazy-loading for offline support;
