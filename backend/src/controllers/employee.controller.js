@@ -98,6 +98,8 @@ async function listEmployees(req, res, next) {
     if (req.query.workLocationType && ["OFFICE", "FIELD"].includes(req.query.workLocationType)) {
       where.workLocationType = req.query.workLocationType
     }
+    // Interns tile: only people whose level is INTERN.
+    if (req.query.level === "INTERN") where.seniorityLevel = "INTERN"
     // Sorted in JS (case-insensitive) — see utils/sort.js.
     const order = req.query.order === "desc" ? "desc" : "asc"
     const STATUS_ORDER = ["ACTIVE", "ON_LEAVE", "LEFT_COMPANY"]
@@ -119,14 +121,16 @@ async function listEmployees(req, res, next) {
       const pageNum = Math.max(1, parseInt(page, 10) || 1)
       const size = Math.min(100, Math.max(1, parseInt(pageSize, 10) || 25))
       // Stat cards: counts per status for the same filters, ignoring the status filter.
-      const { status: _ignored, ...countWhere } = where
+      const { status: _ignored, seniorityLevel: _level, ...countWhere } = where
 
       // One parallel round trip: org rosters are small, so load the filtered
       // set and sort/page it in memory.
-      const [rows, ceoCount, statusGroups] = await Promise.all([
+      const [rows, ceoCount, statusGroups, internCount] = await Promise.all([
         prisma.user.findMany({ where, include }),
         prisma.user.count({ where: { organizationId, role: "CEO" } }),
-        prisma.user.groupBy({ by: ["status"], where: countWhere, _count: { _all: true } }),
+        prisma.user.groupBy({ by: ["status"], where: { ...countWhere, ...(req.query.level === "INTERN" ? { seniorityLevel: "INTERN" } : {}) }, _count: { _all: true } }),
+        // Interns who are still with the company (the tile ignores the level/status filters).
+        prisma.user.count({ where: { ...countWhere, seniorityLevel: "INTERN", status: { not: "LEFT_COMPANY" } } }),
       ])
       const total = rows.length
       const employees = sortRows(rows, sortValue, order, (u) => u.name).slice((pageNum - 1) * size, pageNum * size)
@@ -143,6 +147,7 @@ async function listEmployees(req, res, next) {
         totalPages: Math.max(1, Math.ceil(total / size)),
         ceoCount,
         statusCounts,
+        internCount,
       })
     }
 

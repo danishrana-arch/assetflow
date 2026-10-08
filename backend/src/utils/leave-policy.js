@@ -95,14 +95,26 @@ function typeLimit(allowances, type, employee, year) {
 
 // Days that don't count as leave: company holidays and, when `org` is given,
 // the company's non-working weekdays (e.g. a weekend inside a leave).
-async function holidaySet(organizationId, start, end, org) {
-  const holidays = await prisma.holiday.findMany({
-    where: { organizationId, date: { gte: start, lte: end } },
-    select: { date: true },
-  })
+async function holidaySet(organizationId, start, end, org, employeeId) {
+  const [holidays, worked] = await Promise.all([
+    prisma.holiday.findMany({ where: { organizationId, date: { gte: start, lte: end } }, select: { date: true } }),
+    employeeId ? workedDaySet(employeeId, start, end) : new Set(),
+  ])
   const set = new Set(holidays.map((h) => dayKey(h.date)))
   if (!org) return set
-  return { has: (key) => set.has(key) || !isScheduledWorkday(new Date(`${key}T00:00:00Z`), org) }
+  // `worked` = days the employee actually checked in on: a full-day leave
+  // doesn't count them (daysByMonth), a half day still does.
+  return { has: (key) => set.has(key) || !isScheduledWorkday(new Date(`${key}T00:00:00Z`), org), worked }
+}
+
+// Days (YYYY-MM-DD) in [start, end] the employee checked in — they came to
+// work, so a leave covering that day doesn't use up leave or cost pay.
+async function workedDaySet(employeeId, start, end) {
+  const rows = await prisma.attendanceRecord.findMany({
+    where: { employeeId, checkInAt: { not: null }, status: { in: ["PRESENT", "LATE"] }, date: { gte: toDateOnly(start), lte: toDateOnly(end) } },
+    select: { date: true },
+  })
+  return new Set(rows.map((r) => dayKey(r.date)))
 }
 
 // Chargeable leave days per month of `year` ([0] unused, [1..12]) for the
@@ -117,7 +129,7 @@ function daysByMonth(leaves, year, holidays) {
       continue
     }
     for (let d = new Date(start); d <= end; d.setUTCDate(d.getUTCDate() + 1)) {
-      if (d.getUTCFullYear() !== year || holidays.has(dayKey(d))) continue
+      if (d.getUTCFullYear() !== year || holidays.has(dayKey(d)) || holidays.worked?.has(dayKey(d))) continue
       months[d.getUTCMonth() + 1] += 1
     }
   }
@@ -156,7 +168,7 @@ async function latePenaltiesForYear({ organizationId, employee, org, year, paidB
   if (!lateByMonth.some((n) => n > 0)) return { months: empty, rules }
   if (!paidByMonth || annualUsed === undefined) {
     const { start, end } = yearBounds(year)
-    const [leaves, holidays] = await Promise.all([activeLeavesInYear(employee.id, year), holidaySet(organizationId, start, end, org)])
+    const [leaves, holidays] = await Promise.all([activeLeavesInYear(employee.id, year), holidaySet(organizationId, start, end, org, employee.id)])
     const paid = leaves.filter(isPaidLeave)
     paidByMonth = daysByMonth(paid, year, holidays)
     annualUsed = sum(daysByMonth(paid.filter((l) => l.type === "ANNUAL"), year, holidays))
@@ -179,7 +191,7 @@ async function latePenaltiesForYear({ organizationId, employee, org, year, paidB
 // sickLeaveAllowance, casualLeaveAllowance.
 async function leaveSchedule({ organizationId, employee, org, year, todayKey }) {
   const { start, end } = yearBounds(year)
-  const [leaves, holidays] = await Promise.all([activeLeavesInYear(employee.id, year), holidaySet(organizationId, start, end, org)])
+  const [leaves, holidays] = await Promise.all([activeLeavesInYear(employee.id, year), holidaySet(organizationId, start, end, org, employee.id)])
   const allowances = leaveAllowances(org)
   const paid = leaves.filter(isPaidLeave)
   const perMonth = daysByMonth(paid, year, holidays)
@@ -276,7 +288,7 @@ async function validateLeaveRequest({ organizationId, employee, org, start, end,
   let requestedTotal = 0
   for (let year = start.getUTCFullYear(); year <= end.getUTCFullYear(); year++) {
     const { start: ys, end: ye } = yearBounds(year)
-    const [existing, holidays] = await Promise.all([activeLeavesInYear(employee.id, year), holidaySet(organizationId, ys, ye, org)])
+    const [existing, holidays] = await Promise.all([activeLeavesInYear(employee.id, year), holidaySet(organizationId, ys, ye, org, employee.id)])
     const requested = daysByMonth([request], year, holidays)
     const requestedYear = sum(requested)
     requestedTotal += requestedYear
@@ -339,4 +351,5 @@ module.exports = {
   typeLimit,
   leaveSchedule,
   validateLeaveRequest,
+  workedDaySet,
 }

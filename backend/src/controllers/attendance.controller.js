@@ -712,7 +712,11 @@ async function markSelfAttendance(req, res, next) {
     if (!organization) return res.status(404).json({ error: 'Employee or organization not found' })
     const today=startOfDay(null, organization.timezone)
     const existing=await prisma.attendanceRecord.findUnique({ where:{ employeeId_date:{employeeId:userId,date:today} } })
-    if (existing?.status==='LEAVE') return res.status(400).json({ error:'Today is already recorded as leave' })
+    // An employee who comes in on a day recorded as leave simply works that
+    // day: the check-in below replaces LEAVE with PRESENT/LATE, and leave
+    // balance / payroll skip days that have a check-in (see leave-policy.js
+    // workedDaySet). Only a check-out-only "absent" call is refused.
+    if (existing?.status==='LEAVE' && status==='ABSENT') return res.status(400).json({ error:'Today is already recorded as leave' })
 
     // An employee bound to an attendance site (directly or through the site's
     // project) must check in with a location: WFH is not offered to them. A

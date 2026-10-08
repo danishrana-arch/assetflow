@@ -1,7 +1,6 @@
 import { useState } from "react"
-import { Link } from "react-router-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Plus, X, Building2, Users, Boxes, UserRound, Pencil, Trash2, Check, ChevronDown, ChevronUp, Search } from "lucide-react"
+import { Plus, X, Building2, Users, Boxes, UserRound, Pencil, Trash2, Check, Search, Eye } from "lucide-react"
 import api from "../api/client"
 import { useAuth } from "../context/AuthContext"
 import { hasModuleAccess } from "../utils/roles"
@@ -9,6 +8,11 @@ import PageHeader from "../components/ui/PageHeader"
 import IconChip from "../components/ui/IconChip"
 import { TextField } from "../components/ui/Field"
 import EmptyState from "../components/ui/EmptyState"
+import ActionMenu from "../components/ui/ActionMenu"
+import DetailDrawer from "../components/ui/DetailDrawer"
+import MetricCard from "../components/ui/MetricCard"
+import EmployeeDrawer from "../components/EmployeeDrawer"
+import useDrawerParam from "../utils/useDrawerParam"
 
 const TONES = ["blue", "purple", "cyan", "orange", "green", "pink", "yellow"]
 
@@ -21,25 +25,69 @@ function ManagerSelect({ value, onChange, employees, className = "field mt-1 w-f
   )
 }
 
-// Members of one department, loaded only when its card is expanded.
-function DepartmentMembers({ departmentId }) {
+// Members of one department; each opens that employee's drawer in place.
+function DepartmentMembers({ departmentId, onOpenEmployee }) {
   const { data: members = [], isLoading } = useQuery({
     queryKey: ["employees", "department", departmentId],
     queryFn: () => api.get("/employees", { params: { department: departmentId, page: 1, pageSize: 100 } }).then((r) => r.data?.data || []),
   })
-  if (isLoading) return <p className="mt-3 text-xs text-muted">Loading…</p>
-  if (!members.length) return <p className="mt-3 text-xs text-muted">No employees in this department.</p>
+  if (isLoading) return <p className="py-6 text-center text-sm text-muted">Loading…</p>
+  if (!members.length) return <p className="py-6 text-center text-sm text-muted">No employees in this department.</p>
   return (
-    <ul className="mt-3 max-h-56 space-y-1.5 overflow-y-auto">
+    <ul className="space-y-1.5">
       {members.map((m) => (
         <li key={m.id}>
-          <Link to={`/employees/${m.id}`} className="flex items-center justify-between rounded-xl bg-surface-2 px-3 py-2 text-xs hover:text-accent">
+          <button type="button" onClick={() => onOpenEmployee(m.id)} className="flex w-full items-center justify-between rounded-xl bg-surface px-3 py-2.5 text-left text-sm hover:bg-surface-2">
             <span className="truncate font-medium text-ink">{m.name}</span>
-            <span className="ml-2 shrink-0 text-muted">{m.designation || m.role}</span>
-          </Link>
+            <span className="ml-2 shrink-0 text-xs text-muted">{m.designation || m.role}</span>
+          </button>
         </li>
       ))}
     </ul>
+  )
+}
+
+function DepartmentDrawer({ dept, onClose, canViewMembers, onOpenEmployee }) {
+  const { data: members } = useQuery({
+    queryKey: ["employees", "department", dept?.id],
+    queryFn: () => api.get("/employees", { params: { department: dept.id, page: 1, pageSize: 100 } }).then((r) => r.data?.data || []),
+    enabled: !!dept && canViewMembers,
+  })
+  const overview = dept && (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-2">
+        <MetricCard label="Employees" value={dept._count?.employees || 0} icon={Users}>
+          {canViewMembers && (members?.length
+            ? <ul className="space-y-1">{members.slice(0, 6).map((m) => <li key={m.id} className="truncate text-xs text-ink">{m.name}</li>)}{members.length > 6 && <li className="text-xs text-muted">+ {members.length - 6} more in the Employees tab</li>}</ul>
+            : null)}
+        </MetricCard>
+        <MetricCard label="Assets" value={dept._count?.assets || 0} icon={Boxes} />
+      </div>
+      <div className="rounded-xl bg-surface px-3 py-2.5">
+        <p className="text-[11px] text-muted">Manager</p>
+        <p className="mt-0.5 text-sm font-medium text-ink">
+          {dept.manager ? (
+            canViewMembers
+              ? <button type="button" onClick={() => onOpenEmployee(dept.manager.id)} className="text-accent hover:underline">{dept.manager.name}</button>
+              : dept.manager.name
+          ) : <span className="text-muted">No manager</span>}
+        </p>
+      </div>
+    </div>
+  )
+  return (
+    <DetailDrawer
+      open={!!dept}
+      onClose={onClose}
+      resetKey={dept?.id}
+      breadcrumb={[{ label: "Departments", onClick: onClose }]}
+      title={dept?.name}
+      leading={<IconChip icon={Building2} tone="blue" size="md" />}
+      tabs={dept ? [
+        { key: "overview", label: "Overview", content: overview },
+        canViewMembers && { key: "employees", label: "Employees", count: dept._count?.employees || 0, content: <DepartmentMembers departmentId={dept.id} onOpenEmployee={onOpenEmployee} /> },
+      ].filter(Boolean) : []}
+    />
   )
 }
 
@@ -56,7 +104,8 @@ export default function Departments() {
   const [newDept, setNewDept] = useState({ name: "", managerId: "" })
   const [editingId, setEditingId] = useState(null)
   const [editDraft, setEditDraft] = useState({ name: "", managerId: "" })
-  const [expandedId, setExpandedId] = useState(null)
+  const drawer = useDrawerParam("view")
+  const employeeDrawer = useDrawerParam("employee")
   const [search, setSearch] = useState("")
   const [error, setError] = useState("")
 
@@ -153,16 +202,19 @@ export default function Departments() {
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {visible.map((dept, i) => {
             const editing = editingId === dept.id
-            const expanded = expandedId === dept.id
             return (
               <div key={dept.id} className="card p-5">
                 <div className="flex items-start justify-between">
                   <IconChip icon={Building2} tone={TONES[i % TONES.length]} size="md" />
-                  {canEdit && !editing && (
-                    <div className="flex gap-1">
-                      <button onClick={() => startEdit(dept)} title="Edit department" aria-label="Edit department" className="rounded-full p-2 text-muted hover:bg-surface-2 hover:text-ink"><Pencil size={14} /></button>
-                      <button onClick={() => handleDelete(dept)} disabled={remove.isPending} title="Delete department" aria-label="Delete department" className="rounded-full p-2 text-muted hover:bg-red-50 hover:text-danger disabled:opacity-50"><Trash2 size={14} /></button>
-                    </div>
+                  {!editing && (
+                    <ActionMenu
+                      label={`Actions for ${dept.name}`}
+                      items={[
+                        { label: "View details", icon: Eye, onClick: () => drawer.open(dept.id) },
+                        { label: "Edit", icon: Pencil, show: canEdit, onClick: () => startEdit(dept) },
+                        { label: "Delete", icon: Trash2, danger: true, show: canEdit, onClick: () => handleDelete(dept) },
+                      ]}
+                    />
                   )}
                 </div>
 
@@ -202,13 +254,11 @@ export default function Departments() {
                       <div className="mt-4 border-t border-border pt-3">
                         <button
                           type="button"
-                          onClick={() => setExpandedId(expanded ? null : dept.id)}
+                          onClick={() => drawer.open(dept.id)}
                           className="flex w-full items-center justify-between text-[10px] font-semibold uppercase tracking-wide text-muted hover:text-ink"
                         >
-                          {expanded ? "Hide employees" : "View employees"}
-                          {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                          View details
                         </button>
-                        {expanded && <DepartmentMembers departmentId={dept.id} />}
                       </div>
                     )}
                   </>
@@ -226,6 +276,19 @@ export default function Departments() {
           )}
         </div>
       )}
+
+      <DepartmentDrawer
+        dept={departments.find((d) => d.id === drawer.id)}
+        onClose={drawer.close}
+        canViewMembers={canViewMembers}
+        onOpenEmployee={employeeDrawer.open}
+      />
+      <EmployeeDrawer
+        id={employeeDrawer.id}
+        onClose={employeeDrawer.close}
+        onOpenEmployee={employeeDrawer.open}
+        breadcrumb={[{ label: "Departments", onClick: employeeDrawer.close }, ...(drawer.id ? [{ label: departments.find((d) => d.id === drawer.id)?.name || "Department", onClick: employeeDrawer.close }] : [])]}
+      />
     </div>
   )
 }

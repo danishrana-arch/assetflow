@@ -7,7 +7,7 @@ const { streamPayslipPdf } = require("../utils/payslip-pdf")
 const { hasModuleAccess } = require("../utils/roles")
 const { isScheduledWorkday } = require("../utils/work-schedule")
 const { dateKeyInTimeZone } = require("../utils/timezone")
-const { latePenaltiesForYear } = require("../utils/leave-policy")
+const { latePenaltiesForYear, workedDaySet } = require("../utils/leave-policy")
 
 // Counts how many of an (inclusive) date range's days fall within the
 // given month, so a multi-day unpaid-leave request that only partly
@@ -29,9 +29,12 @@ async function workdaysInMonthOverlap(employeeId, start, end, monthStart, monthE
   const emp = await prisma.user.findUnique({ where: { id: employeeId }, select: { organizationId: true, organization: { select: { workingDays: true, workingDaysPerWeek: true } } } })
   const holidays = await prisma.holiday.findMany({ where: { organizationId: emp?.organizationId, date: { gte: from, lte: to } }, select: { date: true } })
   const holidayKeys = new Set(holidays.map((h) => h.date.toISOString().slice(0, 10)))
+  // Days the employee came in and checked in aren't unpaid leave.
+  const worked = await workedDaySet(employeeId, from, to)
   let n = 0
   for (let d = new Date(from); d <= to; d.setUTCDate(d.getUTCDate() + 1)) {
-    if (!holidayKeys.has(d.toISOString().slice(0, 10)) && isScheduledWorkday(d, emp?.organization)) n += 1
+    const key = d.toISOString().slice(0, 10)
+    if (!holidayKeys.has(key) && !worked.has(key) && isScheduledWorkday(d, emp?.organization)) n += 1
   }
   return n
 }

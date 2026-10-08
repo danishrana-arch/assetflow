@@ -4,7 +4,7 @@ const { logAudit } = require("../utils/audit")
 const { toDateOnly } = require("../utils/date")
 const { notifyManagement, createNotification } = require("../utils/notifications")
 const { dateKeyInTimeZone } = require("../utils/timezone")
-const { validateLeaveRequest, leaveSchedule, leaveAllowances, NOT_PERMANENT_MESSAGE, PENDING_LEAVE_STATUSES } = require("../utils/leave-policy")
+const { validateLeaveRequest, leaveSchedule, leaveAllowances, NOT_PERMANENT_MESSAGE, PENDING_LEAVE_STATUSES, workedDaySet } = require("../utils/leave-policy")
 const { refreshDraftPayslip } = require("./payroll.controller")
 const { isScheduledWorkday } = require("../utils/work-schedule")
 
@@ -461,7 +461,11 @@ async function reviewLeave(req, res, next) {
     }
     const markAbsent = payAs === "UNPAID" && leave.type !== "UNPAID"
     // Only working days are marked (a weekend or holiday inside the leave isn't).
-    const days = decision === "APPROVED" && !leave.isHalfDay ? await leaveWorkdays(organizationId, leave.startDate, leave.endDate) : []
+    const leaveDays = decision === "APPROVED" && !leave.isHalfDay ? await leaveWorkdays(organizationId, leave.startDate, leave.endDate) : []
+    // Days the employee already came in and checked in on are worked days —
+    // never overwrite them with LEAVE / ABSENT.
+    const worked = leaveDays.length ? await workedDaySet(leave.employeeId, leave.startDate, leave.endDate) : new Set()
+    const days = leaveDays.filter((d) => !worked.has(d.toISOString().slice(0, 10)))
 
     const updated = await prisma.$transaction(async (tx) => {
       const saved = await tx.leaveApplication.update({

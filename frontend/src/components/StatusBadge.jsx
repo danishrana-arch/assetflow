@@ -3,7 +3,7 @@ import StatusPill from "./ui/StatusPill"
 const EMPLOYEE_STATUS = {
   ACTIVE: { label: "Active", tone: "green" },
   ON_LEAVE: { label: "On Leave", tone: "yellow" },
-  LEFT_COMPANY: { label: "Left", tone: "pink" },
+  LEFT_COMPANY: { label: "Inactive", tone: "pink" },
 }
 
 const ASSET_STATUS = {

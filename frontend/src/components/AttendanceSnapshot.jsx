@@ -3,7 +3,7 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query"
 import { Link } from "react-router-dom"
 import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react"
 import { TotalEmployeesIcon, PresentIcon, LateIcon, AbsentIcon } from "./ui/StatusIcons"
-import InteractiveMetricWorkspace from "./ui/InteractiveMetricWorkspace"
+import InteractiveMetricWorkspace, { MetricNav } from "./ui/InteractiveMetricWorkspace"
 import api from "../api/client"
 import { formatTime } from "../utils/time"
 
@@ -153,6 +153,7 @@ export default function AttendanceSnapshot({ timeZone, children }) {
   }, [data, todayKey])
 
   const wide = useIsWide()
+  const [activeMetric, setActiveMetric] = useState(null)
   const tz = data?.schedule?.timezone || timeZone
   const metrics = useMemo(() => {
     const c = counts
@@ -216,11 +217,15 @@ export default function AttendanceSnapshot({ timeZone, children }) {
   return (
     <div className="p-4 sm:p-5 lg:p-6">
       {/* Heading + 7-day selector */}
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between lg:gap-4">
         <div className="min-w-0">
           <p className="text-base font-semibold text-ink sm:text-lg">Attendance Snapshot</p>
           <p className="mt-0.5 text-xs leading-5 text-muted sm:text-sm">Overview of attendance for your team</p>
         </div>
+
+        {wide && activeMetric && (
+          <MetricNav metrics={metrics} activeId={activeMetric} onSelect={setActiveMetric} className="min-w-[300px] flex-1 lg:max-w-[460px]" />
+        )}
 
         <div className="flex min-w-0 items-center gap-1.5 sm:gap-2">
           <button type="button" onClick={() => setWindowStart((s) => addDays(s, -1))} className={arrowClass} aria-label="Show previous day">
@@ -264,7 +269,7 @@ export default function AttendanceSnapshot({ timeZone, children }) {
       <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-5">
         <div className="flex min-w-0 flex-col gap-4 lg:col-span-3">
         <div className="rounded-2xl border border-border p-3 sm:p-4 md:h-[280px] lg:h-[300px]">
-          <InteractiveMetricWorkspace metrics={metrics} wide={wide} loading={loading} />
+          <InteractiveMetricWorkspace metrics={metrics} wide={wide} loading={loading} external activeId={activeMetric} onActiveChange={setActiveMetric} />
         </div>
         {children}
         </div>

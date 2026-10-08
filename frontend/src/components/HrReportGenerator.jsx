@@ -368,7 +368,7 @@ export default function HrReportGenerator() {
               <option value="">All statuses</option>
               <option value="ACTIVE">Active</option>
               <option value="ON_LEAVE">On leave</option>
-              <option value="LEFT_COMPANY">Left company</option>
+              <option value="LEFT_COMPANY">Inactive</option>
             </SelectField>
           )}
         </div>

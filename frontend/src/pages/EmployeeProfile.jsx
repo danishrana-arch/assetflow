@@ -1479,7 +1479,7 @@ export default function EmployeeProfile() {
                         <SelectField label="Status" value={editForm.status} disabled={employee.role === "CEO" && user?.role !== "CEO"} onChange={setField("status")}>
                           <option value="ACTIVE">Active</option>
                           <option value="ON_LEAVE">On Leave</option>
-                          <option value="LEFT_COMPANY">Left Company</option>
+                          <option value="LEFT_COMPANY">Inactive</option>
                         </SelectField>
                         <SelectField label="Employee type" value={editForm.workLocationType} onChange={setField("workLocationType")}>
                           <option value="OFFICE">Office (attendance geofence applies)</option>

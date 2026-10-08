@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from "react"
-import { createPortal } from "react-dom"
 import { useMutation, useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query"
-import { Link, useNavigate } from "react-router-dom"
+import { Link } from "react-router-dom"
 import {
   Search, Plus, X, Copy, Trash2, Upload, FileOutput, Pencil, Mail, FileDown,
-  MoreHorizontal, ArrowUp, ArrowDown, ArrowUpDown, User as UserIcon,
+  ExternalLink, ArrowUp, ArrowDown, ArrowUpDown, User as UserIcon, Network, GraduationCap as InternIcon, ChevronDown,
 } from "lucide-react"
+import StatTile from "../components/ui/StatTile"
+import FilterMenu from "../components/ui/FilterMenu"
+import { TotalEmployeesIcon, PresentIcon, OnLeaveIcon } from "../components/ui/StatusIcons"
 import api from "../api/client"
 import BackButton from "../components/ui/BackButton"
 import { useAuth } from "../context/AuthContext"
@@ -15,6 +17,9 @@ import Avatar from "../components/ui/Avatar"
 import Pagination from "../components/ui/Pagination"
 import { TextField, SelectField } from "../components/ui/Field"
 import EmptyState from "../components/ui/EmptyState"
+import ActionMenu from "../components/ui/ActionMenu"
+import EmployeeDrawer from "../components/EmployeeDrawer"
+import useDrawerParam from "../utils/useDrawerParam"
 
 const PAGE_SIZE = 25
 // Any spreadsheet the backend can read (utils/sheet.js): Excel, Google Sheets
@@ -40,21 +45,23 @@ const emptyForm = {
   employmentStatus: "PROBATION",
 }
 
-const STATUS_LABELS = { ACTIVE: "Active", ON_LEAVE: "On Leave", LEFT_COMPANY: "Left Company" }
+const STATUS_LABELS = { ACTIVE: "Active", ON_LEAVE: "On Leave", LEFT_COMPANY: "Inactive" }
 const TYPE_LABELS = { OFFICE: "Office", FIELD: "Field" }
 
-// Same tinted-tile treatment as the dashboard Attendance Snapshot.
-const STAT_TILES = [
-  { key: "", label: "Total Employees", dot: "bg-ink", tile: "bg-surface-2 border-border" },
-  {
-    key: "ACTIVE", label: "Active", dot: "bg-success",
-    tile: "bg-chip-green-bg/40 border-chip-green-bg dark:bg-chip-green-tint/[0.06] dark:border-chip-green-tint/10",
-  },
-  {
-    key: "ON_LEAVE", label: "On Leave", dot: "bg-chip-blue-fg dark:bg-chip-blue-tint",
-    tile: "bg-chip-blue-bg/35 border-chip-blue-bg/80 dark:bg-chip-blue-tint/[0.06] dark:border-chip-blue-tint/10",
-  },
+// Status tiles (click = filter by that status). The Departments tile is separate:
+// it opens the departments panel instead of filtering by status.
+const STATUS_TILES = [
+  { key: "", label: "Total Employees", icon: TotalEmployeesIcon, tone: "neutral" },
+  { key: "ACTIVE", label: "Active", icon: PresentIcon, tone: "green" },
+  { key: "ON_LEAVE", label: "On Leave", icon: OnLeaveIcon, tone: "blue" },
 ]
+const STATUS_CHOICES = [
+  { value: "ACTIVE", label: "Active" },
+  { value: "ON_LEAVE", label: "On Leave" },
+  { value: "LEFT_COMPANY", label: "Inactive" },
+]
+const TYPE_OPTIONS = Object.entries(TYPE_LABELS).map(([value, label]) => ({ value, label }))
+const STATUS_OPTIONS = Object.entries(STATUS_LABELS).map(([value, label]) => ({ value, label }))
 
 function slugName(name) {
   return name
@@ -122,71 +129,32 @@ function SortHeader({ label, field, sort, onSort }) {
   )
 }
 
-// "…" menu, rendered in a portal so the table's scroll container can't clip it.
-function RowMenu({ emp, canDelete, onRemove }) {
-  const [pos, setPos] = useState(null)
-  const btnRef = useRef(null)
-  const navigate = useNavigate()
-
-  useEffect(() => {
-    if (!pos) return
-    const close = () => setPos(null)
-    const onKey = (e) => e.key === "Escape" && close()
-    window.addEventListener("scroll", close, true)
-    window.addEventListener("resize", close)
-    window.addEventListener("keydown", onKey)
-    return () => {
-      window.removeEventListener("scroll", close, true)
-      window.removeEventListener("resize", close)
-      window.removeEventListener("keydown", onKey)
-    }
-  }, [pos])
-
-  function toggle() {
-    if (pos) return setPos(null)
-    const r = btnRef.current.getBoundingClientRect()
-    const height = canDelete ? 132 : 92
-    const top = r.bottom + height + 8 > window.innerHeight ? r.top - height - 4 : r.bottom + 4
-    setPos({ top, left: Math.max(8, r.right - 180) })
-  }
-
-  const item = "flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-surface-2"
+// Shared row/card "⋮" menu: same items everywhere, only permitted ones shown.
+function RowMenu({ emp, canDelete, onRemove, onView }) {
   return (
-    <>
-      <button
-        ref={btnRef}
-        type="button"
-        onClick={toggle}
-        className="rounded-lg p-1.5 text-muted hover:bg-surface-2 hover:text-ink"
-        aria-label={`More actions for ${emp.name}`}
-        aria-expanded={!!pos}
-      >
-        <MoreHorizontal size={16} />
-      </button>
-      {pos && createPortal(
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setPos(null)} />
-          <div
-            role="menu"
-            style={{ top: pos.top, left: pos.left }}
-            className="fixed z-50 w-[180px] overflow-hidden rounded-xl border border-border bg-surface py-1 shadow-card"
-          >
-            <button className={`${item} text-ink`} onClick={() => { setPos(null); navigate(`/employees/${emp.id}`) }}>
-              <UserIcon size={14} /> View profile
-            </button>
-            <button className={`${item} text-ink`} onClick={() => { setPos(null); navigator.clipboard?.writeText(emp.email) }}>
-              <Copy size={14} /> Copy email
-            </button>
-            {canDelete && (
-              <button className={`${item} text-danger`} onClick={() => { setPos(null); onRemove(emp) }}>
-                <Trash2 size={14} /> Remove
-              </button>
-            )}
-          </div>
-        </>,
-        document.body
-      )}
-    </>
+    <ActionMenu
+      label={`More actions for ${emp.name}`}
+      items={[
+        { label: "View details", icon: UserIcon, onClick: () => onView(emp.id) },
+        { label: "Open full profile", icon: ExternalLink, to: `/employees/${emp.id}` },
+        { label: "Copy email", icon: Copy, onClick: () => navigator.clipboard?.writeText(emp.email) },
+        { label: "Remove", icon: Trash2, danger: true, show: canDelete, onClick: () => onRemove(emp) },
+      ]}
+    />
+  )
+}
+
+// The status pill; for people allowed to edit it, clicking opens Active / On Leave / Inactive.
+function StatusMenu({ emp, editable, busy, onChange }) {
+  const badge = <StatusBadge type="employee" status={emp.status} />
+  if (!editable) return badge
+  return (
+    <ActionMenu
+      label={`Change status for ${emp.name}`}
+      selected={emp.status}
+      trigger={<span className={`inline-flex items-center gap-1 ${busy ? "opacity-60" : ""}`}>{badge}<ChevronDown size={12} className="text-muted" /></span>}
+      items={STATUS_CHOICES.map((c) => ({ label: c.label, value: c.value, onClick: () => c.value !== emp.status && onChange(c.value) }))}
+    />
   )
 }
 
@@ -207,8 +175,10 @@ export default function Employees() {
   // ?status= preselects a status tile (e.g. the CEO dashboard Company overview).
   const [filters, setFilters] = useState(() => {
     const status = new URLSearchParams(window.location.search).get("status")
-    return { status: STAT_TILES.some((t) => t.key && t.key === status) ? status : "", department: "", role: "" }
+    return { status: STATUS_LABELS[status] ? status : "", department: "", role: "", type: "", level: "" }
   })
+  const [showDepartments, setShowDepartments] = useState(false)
+  const searchRef = useRef(null)
   const [sort, setSort] = useState({ field: "name", order: "asc" })
   const [page, setPage] = useState(1)
   const [selected, setSelected] = useState(() => new Set())
@@ -222,17 +192,32 @@ export default function Employees() {
   const [exporting, setExporting] = useState(false)
   const fileInputRef = useRef(null)
   const queryClient = useQueryClient()
+  const drawer = useDrawerParam("view")
 
   const listParams = {
     search: debouncedSearch || undefined,
     status: filters.status || undefined,
     department: filters.department || undefined,
     role: filters.role || undefined,
+    workLocationType: filters.type || undefined,
+    level: filters.level || undefined,
     sort: sort.field,
     order: sort.order,
   }
 
   useEffect(() => { setPage(1); setSelected(new Set()) }, [debouncedSearch, filters, sort])
+
+  // "/" jumps to the search box (unless you are already typing somewhere).
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey) return
+      if (e.target.closest?.("input,textarea,select,[contenteditable]")) return
+      e.preventDefault()
+      searchRef.current?.focus()
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [])
 
   const { data, isLoading, isFetching } = useQuery({
     queryKey: ["employees", listParams, page],
@@ -242,6 +227,7 @@ export default function Employees() {
   })
   const employees = data?.data || []
   const counts = data?.statusCounts || {}
+  const internCount = data?.internCount ?? 0
   const totalCount = (counts.ACTIVE || 0) + (counts.ON_LEAVE || 0) + (counts.LEFT_COMPANY || 0)
 
   const { data: managerCandidates = [] } = useQuery({
@@ -272,6 +258,10 @@ export default function Employees() {
   function setFilter(key, value) {
     setFilters((f) => ({ ...f, [key]: value }))
   }
+  function resetFilters() {
+    setFilters({ status: "", department: "", role: "", type: "", level: "" })
+    setSearch("")
+  }
 
   function toggleSort(field) {
     setSort((s) => (s.field === field ? { field, order: s.order === "asc" ? "desc" : "asc" } : { field, order: "asc" }))
@@ -296,6 +286,17 @@ export default function Employees() {
       setError("")
     },
     onError: (err) => setError(err.response?.data?.error || "Could not add employee"),
+  })
+
+  const changeStatus = useMutation({
+    mutationFn: ({ id, status }) => api.patch(`/employees/${id}`, { status }),
+    onSuccess: (_res, vars) => {
+      // Refetch the list so the tile counts move (Active <-> On Leave / Inactive).
+      queryClient.invalidateQueries({ queryKey: ["employees"] })
+      queryClient.invalidateQueries({ queryKey: ["employee", vars.id] })
+      setError("")
+    },
+    onError: (err) => setError(err.response?.data?.error || "Could not change the status"),
   })
 
   const removeEmployee = useMutation({
@@ -392,7 +393,20 @@ export default function Employees() {
     setSelected((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
   }
   const deletableSelected = employees.filter((e) => selected.has(e.id) && canDeleteEmployee(e)).length
-  const hasFilters = !!(filters.status || filters.department || filters.role || search)
+  const hasFilters = !!(filters.status || filters.department || filters.role || filters.type || filters.level || search)
+  const departmentList = departments || []
+  const activeDepartment = departmentList.find((d) => d.id === filters.department)
+
+  // Same rules as the API: ADMIN/CEO/HR change status; an Admin/CEO profile only
+  // by Admin/CEO, a CEO's status only by a CEO; never your own.
+  const canChangeStatus = (emp) =>
+    ["ADMIN", "CEO", "HR"].includes(user?.role) &&
+    emp.id !== user?.id &&
+    (!["ADMIN", "CEO"].includes(emp.role) || ["ADMIN", "CEO"].includes(user?.role)) &&
+    (emp.role !== "CEO" || user?.role === "CEO")
+  const statusCell = (emp) => (
+    <StatusMenu emp={emp} editable={canChangeStatus(emp)} busy={changeStatus.isPending} onChange={(status) => changeStatus.mutate({ id: emp.id, status })} />
+  )
 
   const actionBtn = "rounded-lg p-1.5 text-muted hover:bg-surface-2 hover:text-ink"
 
@@ -445,28 +459,82 @@ export default function Employees() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          {STAT_TILES.map((t) => {
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+          {STATUS_TILES.map((t) => {
             const value = t.key ? counts[t.key] || 0 : totalCount
-            const active = filters.status === t.key
             return (
-              <button
+              <StatTile
                 key={t.label}
-                type="button"
+                label={t.label}
+                icon={t.icon}
+                tone={t.tone}
+                value={data ? value.toLocaleString() : "—"}
+                hint={t.key && totalCount ? `${Math.round((value / totalCount) * 100)}% of everyone` : "Click to show all"}
+                active={filters.status === t.key}
                 onClick={() => setFilter("status", t.key)}
-                aria-pressed={active}
-                className={`rounded-2xl border p-4 text-left transition-all hover:-translate-y-px hover:shadow-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${t.tile} ${
-                  active ? "ring-2 ring-accent" : ""
-                }`}
-              >
-                <p className="flex items-center gap-2 text-xs font-medium text-muted">
-                  <span className={`h-2 w-2 rounded-full ${t.dot}`} /> {t.label}
-                </p>
-                <p className="mt-2 text-2xl font-bold text-ink">{data ? value.toLocaleString() : "—"}</p>
-              </button>
+              />
             )
           })}
+          <StatTile
+            label="Interns"
+            icon={InternIcon}
+            value={data ? internCount.toLocaleString() : "—"}
+            hint={filters.level === "INTERN" ? "Showing interns only" : "Click to show only interns"}
+            active={filters.level === "INTERN"}
+            onClick={() => setFilter("level", filters.level === "INTERN" ? "" : "INTERN")}
+          />
+          <StatTile
+            label="Departments"
+            icon={Network}
+            tone="amber"
+            value={departments ? departmentList.length.toLocaleString() : "—"}
+            hint={activeDepartment ? `Showing ${activeDepartment.name}` : showDepartments ? "Click to hide" : "Click to browse"}
+            active={!!filters.department}
+            expanded={showDepartments}
+            onClick={() => setShowDepartments((v) => !v)}
+          />
         </div>
+
+        {showDepartments && (
+          <div className="mt-4 rounded-2xl border border-border bg-surface-2 p-3">
+            <div className="mb-2 flex items-center justify-between gap-2 px-1">
+              <p className="text-xs font-semibold text-muted">Pick a department to filter the list</p>
+              <div className="flex items-center gap-3 text-xs font-semibold">
+                {filters.department && (
+                  <button type="button" onClick={() => setFilter("department", "")} className="text-muted hover:text-ink">Clear</button>
+                )}
+                <Link to="/departments" className="text-accent hover:underline">Manage departments</Link>
+                <button type="button" onClick={() => setShowDepartments(false)} className="text-muted hover:text-ink" aria-label="Close departments"><X size={14} /></button>
+              </div>
+            </div>
+            {departmentList.length === 0 ? (
+              <p className="px-1 py-3 text-sm text-muted">No departments yet.</p>
+            ) : (
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                {departmentList.map((d) => {
+                  const on = filters.department === d.id
+                  return (
+                    <button
+                      key={d.id}
+                      type="button"
+                      onClick={() => setFilter("department", on ? "" : d.id)}
+                      aria-pressed={on}
+                      className={`flex items-center justify-between gap-3 rounded-xl border bg-surface px-3 py-2.5 text-left transition-colors hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+                        on ? "border-accent ring-1 ring-accent" : "border-border"
+                      }`}
+                    >
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm font-semibold text-ink">{d.name}</span>
+                        <span className="block truncate text-xs text-muted">{d.manager?.name ? `Head: ${d.manager.name}` : "No manager"}</span>
+                      </span>
+                      <span className="shrink-0 text-sm font-semibold tabular-nums text-ink">{d._count?.employees ?? 0}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {importError && (
@@ -614,34 +682,44 @@ export default function Employees() {
       )}
 
       {/* Filters */}
-      <div className="card grid grid-cols-1 gap-3 p-4 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="flex items-center gap-2 rounded-xl border border-border bg-surface px-3">
+      <div className="card flex flex-wrap items-center gap-3 p-4">
+        <div className="flex min-w-[220px] flex-1 items-center gap-2 rounded-xl border border-border bg-surface px-3">
           <Search size={15} className="shrink-0 text-muted-2" />
           <input
+            ref={searchRef}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
+            onKeyDown={(e) => e.key === "Escape" && (setSearch(""), e.currentTarget.blur())}
             placeholder="Search name or email…"
             className="min-w-0 flex-1 bg-transparent py-2.5 text-sm text-ink outline-none placeholder:text-muted-2"
             aria-label="Search employees"
           />
-          {search && <button onClick={() => setSearch("")} className="text-muted hover:text-ink" aria-label="Clear search"><X size={14} /></button>}
+          {search ? (
+            <button onClick={() => setSearch("")} className="text-muted hover:text-ink" aria-label="Clear search"><X size={14} /></button>
+          ) : (
+            <kbd className="hidden rounded border border-border px-1.5 text-[11px] text-muted-2 sm:inline" title='Press "/" to search'>/</kbd>
+          )}
         </div>
-        <select className="field appearance-none pr-8" value={filters.status} onChange={(e) => setFilter("status", e.target.value)} aria-label="Status">
-          <option value="">Status: All</option>
-          {Object.entries(STATUS_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        <select className="field w-auto appearance-none pr-8" value={filters.type} onChange={(e) => setFilter("type", e.target.value)} aria-label="Type">
+          <option value="">All Type</option>
+          {TYPE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
-        {showDepartmentFilter ? (
-          <select className="field appearance-none pr-8" value={filters.department} onChange={(e) => setFilter("department", e.target.value)} aria-label="Department">
-            <option value="">Department: All</option>
-            {(departments || []).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-          </select>
-        ) : (
-          <div className="field flex items-center text-muted">Your department</div>
+        <select className="field w-auto appearance-none pr-8" value={filters.status} onChange={(e) => setFilter("status", e.target.value)} aria-label="Status">
+          <option value="">All Status</option>
+          {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+        <FilterMenu
+          fields={[
+            { key: "department", label: "Department", show: showDepartmentFilter, options: departmentList.map((d) => ({ value: d.id, label: d.name })) },
+            { key: "role", label: "Role", options: Object.entries(ROLE_LABELS).map(([value, label]) => ({ value, label })) },
+          ]}
+          values={filters}
+          onChange={setFilter}
+          onReset={() => setFilters((f) => ({ ...f, department: "", role: "" }))}
+        />
+        {hasFilters && (
+          <button type="button" onClick={resetFilters} className="text-xs font-semibold text-muted hover:text-ink">Clear all</button>
         )}
-        <select className="field appearance-none pr-8" value={filters.role} onChange={(e) => setFilter("role", e.target.value)} aria-label="Role">
-          <option value="">Role: All</option>
-          {Object.entries(ROLE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-        </select>
       </div>
 
       {error && !showForm && (
@@ -672,7 +750,7 @@ export default function Employees() {
         {employees.map((emp) => (
           <div key={emp.id} className="card flex items-center gap-3 p-4">
             <Avatar name={emp.name} src={emp.photoUrl} size="md" />
-            <Link to={`/employees/${emp.id}`} className="min-w-0 flex-1">
+            <button type="button" onClick={() => drawer.open(emp.id)} className="min-w-0 flex-1 text-left">
               <p className="truncate text-sm font-semibold text-ink">{emp.name}</p>
               <p className="truncate text-xs text-muted">{emp.designation || ROLE_LABELS[emp.role] || emp.role}</p>
               <p className="mt-0.5 truncate text-xs text-muted-2">
@@ -680,12 +758,12 @@ export default function Employees() {
                 {emp.manager?.name ? ` · ${emp.manager.name}` : ""}
                 {emp.joiningDate ? ` · ${formatDay(emp.joiningDate)}` : ""}
               </p>
-            </Link>
+            </button>
             <div className="flex flex-col items-end gap-2">
-              <StatusBadge type="employee" status={emp.status} />
+              {statusCell(emp)}
               <div className="flex items-center">
                 <a href={`mailto:${emp.email}`} className={actionBtn} aria-label={`Email ${emp.name}`}><Mail size={15} /></a>
-                <RowMenu emp={emp} canDelete={canDeleteEmployee(emp)} onRemove={handleRemove} />
+                <RowMenu emp={emp} canDelete={canDeleteEmployee(emp)} onRemove={handleRemove} onView={drawer.open} />
               </div>
             </div>
           </div>
@@ -718,6 +796,7 @@ export default function Employees() {
                 <th className="px-4 py-3"><SortHeader label="Department" field="department" sort={sort} onSort={toggleSort} /></th>
                 <th className="px-4 py-3"><SortHeader label="Manager" field="manager" sort={sort} onSort={toggleSort} /></th>
                 <th className="px-4 py-3"><SortHeader label="Start Day" field="joiningDate" sort={sort} onSort={toggleSort} /></th>
+                <th className="px-4 py-3">Job Role</th>
                 <th className="px-4 py-3">Type</th>
                 <th className="px-4 py-3">Action</th>
               </tr>
@@ -726,7 +805,8 @@ export default function Employees() {
               {employees.map((emp) => (
                 <tr
                   key={emp.id}
-                  className={`border-b border-border last:border-0 transition-colors hover:bg-surface-2 ${selected.has(emp.id) ? "bg-accent-soft" : ""}`}
+                  onClick={(e) => { if (!e.target.closest("a,button,input,label")) drawer.open(emp.id) }}
+                  className={`cursor-pointer border-b border-border last:border-0 transition-colors hover:bg-surface-2 ${selected.has(emp.id) ? "bg-accent-soft" : ""}`}
                 >
                   <td className="px-4 py-3">
                     <input
@@ -741,18 +821,33 @@ export default function Employees() {
                     <div className="flex items-center gap-3">
                       <Avatar name={emp.name} src={emp.photoUrl} size="sm" />
                       <div className="min-w-0">
-                        <Link to={`/employees/${emp.id}`} className="block truncate font-semibold text-ink hover:text-accent">
+                        <button type="button" onClick={() => drawer.open(emp.id)} className="block max-w-full truncate text-left font-semibold text-ink hover:text-accent">
                           {emp.name}
-                        </Link>
+                        </button>
                         <p className="truncate text-xs text-muted">{emp.designation || ROLE_LABELS[emp.role] || emp.role}</p>
                       </div>
                     </div>
                   </td>
-                  <td className="px-4 py-3"><StatusBadge type="employee" status={emp.status} /></td>
-                  <td className="px-4 py-3 text-ink">{emp.department?.name || <span className="text-muted-2">—</span>}</td>
+                  <td className="px-4 py-3">
+                    {statusCell(emp)}
+                  </td>
+                  <td className="px-4 py-3 text-ink">
+                    {emp.department?.name ? (
+                      <button type="button" onClick={() => setFilter("department", emp.department.id)} className="text-left hover:text-accent hover:underline" title={`Show only ${emp.department.name}`}>
+                        {emp.department.name}
+                      </button>
+                    ) : <span className="text-muted-2">—</span>}
+                  </td>
                   <td className="px-4 py-3 text-ink">{emp.manager?.name || <span className="text-muted-2">—</span>}</td>
                   <td className="px-4 py-3 text-ink">{emp.joiningDate ? formatDay(emp.joiningDate) : <span className="text-muted-2">—</span>}</td>
-                  <td className="px-4 py-3 text-ink">{TYPE_LABELS[emp.workLocationType] || <span className="text-muted-2">—</span>}</td>
+                  <td className="px-4 py-3 text-ink">{emp.designation || ROLE_LABELS[emp.role] || emp.role}</td>
+                  <td className="px-4 py-3 text-ink">
+                    {TYPE_LABELS[emp.workLocationType] ? (
+                      <button type="button" onClick={() => setFilter("type", emp.workLocationType)} className="rounded-full border border-border px-2.5 py-0.5 text-xs font-medium hover:bg-surface-2" title={`Show only ${TYPE_LABELS[emp.workLocationType]}`}>
+                        {TYPE_LABELS[emp.workLocationType]}
+                      </button>
+                    ) : <span className="text-muted-2">—</span>}
+                  </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-0.5">
                       <Link to={`/employees/${emp.id}`} className={actionBtn} aria-label={`Edit ${emp.name}`} title="Open / edit profile">
@@ -761,14 +856,14 @@ export default function Employees() {
                       <a href={`mailto:${emp.email}`} className={actionBtn} aria-label={`Email ${emp.name}`} title={emp.email}>
                         <Mail size={15} />
                       </a>
-                      <RowMenu emp={emp} canDelete={canDeleteEmployee(emp)} onRemove={handleRemove} />
+                      <RowMenu emp={emp} canDelete={canDeleteEmployee(emp)} onRemove={handleRemove} onView={drawer.open} />
                     </div>
                   </td>
                 </tr>
               ))}
               {employees.length === 0 && !isLoading && (
                 <tr>
-                  <td colSpan={8} className="px-5 py-10 text-center text-muted">
+                  <td colSpan={9}className="px-5 py-10 text-center text-muted">
                     {hasFilters ? "No employees match these filters." : "No employees found."}
                   </td>
                 </tr>
@@ -786,6 +881,8 @@ export default function Employees() {
         onPageChange={(p) => { setPage(p); setSelected(new Set()) }}
       />
       {isFetching && !isLoading && <p className="mt-1 text-center text-xs text-muted-2">Refreshing…</p>}
+
+      <EmployeeDrawer id={drawer.id} onClose={drawer.close} onOpenEmployee={drawer.open} />
     </div>
   )
 }

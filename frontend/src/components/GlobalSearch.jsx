@@ -14,6 +14,7 @@ import {
 import api from "../api/client"
 import { useAuth } from "../context/AuthContext"
 import { searchablePages, matchPages } from "../utils/navItems"
+import { canViewEmployeeDirectory } from "../utils/roles"
 
 const TYPE_CONFIG = {
   employee: { label: "Employees", icon: Users },
@@ -23,6 +24,14 @@ const TYPE_CONFIG = {
   announcement: { label: "Announcements", icon: Megaphone },
 }
 const MAX_PAGES = 6
+
+// Employee hits open that person's drawer on the Employees page (the same
+// workspace as clicking the row) for roles that can open the directory;
+// anyone else keeps the server's link (their own profile).
+function resultLink(item, role) {
+  if (item.type === "employee" && canViewEmployeeDirectory(role)) return `/employees?view=${item.id}`
+  return item.link
+}
 
 // Searches the pages this user can open (instantly, from the nav list) and,
 // from 2 characters, employees / assets / projects / tickets / announcements
@@ -66,7 +75,7 @@ export default function GlobalSearch({ className = "", compact = false, onNaviga
   // One flat list in display order, for keyboard navigation.
   const flat = [
     ...pages.map((page) => ({ key: `page-${page.to}`, link: page.to })),
-    ...Object.entries(grouped).flatMap(([type, items]) => items.map((item) => ({ key: `${type}-${item.id}`, link: item.link }))),
+    ...Object.entries(grouped).flatMap(([type, items]) => items.map((item) => ({ key: `${type}-${item.id}`, link: resultLink(item, user?.role) }))),
   ]
   const activeIndex = Math.min(active, Math.max(flat.length - 1, 0))
 
@@ -192,7 +201,7 @@ export default function GlobalSearch({ className = "", compact = false, onNaviga
                   return (
                     <Link
                       key={`${type}-${item.id}`}
-                      to={item.link}
+                      to={resultLink(item, user?.role)}
                       onClick={opened}
                       onMouseEnter={() => setActive(i)}
                       data-active={i === activeIndex}
