@@ -59,7 +59,9 @@ export default function OrganizationSwitcher({ compact = false, glass = false })
           ))}
         </select>
         {switching ? (
-          <Loader2 size={14} className="absolute right-4 top-1/2 z-10 -translate-y-1/2 animate-spin text-muted" />
+          <span className="pointer-events-none absolute right-4 top-1/2 z-10 -translate-y-1/2 text-muted">
+            <Loader2 size={14} className="animate-spin" />
+          </span>
         ) : (
           <ChevronDown size={14} className="pointer-events-none absolute right-4 top-1/2 z-10 -translate-y-1/2 text-muted" />
         )}

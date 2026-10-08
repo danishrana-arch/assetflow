@@ -75,13 +75,13 @@ function RestingCard({ m, onActivate, loading }) {
       type="button"
       onClick={onActivate}
       aria-label={`${m.title}: ${m.value}. Show details`}
-      className={`flex h-full w-full flex-col p-4 text-left transition-colors hover:bg-surface-2/60 ${cardBase}`}
+      className={`group flex h-full w-full flex-col p-4 text-left transition-colors hover:bg-surface-2/60 ${cardBase}`}
     >
       <div className="flex items-center gap-2">
         <Dot tone={m.tone} />
         <span className="truncate text-sm font-medium text-muted">{m.title}</span>
       </div>
-      <Icon size={28} className="mt-3 text-ink" />
+      <Icon size={28} className="mt-3 text-ink origin-left transition-transform duration-300 ease-out group-hover:scale-125 motion-reduce:transition-none" />
       <span className={`mt-auto pt-2 text-3xl font-semibold leading-none text-ink transition-opacity sm:text-4xl ${loading ? "opacity-50" : ""}`}>
         {m.value}
       </span>

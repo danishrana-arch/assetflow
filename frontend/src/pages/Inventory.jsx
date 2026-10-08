@@ -773,13 +773,13 @@ export default function Inventory() {
                   type="button"
                   onClick={() => setStatus(t.status)}
                   aria-pressed={status === t.status}
-                  className={`flex min-w-0 flex-col gap-3 rounded-2xl border p-4 text-left transition-all hover:-translate-y-px hover:shadow-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${t.tile} ${
+                  className={`group flex min-w-0 flex-col gap-3 rounded-2xl border p-4 text-left transition-all hover:-translate-y-px hover:shadow-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${t.tile} ${
                     status === t.status && t.status ? "ring-2 ring-accent" : ""
                   }`}
                 >
                   <div className="flex items-start gap-3">
                     <div className="flex h-11 w-11 shrink-0 items-center justify-center text-ink">
-                      <Icon size={28} />
+                      <Icon size={28} className="transition-transform duration-300 ease-out group-hover:scale-125 motion-reduce:transition-none" />
                     </div>
                     <div className="min-w-0">
                       <p className="truncate text-xs font-medium text-muted">{t.label}</p>
