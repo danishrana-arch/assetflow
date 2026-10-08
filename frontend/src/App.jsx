@@ -4,6 +4,7 @@ import { useAuth } from "./context/AuthContext"
 import { ThemeProvider, useTheme } from "./context/ThemeContext"
 import { isManagement, hasModuleAccess, canManageInventory, canViewEmployeeDirectory, canAccessPayroll } from "./utils/roles"
 import DashboardLayout from "./layouts/DashboardLayout"
+import PlatformLayout from "./layouts/PlatformLayout"
 // Not lazy-loaded like the other pages below: this is the offline-first
 // check-in/check-out page, so its code must already be in the main bundle
 // a device downloaded on its last online visit. A lazy chunk is only ever
@@ -41,6 +42,17 @@ const Tickets = lazy(() => import("./pages/Tickets"))
 const Settings = lazy(() => import("./pages/Settings"))
 const AttendanceDevices = lazy(() => import("./pages/AttendanceDevices"))
 const Billing = lazy(() => import("./pages/Billing"))
+const ControlCenterLayout = lazy(() => import("./pages/control/ControlCenterLayout"))
+const CcOverview = lazy(() => import("./pages/control/Overview"))
+const CcOrganizations = lazy(() => import("./pages/control/Organizations"))
+const CcUsers = lazy(() => import("./pages/control/Users"))
+const CcRoles = lazy(() => import("./pages/control/RolesPermissions"))
+const CcFeatures = lazy(() => import("./pages/control/Features"))
+const CcPlans = lazy(() => import("./pages/control/Plans"))
+const CcBilling = lazy(() => import("./pages/control/BillingAdmin"))
+const CcUsage = lazy(() => import("./pages/control/Usage"))
+const CcAudit = lazy(() => import("./pages/control/AuditLogs"))
+const CcSystem = lazy(() => import("./pages/control/SystemSettings"))
 const Payroll = lazy(() => import("./pages/Payroll"))
 const MyPayroll = lazy(() => import("./pages/MyPayroll"))
 const ExpenseClaims = lazy(() => import("./pages/ExpenseClaims"))
@@ -101,6 +113,32 @@ function RequirePayrollAccess({ children }) {
   return children
 }
 
+// The platform account (role PLATFORM_ADMIN) gets only the Control Center —
+// none of the company pages. The backend re-checks every call.
+function PlatformRoutes() {
+  return (
+    <Suspense fallback={<PageFallback />}>
+      <Routes>
+        <Route element={<PlatformLayout />}>
+          <Route path="/control-center" element={<ControlCenterLayout />}>
+          <Route index element={<CcOverview />} />
+          <Route path="organizations" element={<CcOrganizations />} />
+          <Route path="users" element={<CcUsers />} />
+          <Route path="roles" element={<CcRoles />} />
+          <Route path="features" element={<CcFeatures />} />
+          <Route path="plans" element={<CcPlans />} />
+          <Route path="billing" element={<CcBilling />} />
+          <Route path="usage" element={<CcUsage />} />
+          <Route path="audit" element={<CcAudit />} />
+          <Route path="system" element={<CcSystem />} />
+          </Route>
+          <Route path="*" element={<Navigate to="/control-center" replace />} />
+        </Route>
+      </Routes>
+    </Suspense>
+  )
+}
+
 function ProtectedShell() {
   const { user, organization, loading } = useAuth()
   const { applyAccent } = useTheme()
@@ -120,6 +158,7 @@ function ProtectedShell() {
     )
   }
   if (!user) return <Navigate to="/" replace />
+  if (user.role === "PLATFORM_ADMIN") return <PlatformRoutes />
 
   const isManager = isManagement(user.role)
   const isIT = user.role === "IT_MANAGER"
@@ -170,7 +209,7 @@ function ProtectedShell() {
           <Route path="/employee-forms" element={<RequireModule moduleKey="employeeForms"><EmployeeForms /></RequireModule>} />
           <Route path="/settings" element={<RequireOwner><Settings /></RequireOwner>} />
           <Route path="/settings/attendance-devices" element={<RequireOwner><AttendanceDevices /></RequireOwner>} />
-          <Route path="/billing" element={<Navigate to="/" replace />} />
+          <Route path="/billing" element={<RequireOwner><Billing /></RequireOwner>} />
           <Route path="/profile" element={<Profile />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>

@@ -10,6 +10,9 @@ const { logAudit } = require("../utils/audit")
 const { isValidTimeZone } = require("../utils/timezone")
 const { sendEmail, appUrl, escapeHtml } = require("../utils/mailer")
 const { createNotification } = require("../utils/notifications")
+const { checkEmployeeCapacity } = require("../utils/billing")
+const { isPlatformAdminUser } = require("../utils/platform")
+const { safeDisabledModuleKeys } = require("../utils/features")
 const { accessibleOrganizations, canManageCompanies } = require("../utils/organization")
 
 // Failed-login alerting: after MAX_FAILED_LOGINS wrong passwords within
@@ -145,7 +148,7 @@ async function login(req, res, next) {
 
     const user = await prisma.user.findUnique({
       where: { email },
-      include: { organization: true },
+      include: { organization: { include: { subscription: { select: { status: true } } } } },
     })
 
     if (!user || user.organization.archivedAt) {
@@ -184,6 +187,10 @@ async function login(req, res, next) {
       await prisma.user.update({ where: { id: user.id }, data: { failedLoginAttempts: 0, lastFailedLoginAt: null } })
     }
 
+    if (user.organization.subscription?.status === "SUSPENDED" && user.role !== "PLATFORM_ADMIN") {
+      return res.status(403).json({ error: "This organization has been suspended for an overdue payment. Please contact ManagementDock to restore access.", code: "ORGANIZATION_SUSPENDED" })
+    }
+
     res.json(await sessionResponse(user))
   } catch (err) {
     next(err)
@@ -192,6 +199,13 @@ async function login(req, res, next) {
 
 // Login payload (token + session user + organizations). `user` must include
 // its organization. Also used when an emailed invitation is accepted.
+// Modules of the user's Control Center custom role (null = their base role decides).
+async function customAccess(user) {
+  if (!user.customRoleId) return { customModules: null, customRoleName: null }
+  const role = await prisma.customRole.findUnique({ where: { id: user.customRoleId }, select: { modules: true, name: true } })
+  return { customModules: role?.modules || null, customRoleName: role?.name || null }
+}
+
 async function sessionResponse(user) {
   const token = signToken({ userId: user.id, organizationId: user.organizationId, companyId: user.organization.companyId, role: user.role })
   const organizations = await getSelectableOrganizations(user)
@@ -209,6 +223,10 @@ async function sessionResponse(user) {
       canManageAttendance: user.canManageAttendance,
       homeOrganizationId: user.organizationId,
       canManageCompanies: canManageCompanies(user.role),
+      // Control Center access, and modules this company's plan doesn't include.
+      isPlatformAdmin: isPlatformAdminUser(user),
+      disabledModules: await safeDisabledModuleKeys(user.organizationId),
+      ...(await customAccess(user)),
     },
     organization: organizationSummary(user.organization),
     organizations,
@@ -287,6 +305,9 @@ async function inviteEmployee(req, res, next) {
       return res.status(400).json({ error: `employmentStatus must be one of: ${EMPLOYMENT_STATUSES.join(", ")}` })
     }
 
+    const limitReached = await checkEmployeeCapacity(organizationId, 1)
+    if (limitReached) return res.status(403).json(limitReached)
+
     const tempPassword = Math.random().toString(36).slice(2, 10)
     const hashed = await bcrypt.hash(tempPassword, 10)
 
@@ -349,6 +370,9 @@ async function me(req, res, next) {
       homeOrganizationId: user.organizationId,
       // Only a CEO adds companies and gives others access to them.
       canManageCompanies: canManageCompanies(user.role),
+      isPlatformAdmin: isPlatformAdminUser(user),
+      disabledModules: await safeDisabledModuleKeys(req.user.organizationId),
+      ...(await customAccess(user)),
       organization: activeOrganization,
       organizations,
     })

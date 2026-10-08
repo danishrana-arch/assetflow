@@ -28,6 +28,7 @@ import {
   Bell,
   ListTodo,
   Fingerprint,
+  CreditCard,
 } from "lucide-react"
 import { isManagement, hasModuleAccess } from "./roles"
 
@@ -214,6 +215,7 @@ export function searchablePages(user) {
     { to: "/projects?tab=tasks", label: isManagement(role) ? "Tasks" : "My Tasks", icon: ListTodo, group: "Work", show: role !== "IT_MANAGER" && (!isManagement(role) || hasModuleAccess(role, "projects")) },
     { to: "/expense-claims", label: "Expense Claims", icon: Receipt, group: "Payroll", show: hasModuleAccess(role, "expenseClaims") },
     { to: "/settings/attendance-devices", label: "Attendance Devices", icon: Fingerprint, group: "Reports & Admin", show: isOwner },
+    { to: "/billing", label: "Billing & Subscription", icon: CreditCard, group: "Reports & Admin", show: isOwner, keywords: "plan plans pricing upgrade subscription invoice payment employee limit sale" },
   ].filter((p) => p.show !== false)
   const seen = new Set()
   return [...pages, ...extras]

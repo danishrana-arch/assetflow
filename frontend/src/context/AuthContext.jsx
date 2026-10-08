@@ -3,6 +3,7 @@ import { useQueryClient } from "@tanstack/react-query"
 import api from "../api/client"
 import { clearAttendanceCaches } from "../utils/offlineAttendance"
 import { clearPageHistory } from "../utils/pageHistory"
+import { setDisabledModules, setCustomModules } from "../utils/roles"
 
 const AuthContext = createContext(null)
 const TOKEN_KEY = "assetflow_token"
@@ -14,7 +15,10 @@ const INACTIVITY_LIMIT_MS = 60 * 60 * 1000
 function readCachedUser() {
   try {
     const value = localStorage.getItem(USER_CACHE_KEY)
-    return value ? JSON.parse(value) : null
+    const parsed = value ? JSON.parse(value) : null
+    setDisabledModules(parsed?.user?.disabledModules)
+    setCustomModules(parsed?.user?.customModules)
+    return parsed
   } catch {
     return null
   }
@@ -52,6 +56,11 @@ function normalizeAuthPayload(data) {
     // companies / give others access (CEO only).
     homeOrganizationId: data.homeOrganizationId,
     canManageCompanies: !!data.canManageCompanies,
+    // Control Center access + modules the company's plan doesn't include.
+    isPlatformAdmin: !!data.isPlatformAdmin,
+    disabledModules: data.disabledModules || [],
+    customModules: data.customModules || null,
+    customRoleName: data.customRoleName || null,
     organization: data.organization,
   }
 
@@ -85,6 +94,8 @@ export function AuthProvider({ children }) {
     const nextOrganizations = normalizeOrganizations(nextUser, normalized.organizations || [])
     const active = pickActiveOrganization(nextUser, nextOrganizations)
     const nextOrganization = normalized.organization || active || nextUser?.organization || null
+    setDisabledModules(nextUser?.disabledModules)
+    setCustomModules(nextUser?.customModules)
 
     setUser(nextUser)
     setOrganizations(nextOrganizations)
@@ -193,6 +204,8 @@ export function AuthProvider({ children }) {
     localStorage.removeItem(ORG_KEY)
     localStorage.removeItem(LAST_ACTIVITY_KEY)
     clearAttendanceCaches()
+    setDisabledModules([])
+    setCustomModules(null)
     clearPageHistory()
     queryClient.clear()
     setUser(null)

@@ -1,3 +1,5 @@
+const { AsyncLocalStorage } = require("node:async_hooks")
+
 const MANAGEMENT_ROLES = [
   "ADMIN",
   "CEO",
@@ -56,6 +58,9 @@ const ROLE_MODULES = {
   // Site Admin / Project Manager: marks attendance only for the employees of
   // the sites assigned to them (AttendanceSiteAdmin) — not a global admin.
   SITE_ADMIN: ["siteAttendance"],
+  // Platform administration lives in the Control Center (utils/platform.js),
+  // not in the company module tree — no company modules.
+  PLATFORM_ADMIN: [],
   EMPLOYEE: [],
 }
 
@@ -77,8 +82,37 @@ function hasModuleAccessImpl(role, moduleKey) {
   return modules.includes("*") || modules.includes(moduleKey)
 }
 
-function hasModuleAccess(role, moduleKey) {
+// Every module key a role can be given (what a Control Center custom role picks from).
+const ALL_MODULE_KEYS = [...new Set(Object.values(ROLE_MODULES).flat().filter((m) => m !== "*"))].sort()
+
+// A user with a Control Center custom role has THAT role's module list instead
+// of their base role's. requireAuth runs the rest of the request inside this
+// store ({ role: baseRole, customModules }) so the ~28 existing
+// hasModuleAccess(req.user.role, …) calls honour it without being edited. It
+// only applies when the role asked about is the requester's own base role.
+const accessStore = new AsyncLocalStorage()
+
+function runWithAccess(store, fn) {
+  return accessStore.run(store, fn)
+}
+
+// Module access for a role as defined in code — never affected by custom
+// roles (use this when iterating over roles, e.g. to pick notification recipients).
+function roleHasModule(role, moduleKey) {
   return hasModuleAccessImpl(role, moduleKey)
+}
+
+function hasModuleAccess(role, moduleKey) {
+  const store = accessStore.getStore()
+  if (store?.customModules && store.role === role) return store.customModules.includes(moduleKey)
+  return hasModuleAccessImpl(role, moduleKey)
+}
+
+// Same check for an explicit req.user (no reliance on the request store).
+function userHasModule(user, moduleKey) {
+  if (!user) return false
+  if (user.customModules) return user.customModules.includes(moduleKey)
+  return hasModuleAccessImpl(user.role, moduleKey)
 }
 
 function isManagement(role) {
@@ -110,6 +144,10 @@ module.exports = {
   EMPLOYEE_DIRECTORY_ROLES,
   MAX_CEO_COUNT,
   ROLE_MODULES,
+  ALL_MODULE_KEYS,
+  runWithAccess,
+  roleHasModule,
+  userHasModule,
   hasModuleAccess,
   isManagement,
 }

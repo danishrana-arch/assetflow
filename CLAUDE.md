@@ -3055,3 +3055,108 @@ the 2026-10-05 employee-details/leave section.
   calendar rendered in a standalone bundle with the app CSS (range presets,
   Apply, year grid, no console errors). Not exercised in the live app
   (migrations pending).
+
+## Post-module addition: Billing & Subscription (2026-10-08)
+
+- `/billing` (ADMIN/CEO; reached from Settings → "Open billing" and global
+  search — **not** in the sidebar, per request). Page split by concern:
+  `api/billing.js`, `components/billing/*` (SubscriptionSummary, PlanCard,
+  PlanEditorModal, SaleModal, ContactModal, BillingHistory, InquiriesPanel).
+- New models `BillingPlan` (price in cents, `employeeLimit` null = no cap,
+  `isCustom`, sale = `salePercent/saleLabel/saleStartsAt/saleEndsAt`),
+  `OrganizationSubscription` (one per org; no row = Free), `BillingInvoice`,
+  `SalesInquiry`. Migration `20261008120000_billing_subscription` seeds the 4
+  plans (Free 2 / Team $50·4 / Business $100·9 / Custom) and **grandfathers
+  every existing company onto the uncapped Custom plan** so none is locked out.
+  **Not yet deployed** — run `npx prisma migrate deploy && npx prisma generate`
+  (stop the dev backend first for the EPERM lock), then restart.
+- API `/api/billing/*`: plans CRUD + `PUT/DELETE /plans/:id/sale`,
+  `GET/POST /subscription`, `POST /portal`, `GET /invoices`, inquiries CRUD.
+  Plan/sale/inquiry-status writes need `canManagePlans`
+  (`BILLING_PLAN_ADMIN_EMAILS`, else CEOs of the first company created) —
+  plans are global, so an ordinary company's CEO can't edit them.
+- Employee limit is enforced server-side (`utils/billing.js`
+  `checkEmployeeCapacity`, 403 `EMPLOYEE_LIMIT_REACHED`) in add employee,
+  invite, sheet import (per row) and reactivating a "Left Company" user.
+  Downgrades are refused (409) while headcount exceeds the target limit.
+- Payments are **not connected**: `services/billing-payments.js` is the only
+  place Stripe belongs; it currently throws, and paid-plan selection/Manage
+  Billing return 402 `PAYMENT_NOT_CONFIGURED` ("Payment Required" in the UI).
+  Switching to Free works immediately. Invoices stay empty until webhooks
+  write `BillingInvoice` rows.
+
+## Post-module addition: ManagementDock Control Center (2026-10-08)
+
+Platform-level administration, separate from company ADMIN/CEO. Frontend
+`/control-center/*` (`pages/control/*`, `components/control/*`,
+`api/platform.js`); backend `/api/platform/*` (`routes/platform.routes.js`,
+`controllers/platform.controller.js`), behind `requirePlatformAdmin`.
+
+- **Platform admin** (`utils/platform.js`): ONLY a user with role
+  `PLATFORM_ADMIN` — a separate account in its own hidden organization
+  (`managementdock-platform`), created with
+  `backend/scripts/create-platform-admin.js` after the migration. No email
+  list/setting grants it. Only it can publish/edit plans (`canManagePlans`);
+  companies just subscribe. A company CEO/ADMIN gets 403 (verified).
+  `/auth/me` + login send `isPlatformAdmin` and `disabledModules`.
+- **Entitlement** (`utils/features.js`): `FEATURES` maps platform features onto
+  the *existing* `ROLE_MODULES` keys (no new modules). Access = platform
+  availability (`PlatformFeature`) AND org entitlement (plan `featureKeys`,
+  or `OrganizationFeatureOverride`) AND role permission AND user flags.
+  `requireModule`/`requireModuleOrSelf` check the entitlement (30s cache,
+  **fails open** if the lookup errors); `requireFeature()` gates `biometric`
+  and `orgComparison` routes. Frontend `hasModuleAccess` also honours
+  `disabledModules` (`setDisabledModules` in `utils/roles.js`). The migration
+  gives every existing plan ALL features, so nothing changes until a platform
+  admin narrows a plan. Keep `FEATURE_KEYS` and the migration list in sync.
+- **Plans** reuse the billing controller (same handlers mounted under
+  `/platform/plans`); `canManagePlans` now also passes platform admins.
+  `BillingPlan` gained `featureKeys`, `siteLimit`, `projectLimit`,
+  `organizationLimit`, `storageLimitMb`, `billingInterval`, `stripePriceId`.
+  Only the employee limit is enforced; the others warn (Usage).
+  `PlanEditorModal`/`SaleModal` take an `api` prop (default `billingApi`).
+- **Subscriptions**: platform admin can assign a plan / cancel to Free per
+  org. These are administrative assignments — `$0` stored, **no payment
+  collected** (Stripe still not connected), and the audit entry says so.
+- **Audit**: `AuditLog.details` (JSON `{before, after, reason…}`); `logAudit`
+  takes `details`. Platform actions are `platform.*`; plan edits keep
+  `billing.plan_updated` (now with before/after); attendance permission
+  changes now log `permissions.attendance_updated`.
+- **Not hard delete**: organizations are archived/restored (reason required;
+  can't archive your own org or a group's main company with active peers).
+- Hierarchy note: the request described exactly-1 Grand Parent / 1 Parent, but
+  the app is flat since 2026-10-05 (see above) — the Control Center shows the
+  company group as peers and does not reintroduce the old hierarchy.
+- Migration `20261008140000_control_center` — **not deployed**. Deploy
+  (`npx prisma migrate deploy && npx prisma generate`, backend stopped) BEFORE
+  restarting the backend: the JS client is already regenerated, so billing
+  plan queries 500 (`BillingPlan.featureKeys` missing) until it runs.
+
+### Follow-up (2026-10-08): platform account is separate; full CRUD; custom roles
+
+- The platform account (`PLATFORM_ADMIN`, hidden org `managementdock-platform`,
+  `backend/scripts/create-platform-admin.js`) gets its own shell
+  (`layouts/PlatformLayout.jsx`) with only the Control Center — no company
+  pages. Only it can publish/edit plans; companies subscribe.
+- **Full CRUD** (`controllers/platform-crud.controller.js`): organizations
+  (create with first admin; delete only when archived + typed name), users
+  (create / edit / reset password / delete; temp passwords shown once via
+  `SecretDialog`), custom roles, per-org attendance permission matrix,
+  inquiries delete. Audit log stays read-only on purpose.
+- **Custom roles** (`CustomRole`, `User.customRoleId`, migration
+  `20261008150000_custom_roles`, deployed): a named module list layered on a
+  base role. `req.user.customModules` replaces the base role's modules;
+  `runWithAccess` (AsyncLocalStorage in `utils/roles.js`) makes the existing
+  `hasModuleAccess(req.user.role, …)` calls honour it without editing them
+  (only when asked about the requester's own base role; notification
+  recipient lookup uses `roleHasModule`, unaffected). Role-based checks
+  (`requireRole`, `isManagement`) still use the base role. Frontend:
+  `setCustomModules` in `utils/roles.js`. Verified 22/22 end to end with a
+  temporary org (deleted afterwards).
+- **Suspend for non-payment**: `OrganizationSubscription.status = "SUSPENDED"`
+  (no schema change; the column is a string). `requireAuth` returns 401
+  `ORGANIZATION_SUSPENDED` for everyone in it (and the org switcher refuses to
+  enter it); login returns 403 with the reason only after a correct password.
+  Platform admin: `POST /platform/organizations/:id/suspend {reason}` /
+  `/unsuspend`; delete is allowed for suspended OR archived organizations
+  (typed name). Verified 12/12 on a temporary org (deleted afterwards).

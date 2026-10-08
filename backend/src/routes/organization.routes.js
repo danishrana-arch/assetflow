@@ -16,6 +16,7 @@ const {
   updateAttendancePermissions,
 } = require("../controllers/permissions.controller")
 const { requireAuth, requireRole } = require("../middleware/auth.middleware")
+const { requireFeature } = require("../utils/platform")
 
 const router = express.Router()
 
@@ -24,7 +25,7 @@ router.use(requireAuth)
 router.get("/", getOrganization)
 router.get("/company", listCompanyOrganizations)
 // ADMIN/CEO only — matches the frontend's RequireOwner.
-router.get("/comparison", requireRole("ADMIN", "CEO"), getOrganizationComparison)
+router.get("/comparison", requireRole("ADMIN", "CEO"), requireFeature("orgComparison"), getOrganizationComparison)
 router.patch("/", requireRole("ADMIN", "CEO"), updateOrganization)
 
 // CEO only: add / remove companies and decide which Admins / IT Managers

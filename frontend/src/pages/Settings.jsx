@@ -691,11 +691,11 @@ export default function Settings() {
           <div className="grid gap-4 md:grid-cols-2">
             <div className="flex items-center justify-between gap-3 rounded-2xl bg-surface-2 p-4">
               <div>
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Current plan</p>
-                <p className="mt-0.5 text-lg font-semibold text-ink">Free</p>
-                <p className="mt-1 text-xs text-muted">Billing is disabled — every ManagementDock feature is available at no cost.</p>
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Plan & billing</p>
+                <p className="mt-0.5 text-lg font-semibold text-ink">Billing & Subscription</p>
+                <p className="mt-1 text-xs text-muted">See your plan, employee usage and invoices, or change plan.</p>
               </div>
-              <span className="shrink-0 rounded-full bg-chip-green-bg px-3 py-1.5 text-[11px] font-semibold text-chip-green-fg">All features enabled</span>
+              <Link to="/billing" className="pill-accent shrink-0 px-4 py-2 text-xs">Open billing</Link>
             </div>
             <div className="rounded-2xl bg-surface-2 p-4">
               <p className="mb-3 text-[11px] font-semibold uppercase tracking-wide text-muted">Shortcuts</p>

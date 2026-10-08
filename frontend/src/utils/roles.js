@@ -14,6 +14,7 @@ export const ROLE_LABELS = {
   DEPARTMENT_HEAD: "Department Head",
   IT_MANAGER: "IT Manager",
   SITE_ADMIN: "Site Admin / Project Manager",
+  PLATFORM_ADMIN: "Platform Admin",
   EMPLOYEE: "Employee",
 }
 
@@ -47,10 +48,29 @@ export const ROLE_MODULES = {
   // Site Admin / Project Manager: marks attendance only for the employees of
   // the sites assigned to them (AttendanceSiteAdmin) — not a global admin.
   SITE_ADMIN: ["siteAttendance"],
+  // Platform administration lives in the Control Center, not in the company
+  // module tree — no company modules.
+  PLATFORM_ADMIN: [],
   EMPLOYEE: [],
 }
 
+// Modules the active organization's plan does not include (sent by /auth/me,
+// set by AuthContext). Role permission AND organization entitlement are both
+// required — the backend enforces the same pair in requireModule().
+let disabledModules = new Set()
+export function setDisabledModules(list) {
+  disabledModules = new Set(Array.isArray(list) ? list : [])
+}
+
+// A Control Center custom role replaces the base role's module list.
+let customModules = null
+export function setCustomModules(list) {
+  customModules = Array.isArray(list) ? list : null
+}
+
 export function hasModuleAccess(role, moduleKey) {
+  if (disabledModules.has(moduleKey)) return false
+  if (customModules) return customModules.includes(moduleKey)
   const modules = ROLE_MODULES[role]
   if (!modules) return false
   return modules.includes("*") || modules.includes(moduleKey)

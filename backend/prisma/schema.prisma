@@ -103,6 +103,10 @@ model Organization {
   TimeEntry                 TimeEntry[]
   users                     User[]
   workCategories            WorkCategory[]
+  subscription              OrganizationSubscription?
+  billingInvoices           BillingInvoice[]
+  salesInquiries            SalesInquiry[]
+  featureOverrides          OrganizationFeatureOverride[]
 
   @@index([companyId])
   @@index([parentOrganizationId])
@@ -165,6 +169,8 @@ model AuditLog {
   targetType     String?
   targetId       String?
   note           String?
+  // Structured before/after values for platform actions: { before, after, ... }.
+  details        Json?
   createdAt      DateTime     @default(now())
   actor          User?        @relation(fields: [actorId], references: [id])
   organization   Organization @relation(fields: [organizationId], references: [id])
@@ -185,6 +191,10 @@ model User {
   phone                                                        String?
   photoUrl                                                     String?
   role                                                         UserRole                  @default(EMPLOYEE)
+  // Optional platform-defined role (CustomRole): its module list replaces the
+  // base role's modules; `role` stays the base role for every other check.
+  customRoleId                                                 String?
+  customRole                                                   CustomRole?               @relation(fields: [customRoleId], references: [id], onDelete: SetNull)
   status                                                       EmployeeStatus            @default(ACTIVE)
   departmentId                                                 String?
   managerId                                                    String?
@@ -1338,6 +1348,8 @@ enum UserRole {
   DEPARTMENT_HEAD
   IT_MANAGER
   SITE_ADMIN
+  // Runs the ManagementDock platform itself (Control Center) — not a company role.
+  PLATFORM_ADMIN
 }
 
 enum EmployeeFormSubmissionStatus {
@@ -1499,4 +1511,144 @@ enum AttendanceLocationMode {
   OFFICE
   FIELD
   WFH
+}
+
+// ── Billing & subscription ───────────────────────────────────────────────
+// Plans are data, not code: the Billing page reads them from here. Money is
+// stored in minor units (cents). A sale is a percentage off the monthly price
+// between saleStartsAt and saleEndsAt (either may be null = open-ended).
+model BillingPlan {
+  id            String    @id @default(cuid())
+  key           String    @unique
+  name          String
+  description   String    @default("")
+  priceCents    Int       @default(0)
+  currency      String    @default("usd")
+  // null = no cap (Custom plans are sized per customer).
+  employeeLimit Int?
+  // Custom plans are sold by contacting the team, never by checkout.
+  isCustom      Boolean   @default(false)
+  features      String[]
+  // Entitlement: which platform features (utils/features.js) the plan includes.
+  featureKeys   String[]  @default([])
+  // Other limits (null = no cap). Only employeeLimit is enforced today; the
+  // rest drive the usage warnings in the Control Center.
+  siteLimit         Int?
+  projectLimit      Int?
+  organizationLimit Int?
+  storageLimitMb    Int?
+  billingInterval   String  @default("MONTH")
+  stripePriceId     String?
+  recommended   Boolean   @default(false)
+  active        Boolean   @default(true)
+  sortOrder     Int       @default(0)
+  salePercent   Int?
+  saleLabel     String?
+  saleStartsAt  DateTime?
+  saleEndsAt    DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  subscriptions OrganizationSubscription[]
+}
+
+// One row per organization. No row = the Free plan.
+model OrganizationSubscription {
+  id                   String    @id @default(cuid())
+  organizationId       String    @unique
+  planId               String
+  status               String    @default("ACTIVE")
+  // Monthly price (after any sale) locked in when the plan was chosen.
+  priceCents           Int       @default(0)
+  currentPeriodStart   DateTime?
+  currentPeriodEnd     DateTime?
+  stripeCustomerId     String?
+  stripeSubscriptionId String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  plan         BillingPlan  @relation(fields: [planId], references: [id], onDelete: Restrict)
+
+  @@index([planId])
+}
+
+// Filled by the payment provider's webhooks once connected.
+model BillingInvoice {
+  id              String    @id @default(cuid())
+  organizationId  String
+  number          String
+  amountCents     Int
+  currency        String    @default("usd")
+  status          String    @default("PAID")
+  description     String?
+  issuedAt        DateTime  @default(now())
+  paidAt          DateTime?
+  hostedUrl       String?
+  pdfUrl          String?
+  stripeInvoiceId String?   @unique
+  createdAt       DateTime  @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, issuedAt])
+}
+
+// "Contact Our Team" requests from the Custom plan.
+model SalesInquiry {
+  id             String   @id @default(cuid())
+  organizationId String
+  requestedById  String?
+  name           String
+  email          String
+  company        String?
+  employeeCount  Int?
+  message        String
+  status         String   @default("NEW")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, createdAt])
+  @@index([status])
+}
+
+// Platform-wide switch for a feature (utils/features.js). No row = available.
+model PlatformFeature {
+  key         String   @id
+  enabled     Boolean  @default(true)
+  updatedById String?
+  updatedAt   DateTime @updatedAt
+}
+
+// Per-organization exception to what the plan includes (on or off).
+model OrganizationFeatureOverride {
+  id             String   @id @default(cuid())
+  organizationId String
+  featureKey     String
+  enabled        Boolean
+  note           String?
+  updatedById    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, featureKey])
+}
+
+// A role defined in the Control Center: a named set of modules layered on a
+// base role (the base role keeps deciding every non-module check).
+model CustomRole {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  name        String
+  description String   @default("")
+  baseRole    UserRole @default(EMPLOYEE)
+  modules     String[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users User[]
 }

@@ -418,6 +418,7 @@ const EMPLOYMENT_STATUS_EDITORS = ["ADMIN", "CEO", "HR"]
 // Org policy: no salary below this (utils/payroll.js) — the floor, not a
 // fixed scale.
 const { MIN_BASE_SALARY } = require("../utils/payroll")
+const { checkEmployeeCapacity } = require("../utils/billing")
 const { recordProfileSalaryEdit } = require("./salary-revision.controller")
 
 // Fields a non-management user may change on THEMSELVES ONLY.
@@ -447,6 +448,12 @@ async function updateEmployee(req, res, next) {
       if (req.body.status !== undefined && req.body.status !== existing.status) {
         return res.status(403).json({ error: "Only a CEO can change a CEO's status" })
       }
+    }
+
+    // Bringing someone back from "Left Company" takes a seat on the plan.
+    if (existing.status === "LEFT_COMPANY" && req.body.status && req.body.status !== "LEFT_COMPANY") {
+      const blocked = await checkEmployeeCapacity(existing.organizationId, 1)
+      if (blocked) return res.status(403).json(blocked)
     }
 
     const allowedFields = isManagementRequester
@@ -826,6 +833,12 @@ async function importEmployees(req, res, next) {
 
       if (!name || !email) {
         skipped.push({ row: rowNumber, reason: "Missing name or email" })
+        continue
+      }
+      // Plan employee limit — checked per row so a sheet fills the remaining
+      // seats and the rest are reported, instead of overshooting.
+      if (await checkEmployeeCapacity(organizationId, 1)) {
+        skipped.push({ row: rowNumber, reason: "Employee limit reached for your plan — upgrade to add more" })
         continue
       }
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {

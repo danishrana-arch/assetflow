@@ -1,5 +1,5 @@
 const prisma = require("../lib/prisma")
-const { MANAGEMENT_ROLES, ROLE_MODULES, hasModuleAccess } = require("./roles")
+const { MANAGEMENT_ROLES, ROLE_MODULES, roleHasModule } = require("./roles")
 
 async function createNotification({
   organizationId,
@@ -34,7 +34,7 @@ async function notifyManagement({ organizationId, createdById, type, title, mess
   const roles = onlyRoles
     ? onlyRoles
     : moduleKey
-    ? Object.keys(ROLE_MODULES).filter((role) => hasModuleAccess(role, moduleKey))
+    ? Object.keys(ROLE_MODULES).filter((role) => roleHasModule(role, moduleKey))
     : MANAGEMENT_ROLES
   const users = await prisma.user.findMany({
     where: {

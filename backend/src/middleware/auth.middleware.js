@@ -1,7 +1,8 @@
 const { verifyToken } = require("../utils/jwt")
 const prisma = require("../lib/prisma")
-const { MANAGEMENT_ROLES, hasModuleAccess } = require("../utils/roles")
+const { MANAGEMENT_ROLES, userHasModule, runWithAccess } = require("../utils/roles")
 const { ORG_ACCESS_SELECT, canAccessOrganization } = require("../utils/organization")
+const { isModuleEntitled } = require("../utils/features")
 
 // Organization switching (X-Organization-Id) follows utils/organization.js:
 // a CEO may enter any company of their group; an ADMIN / IT_MANAGER only
@@ -34,13 +35,19 @@ async function applyOrganizationScope(req) {
 
   const target = await prisma.organization.findUnique({
     where: { id: selectedOrganizationId },
-    select: ORG_ACCESS_SELECT,
+    select: { ...ORG_ACCESS_SELECT, subscription: { select: { status: true } } },
   })
 
   if (!canAccessOrganization(role, home, target, { grantedOrganizationIds: req.user.grantedOrganizationIds })) {
     const error = new Error(
       "You do not have access to this organization"
     )
+    error.statusCode = 403
+    throw error
+  }
+
+  if (target.subscription?.status === "SUSPENDED") {
+    const error = new Error("This organization has been suspended for an overdue payment. Please contact ManagementDock to restore access.")
     error.statusCode = 403
     throw error
   }
@@ -68,15 +75,18 @@ async function requireAuth(req, res, next) {
       where: { id: decoded.userId },
       select: {
         id: true,
+        email: true,
         organizationId: true,
         role: true,
         status: true,
         departmentId: true,
         accessGrants: { select: { organizationId: true } },
+        customRole: { select: { modules: true } },
         organization: {
           select: {
             companyId: true,
             archivedAt: true,
+            subscription: { select: { status: true } },
           },
         },
       },
@@ -92,9 +102,18 @@ async function requireAuth(req, res, next) {
       })
     }
 
+    // A company that hasn't paid is switched off by the platform team.
+    if (dbUser.organization?.subscription?.status === "SUSPENDED" && dbUser.role !== "PLATFORM_ADMIN") {
+      return res.status(401).json({
+        error: "This organization has been suspended for an overdue payment. Please contact ManagementDock to restore access.",
+        code: "ORGANIZATION_SUSPENDED",
+      })
+    }
+
     req.user = {
       ...decoded,
       userId: dbUser.id,
+      email: dbUser.email,
       organizationId: dbUser.organizationId,
       // Never changes during the request (organizationId may, via the
       // organization switcher) — use it for "what may this user reach?".
@@ -104,11 +123,15 @@ async function requireAuth(req, res, next) {
       role: dbUser.role,
       departmentId: dbUser.departmentId,
       grantedOrganizationIds: dbUser.accessGrants.map((g) => g.organizationId),
+      // Control Center custom role: its modules replace the base role's.
+      customModules: dbUser.customRole ? dbUser.customRole.modules : null,
     }
 
     await applyOrganizationScope(req)
 
-    next()
+    // Everything after this (handlers included) runs with the user's module
+    // access in scope — see runWithAccess in utils/roles.js.
+    return runWithAccess({ role: req.user.role, customModules: req.user.customModules }, () => next())
   } catch (err) {
     if (err.statusCode) {
       return res.status(err.statusCode).json({
@@ -180,11 +203,19 @@ function requireInventoryAccess(req, res, next) {
 // by the frontend nav/route guards. ADMIN/CEO always pass via the "*"
 // wildcard in ROLE_MODULES; every other role is checked against its own
 // fixed module list.
+// On top of the role check, the organization must be entitled to the module's
+// feature (plan + overrides, utils/features.js).
 function requireModule(moduleKey) {
-  return (req, res, next) => {
-    if (!req.user || !hasModuleAccess(req.user.role, moduleKey)) {
+  return async (req, res, next) => {
+    if (!req.user || !userHasModule(req.user, moduleKey)) {
       return res.status(403).json({
         error: "You do not have access to this module",
+      })
+    }
+    if (!(await isModuleEntitled(req.user.organizationId, moduleKey))) {
+      return res.status(403).json({
+        error: "This feature isn't included in your organization's plan",
+        code: "FEATURE_NOT_ENTITLED",
       })
     }
     next()
@@ -194,11 +225,19 @@ function requireModule(moduleKey) {
 // Same as requireModule, but also lets a user through onto their own
 // record (e.g. PATCH /employees/:id) even without the module.
 function requireModuleOrSelf(moduleKey) {
-  return (req, res, next) => {
+  return async (req, res, next) => {
     const isSelf = req.user?.userId === req.params.id
-    if (!req.user || (!hasModuleAccess(req.user.role, moduleKey) && !isSelf)) {
+    const roleAllows = !!req.user && userHasModule(req.user, moduleKey)
+    if (!req.user || (!roleAllows && !isSelf)) {
       return res.status(403).json({
         error: "You do not have access to this module",
+      })
+    }
+    // Own record stays reachable; module access needs the entitlement too.
+    if (roleAllows && !isSelf && !(await isModuleEntitled(req.user.organizationId, moduleKey))) {
+      return res.status(403).json({
+        error: "This feature isn't included in your organization's plan",
+        code: "FEATURE_NOT_ENTITLED",
       })
     }
     next()

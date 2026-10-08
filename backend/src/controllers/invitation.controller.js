@@ -5,6 +5,7 @@ const { ASSIGNABLE_ROLES, MAX_CEO_COUNT, reportingManagerWhere } = require("../u
 const { parseDateInput, employmentData, EMPLOYMENT_STATUSES } = require("../utils/employee-fields")
 const { sendEmail, appUrl, escapeHtml } = require("../utils/mailer")
 const { logAudit } = require("../utils/audit")
+const { checkEmployeeCapacity } = require("../utils/billing")
 const { sessionResponse } = require("./auth.controller")
 
 // Email invitations for new employees (Employee Forms → "Invite new
@@ -187,6 +188,9 @@ async function createInvitation(req, res, next) {
           : "An account with this email already exists.",
       })
     }
+
+    const limitReached = await checkEmployeeCapacity(organizationId, 1)
+    if (limitReached) return res.status(403).json(limitReached)
 
     const { raw, tokenHash, expiresAt } = newToken()
     // Random password nobody knows; replaced when the invitation is accepted.

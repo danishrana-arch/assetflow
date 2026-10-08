@@ -35,6 +35,8 @@ const notificationRoutes = require("./routes/notification.routes")
 const searchRoutes = require("./routes/search.routes")
 const hrReportRoutes = require("./routes/hr-report.routes")
 const calendarFeedRoutes = require("./routes/calendar-feed.routes")
+const billingRoutes = require("./routes/billing.routes")
+const platformRoutes = require("./routes/platform.routes")
 const { notFound, errorHandler } = require("./middleware/error.middleware")
 
 if (!process.env.JWT_SECRET) {
@@ -142,6 +144,8 @@ app.use("/api/notifications", notificationRoutes)
 app.use("/api/search", searchRoutes)
 app.use("/api/reports/hr", hrReportRoutes)
 app.use("/api/calendar", calendarFeedRoutes)
+app.use("/api/billing", billingRoutes)
+app.use("/api/platform", platformRoutes)
 
 app.use(notFound)
 app.use(errorHandler)

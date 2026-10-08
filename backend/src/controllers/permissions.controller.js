@@ -1,4 +1,5 @@
 const prisma = require("../lib/prisma")
+const { logAudit } = require("../utils/audit")
 const {
   ALWAYS_FULL_ATTENDANCE_ROLES,
   CONFIGURABLE_ATTENDANCE_ROLES,
@@ -44,6 +45,9 @@ async function updateAttendancePermissions(req, res, next) {
       (entry) => entry?.role && CONFIGURABLE_ATTENDANCE_ROLES.includes(entry.role) && !ALWAYS_FULL_ATTENDANCE_ROLES.includes(entry.role)
     )
 
+    const flags = (r) => (r ? { canCreate: r.canCreate, canRead: r.canRead, canUpdate: r.canUpdate, canDelete: r.canDelete } : null)
+    const beforeRows = await prisma.attendancePermission.findMany({ where: { organizationId, role: { in: updates.map((u) => u.role) } } })
+
     await prisma.$transaction(
       updates.map((entry) =>
         prisma.attendancePermission.upsert({
@@ -65,6 +69,23 @@ async function updateAttendancePermissions(req, res, next) {
         })
       )
     )
+
+    if (updates.length) {
+      const before = {}
+      const after = {}
+      for (const u of updates) {
+        before[u.role] = flags(beforeRows.find((r) => r.role === u.role))
+        after[u.role] = { canCreate: !!u.canCreate, canRead: !!u.canRead, canUpdate: !!u.canUpdate, canDelete: !!u.canDelete }
+      }
+      logAudit({
+        organizationId,
+        actorId: req.user.userId,
+        action: "permissions.attendance_updated",
+        targetType: "AttendancePermission",
+        note: `Roles: ${updates.map((u) => u.role).join(", ")}`,
+        details: { before, after },
+      })
+    }
 
     res.json({ saved: updates.length })
   } catch (err) {
