@@ -33,7 +33,7 @@ export default function AuthCard({ title, subtitle, brandName, children }) {
         {subtitle && <p className={`mt-1 text-sm ${isDark ? "text-white/55" : "text-[#687272]"}`}>{subtitle}</p>}
         <div className="mt-6">{children}</div>
         <p className={`mt-6 text-center text-sm ${isDark ? "text-white/60" : "text-[#687272]"}`}>
-          <Link to="/" className="font-semibold text-accent hover:underline">Back to sign in</Link>
+          <Link to="/login" className="font-semibold text-accent hover:underline">Back to sign in</Link>
         </p>
       </div>
     </div>

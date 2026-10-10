@@ -16,7 +16,8 @@ import MyAttendance from "./pages/MyAttendance"
 // Same reason: the Site Admin workspace is used at sites with no signal.
 import SiteAttendance from "./pages/SiteAttendance"
 const Register = lazy(() => import("./pages/Register"))
-const Welcome = lazy(() => import("./pages/Welcome"))
+const Landing = lazy(() => import("./pages/Landing"))
+const Login = lazy(() => import("./pages/Login"))
 const ForgotPassword = lazy(() => import("./pages/ForgotPassword"))
 const ResetPassword = lazy(() => import("./pages/ResetPassword"))
 const AcceptInvite = lazy(() => import("./pages/AcceptInvite"))
@@ -157,7 +158,7 @@ function ProtectedShell() {
       </div>
     )
   }
-  if (!user) return <Navigate to="/" replace />
+  if (!user) return <Navigate to="/login" replace />
   if (user.role === "PLATFORM_ADMIN") return <PlatformRoutes />
 
   const isManager = isManagement(user.role)
@@ -224,8 +225,8 @@ export default function App() {
       <BrowserRouter>
         <Suspense fallback={<PageFallback />}>
           <Routes>
-            <Route path="/" element={<Welcome />} />
-            <Route path="/login" element={<Navigate to="/" replace />} />
+            <Route path="/" element={<Landing />} />
+            <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
             <Route path="/forgot-password" element={<ForgotPassword />} />
             <Route path="/reset-password" element={<ResetPassword />} />

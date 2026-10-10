@@ -83,7 +83,7 @@ export default function Register() {
           </h1>
           <p className="mt-1.5 text-sm text-muted">
             Already have one?{" "}
-            <Link to="/" className="font-medium text-accent hover:underline">
+            <Link to="/login" className="font-medium text-accent hover:underline">
               Log in instead
             </Link>
           </p>
