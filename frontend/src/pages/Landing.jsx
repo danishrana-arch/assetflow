@@ -3,6 +3,7 @@ import { Link, Navigate } from "react-router-dom"
 import { useAuth } from "../context/AuthContext"
 import useLandingFonts from "../hooks/useLandingFonts"
 import logoFull from "../assets/logo1.png"
+import ParticleText from "../components/ParticleText"
 import { useQuery } from "@tanstack/react-query"
 import api from "../api/client"
 import { formatMoney, limitLabel } from "../utils/billing"
@@ -862,6 +863,26 @@ export default function Landing() {
               <a className="hover:text-primary transition-colors" href="#top">Service Level Agreements</a>
               <a className="hover:text-primary transition-colors" href="#top">Privacy Architecture</a>
             </div>
+          </div>
+
+          <div
+            aria-hidden="true"
+            className="mt-space-xl h-[155px] w-full select-none overflow-hidden sm:h-[190px] [&_canvas]:touch-auto"
+            style={{
+              maskImage: "linear-gradient(to bottom, transparent, #000 30%, #000 70%, transparent)",
+              WebkitMaskImage: "linear-gradient(to bottom, transparent, #000 30%, #000 70%, transparent)",
+            }}
+          >
+            <ParticleText
+              text="MANAGEMENTDOCK"
+              height={190}
+              background="transparent"
+              dotColor="rgba(24, 27, 43, 0.85)"
+              accentColor="rgba(96, 57, 229, 0.9)"
+              repelRadius={140}
+              repelStrength={210}
+              ease={0.065}
+            />
           </div>
         </div>
       </footer>
